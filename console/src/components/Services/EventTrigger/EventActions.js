@@ -5,20 +5,21 @@ import processedEventsReducer from './ProcessedEvents/ViewActions';
 import pendingEventsReducer from './PendingEvents/ViewActions';
 import runningEventsReducer from './RunningEvents/ViewActions';
 import streamingLogsReducer from './StreamingLogs/LogActions';
-import { showErrorNotification, showSuccessNotification } from './Notification';
+import {
+  showSuccessNotification,
+  showErrorNotification,
+} from '../Common/Notification';
 import dataHeaders from './Common/Headers';
 import { loadMigrationStatus } from '../../Main/Actions';
 import returnMigrateUrl from './Common/getMigrateUrl';
 import globals from '../../../Globals';
 import push from './push';
-import {
-  filterInconsistentMetadata,
-  loadInconsistentObjects,
-} from '../Metadata/Actions';
+import { loadInconsistentObjects } from '../Settings/Actions';
+import { filterInconsistentMetadataObjects } from '../Settings/utils';
 import { replace } from 'react-router-redux';
 import { getEventTriggersQuery } from './utils';
 
-import { SERVER_CONSOLE_MODE } from '../../../constants';
+import { CLI_CONSOLE_MODE, SERVER_CONSOLE_MODE } from '../../../constants';
 import { REQUEST_COMPLETE, REQUEST_ONGOING } from './Modify/Actions';
 
 const SET_TRIGGER = 'Event/SET_TRIGGER';
@@ -70,7 +71,7 @@ const loadTriggers = triggerNames => (dispatch, getState) => {
       const { inconsistentObjects } = getState().metadata;
       let consistentTriggers;
       if (inconsistentObjects.length > 1) {
-        consistentTriggers = filterInconsistentMetadata(
+        consistentTriggers = filterInconsistentMetadataObjects(
           triggerData,
           inconsistentObjects,
           'events'
@@ -317,34 +318,23 @@ const setRedeliverEvent = eventId => dispatch => {
 /* **********Shared functions between table actions********* */
 
 const handleMigrationErrors = (title, errorMsg) => dispatch => {
-  const requestMsg = title;
   if (globals.consoleMode === SERVER_CONSOLE_MODE) {
     // handle errors for run_sql based workflow
-    dispatch(showErrorNotification(title, errorMsg.code, requestMsg, errorMsg));
+    dispatch(showErrorNotification(title, errorMsg.code, errorMsg));
   } else if (errorMsg.code === 'migration_failed') {
-    dispatch(
-      showErrorNotification(title, 'Migration Failed', requestMsg, errorMsg)
-    );
+    dispatch(showErrorNotification(title, 'Migration Failed', errorMsg));
   } else if (errorMsg.code === 'data_api_error') {
     const parsedErrorMsg = errorMsg;
     parsedErrorMsg.message = JSON.parse(errorMsg.message);
     dispatch(
-      showErrorNotification(
-        title,
-        parsedErrorMsg.message.error,
-        requestMsg,
-        parsedErrorMsg
-      )
+      showErrorNotification(title, parsedErrorMsg.message.error, parsedErrorMsg)
     );
   } else {
     // any other unhandled codes
     const parsedErrorMsg = errorMsg;
     parsedErrorMsg.message = JSON.parse(errorMsg.message);
-    dispatch(
-      showErrorNotification(title, errorMsg.code, requestMsg, parsedErrorMsg)
-    );
+    dispatch(showErrorNotification(title, errorMsg.code, parsedErrorMsg));
   }
-  // dispatch(showErrorNotification(msg, firstDisplay, request, response));
 };
 
 const makeMigrationCall = (
@@ -382,7 +372,7 @@ const makeMigrationCall = (
   let finalReqBody;
   if (globals.consoleMode === SERVER_CONSOLE_MODE) {
     finalReqBody = upQuery;
-  } else if (globals.consoleMode === 'cli') {
+  } else if (globals.consoleMode === CLI_CONSOLE_MODE) {
     finalReqBody = migrationBody;
   }
   const url = migrateUrl;
@@ -394,7 +384,7 @@ const makeMigrationCall = (
   };
 
   const onSuccess = () => {
-    if (globals.consoleMode === 'cli') {
+    if (globals.consoleMode === CLI_CONSOLE_MODE) {
       dispatch(loadMigrationStatus()); // don't call for server mode
     }
     customOnSuccess();
@@ -469,6 +459,7 @@ const deleteTrigger = triggerName => {
       // dispatch({ type: REQUEST_SUCCESS });
       dispatch({ type: REQUEST_COMPLETE }); // modify trigger action
       dispatch(showSuccessNotification('Trigger Deleted'));
+      dispatch(push('/manage/triggers'));
       // remove this trigger from state
       const existingTriggers = getState().triggers.triggerList.filter(
         trigger => trigger.name !== triggerName
@@ -477,7 +468,6 @@ const deleteTrigger = triggerName => {
         type: LOAD_TRIGGER_LIST,
         triggerList: existingTriggers,
       });
-      dispatch(push('/manage/triggers'));
       return;
     };
     const customOnError = () => {

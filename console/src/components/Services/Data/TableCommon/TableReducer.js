@@ -22,28 +22,30 @@ import {
   FETCH_COLUMN_TYPE_CASTS_FAIL,
   RESET,
   SET_UNIQUE_KEYS,
+  TOGGLE_ENUM,
+  TOGGLE_ENUM_SUCCESS,
+  TOGGLE_ENUM_FAILURE,
 } from '../TableModify/ModifyActions';
 
 // TABLE RELATIONSHIPS
 
 import {
-  REL_SET_TYPE,
-  REL_SET_RTABLE,
-  REL_SET_LCOL,
-  REL_SET_RCOL,
-  REL_RESET,
-  REL_SELECTION_CHANGED,
+  MANUAL_REL_SET_TYPE,
+  MANUAL_REL_SET_RSCHEMA,
+  MANUAL_REL_SET_RTABLE,
+  MANUAL_REL_NAME_CHANGED,
+  SET_MANUAL_REL_ADD,
   REL_NAME_CHANGED,
+  REL_RESET,
+  MANUAL_REL_RESET,
+  REL_SELECTION_CHANGED,
   REL_ADD_NEW_CLICKED,
-  REL_SET_MANUAL_COLUMNS,
-  REL_ADD_MANUAL_CLICKED,
 } from '../TableRelationships/Actions';
 
 // TABLE PERMISSIONS
 
 import {
   PERM_OPEN_EDIT,
-  PERM_ADD_TABLE_SCHEMAS,
   PERM_SET_FILTER,
   PERM_SET_FILTER_SAME_AS,
   PERM_TOGGLE_COLUMN,
@@ -123,21 +125,20 @@ const modifyReducer = (tableName, schemas, modifyStateOrig, action) => {
           isActive: true,
         },
       };
-    case REL_ADD_MANUAL_CLICKED:
+    case REL_NAME_CHANGED:
       return {
         ...modifyState,
         relAdd: {
           ...modifyState.relAdd,
-          isManualExpanded: !modifyState.relAdd.isManualExpanded,
+          relName: action.relName,
         },
       };
-    case REL_NAME_CHANGED:
-      const relName = action.relName;
+    case MANUAL_REL_NAME_CHANGED:
       return {
         ...modifyState,
-        relAdd: {
-          ...modifyState.relAdd,
-          relName: relName,
+        manualRelAdd: {
+          ...modifyState.manualRelAdd,
+          relName: action.relName,
         },
       };
     case REL_SELECTION_CHANGED:
@@ -154,6 +155,7 @@ const modifyReducer = (tableName, schemas, modifyStateOrig, action) => {
           rTable: selectedRel.rTable,
           rSchema: selectedRel.rSchema,
           rcol: selectedRel.rcol,
+          isUnique: selectedRel.isUnique,
         },
       };
     case REL_RESET:
@@ -163,45 +165,44 @@ const modifyReducer = (tableName, schemas, modifyStateOrig, action) => {
           ...defaultModifyState.relAdd,
         },
       };
-    case REL_SET_TYPE:
+    case MANUAL_REL_RESET:
       return {
         ...modifyState,
-        relAdd: {
-          ...modifyState.relAdd,
-          isObjRel: action.isObjRel,
+        manualRelAdd: {
+          ...defaultModifyState.manualRelAdd,
         },
       };
-    case REL_SET_RTABLE:
+    case MANUAL_REL_SET_TYPE:
       return {
         ...modifyState,
-        relAdd: {
-          ...modifyState.relAdd,
+        manualRelAdd: {
+          ...modifyState.manualRelAdd,
+          relType: action.relType,
+        },
+      };
+    case MANUAL_REL_SET_RSCHEMA:
+      return {
+        ...modifyState,
+        manualRelAdd: {
+          ...modifyState.manualRelAdd,
+          rSchema: action.rSchema,
+          rTable: '',
+          colMappings: [...defaultModifyState.manualRelAdd.colMappings],
+        },
+      };
+    case MANUAL_REL_SET_RTABLE:
+      return {
+        ...modifyState,
+        manualRelAdd: {
+          ...modifyState.manualRelAdd,
           rTable: action.rTable,
+          colMappings: [...defaultModifyState.manualRelAdd.colMappings],
         },
       };
-    case REL_SET_LCOL:
+    case SET_MANUAL_REL_ADD:
       return {
         ...modifyState,
-        relAdd: {
-          ...modifyState.relAdd,
-          lcol: action.lcol,
-        },
-      };
-    case REL_SET_RCOL:
-      return {
-        ...modifyState,
-        relAdd: {
-          ...modifyState.relAdd,
-          rcol: action.rcol,
-        },
-      };
-    case REL_SET_MANUAL_COLUMNS:
-      return {
-        ...modifyState,
-        relAdd: {
-          ...modifyState.relAdd,
-          manualColumns: action.data,
-        },
+        manualRelAdd: action.manualRelAdd,
       };
     case TABLE_COMMENT_EDIT:
       return {
@@ -249,31 +250,21 @@ const modifyReducer = (tableName, schemas, modifyStateOrig, action) => {
         },
       };
     case PERM_OPEN_EDIT:
+      const isNewRole = modifyState.permissionsState.newRole === action.role;
       const permState = getBasePermissionsState(
         action.tableSchema,
         action.role,
-        action.query
+        action.query,
+        isNewRole
       );
       return {
         ...modifyState,
         permissionsState: {
           ...permState,
-          tableSchemas: schemas,
+          isEditing: true,
         },
         prevPermissionState: {
           ...permState,
-        },
-      };
-
-    case PERM_ADD_TABLE_SCHEMAS:
-      return {
-        ...modifyState,
-        permissionsState: {
-          ...modifyState.permissionsState,
-          tableSchemas: [
-            ...modifyState.permissionsState.tableSchemas,
-            ...action.schemas,
-          ],
         },
       };
 
@@ -331,7 +322,6 @@ const modifyReducer = (tableName, schemas, modifyStateOrig, action) => {
       };
 
     case PERM_SET_FILTER_SAME_AS:
-    case PERM_SET_FILTER:
       return {
         ...modifyState,
         permissionsState: {
@@ -341,6 +331,19 @@ const modifyReducer = (tableName, schemas, modifyStateOrig, action) => {
             action.filter
           ),
           custom_checked: false,
+        },
+      };
+
+    case PERM_SET_FILTER:
+      return {
+        ...modifyState,
+        permissionsState: {
+          ...updatePermissionsState(
+            modifyState.permissionsState,
+            getFilterKey(modifyState.permissionsState.query),
+            action.filter
+          ),
+          // custom_checked: true,
         },
       };
 
@@ -396,11 +399,17 @@ const modifyReducer = (tableName, schemas, modifyStateOrig, action) => {
       };
 
     case PERM_SET_ROLE_NAME:
+      const newRole = action.data;
+      const role = modifyState.permissionsState.isEditing
+        ? newRole
+        : modifyState.permissionsState.role;
+
       return {
         ...modifyState,
         permissionsState: {
           ...modifyState.permissionsState,
-          newRole: action.data,
+          newRole: newRole,
+          role: role,
         },
       };
 
@@ -574,6 +583,28 @@ const modifyReducer = (tableName, schemas, modifyStateOrig, action) => {
       return {
         ...modifyState,
         uniqueKeyModify: action.keys,
+      };
+    case TOGGLE_ENUM:
+      return {
+        ...modifyState,
+        tableEnum: {
+          loading: true,
+        },
+      };
+    case TOGGLE_ENUM_FAILURE:
+      return {
+        ...modifyState,
+        tableEnum: {
+          loading: false,
+          error: action.error,
+        },
+      };
+    case TOGGLE_ENUM_SUCCESS:
+      return {
+        ...modifyState,
+        tableEnum: {
+          loading: false,
+        },
       };
     default:
       return modifyState;

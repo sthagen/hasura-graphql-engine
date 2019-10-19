@@ -33,7 +33,7 @@ const defaultPermissionsState = {
   limitEnabled: true,
   bulkSelect: [],
   applySamePermissions: [],
-  tableSchemas: [],
+  isEditing: false,
 };
 
 const defaultPresetsState = {
@@ -90,6 +90,9 @@ const defaultModifyState = {
     rel: null,
     perm: '',
   },
+  tableEnum: {
+    loading: false,
+  },
   columnEdit: {},
   pkEdit: [''],
   pkModify: [''],
@@ -113,11 +116,15 @@ const defaultModifyState = {
     rTable: null,
     rSchema: null,
     rcol: [],
-    manualColumns: [],
-    isManualExpanded: false,
-    manualRelInfo: {
-      remoteSchema: '',
-    },
+    isUnique: false,
+  },
+  manualRelAdd: {
+    relName: '',
+    relType: '',
+    rSchema: '',
+    rTable: '',
+    colMappings: [{ column: '', refColumn: '' }],
+    isToggled: false,
   },
   permissionsState: { ...defaultPermissionsState },
   prevPermissionState: { ...defaultPermissionsState },
@@ -133,7 +140,9 @@ const defaultModifyState = {
 
 const defaultState = {
   columnDataTypes: [], // To store list of column types supported by postgres
-  columnDataTypeFetchErr: null,
+  columnDataTypeInfoErr: null,
+  columnDefaultFunctions: {},
+  columnTypeCasts: {},
   currentTable: null,
   view: { ...defaultViewState },
   modify: { ...defaultModifyState },

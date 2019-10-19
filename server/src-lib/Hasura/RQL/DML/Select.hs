@@ -5,7 +5,6 @@ module Hasura.RQL.DML.Select
   , mkFuncSelectSimple
   , mkFuncSelectAgg
   , convSelectQuery
-  , getSelectDeps
   , asSingleRowJsonResp
   , module Hasura.RQL.DML.Select.Internal
   , runSelect
@@ -15,7 +14,6 @@ where
 import           Data.Aeson.Types
 import           Instances.TH.Lift              ()
 
-import qualified Data.HashMap.Strict            as HM
 import qualified Data.HashSet                   as HS
 import qualified Data.List.NonEmpty             as NE
 import qualified Data.Sequence                  as DS
@@ -24,7 +22,6 @@ import           Hasura.EncJSON
 import           Hasura.Prelude
 import           Hasura.RQL.DML.Internal
 import           Hasura.RQL.DML.Select.Internal
-import           Hasura.RQL.GBoolExp
 import           Hasura.RQL.Types
 import           Hasura.SQL.Types
 
@@ -32,7 +29,7 @@ import qualified Database.PG.Query              as Q
 import qualified Hasura.SQL.DML                 as S
 
 convSelCol :: (UserInfoM m, QErrM m, CacheRM m)
-           => FieldInfoMap
+           => FieldInfoMap PGColumnInfo
            -> SelPermInfo
            -> SelCol
            -> m [ExtCol]
@@ -52,17 +49,18 @@ convSelCol fieldInfoMap spi (SCStar wildcard) =
 
 convWildcard
   :: (UserInfoM m, QErrM m, CacheRM m)
-  => FieldInfoMap
+  => FieldInfoMap PGColumnInfo
   -> SelPermInfo
   -> Wildcard
   -> m [ExtCol]
-convWildcard fieldInfoMap (SelPermInfo cols _ _ _ _ _) wildcard =
+convWildcard fieldInfoMap selPermInfo wildcard =
   case wildcard of
   Star         -> return simpleCols
   (StarDot wc) -> (simpleCols ++) <$> (catMaybes <$> relExtCols wc)
   where
-    (pgCols, relColInfos) = partitionFieldInfosWith (pgiName, id) $
-                            HM.elems fieldInfoMap
+    cols = spiCols selPermInfo
+    pgCols = map pgiColumn $ getCols fieldInfoMap
+    relColInfos = getRels fieldInfoMap
 
     simpleCols = map ECSimple $ filter (`HS.member` cols) pgCols
 
@@ -73,14 +71,14 @@ convWildcard fieldInfoMap (SelPermInfo cols _ _ _ _ _) wildcard =
       mRelSelPerm <- askPermInfo' PASelect relTabInfo
 
       forM mRelSelPerm $ \rspi -> do
-        rExtCols <- convWildcard (tiFieldInfoMap relTabInfo) rspi wc
+        rExtCols <- convWildcard (_tiFieldInfoMap relTabInfo) rspi wc
         return $ ECRel relName Nothing $
           SelectG rExtCols Nothing Nothing Nothing Nothing
 
     relExtCols wc = mapM (mkRelCol wc) relColInfos
 
 resolveStar :: (UserInfoM m, QErrM m, CacheRM m)
-            => FieldInfoMap
+            => FieldInfoMap PGColumnInfo
             -> SelPermInfo
             -> SelectQ
             -> m SelectQExt
@@ -107,7 +105,7 @@ resolveStar fim spi (SelectG selCols mWh mOb mLt mOf) = do
 convOrderByElem
   :: (UserInfoM m, QErrM m, CacheRM m)
   => SessVarBldr m
-  -> (FieldInfoMap, SelPermInfo)
+  -> (FieldInfoMap PGColumnInfo, SelPermInfo)
   -> OrderByCol
   -> m AnnObCol
 convOrderByElem sessVarBldr (flds, spi) = \case
@@ -115,9 +113,9 @@ convOrderByElem sessVarBldr (flds, spi) = \case
     fldInfo <- askFieldInfo flds fldName
     case fldInfo of
       FIColumn colInfo -> do
-        checkSelOnCol spi (pgiName colInfo)
+        checkSelOnCol spi (pgiColumn colInfo)
         let ty = pgiType colInfo
-        if ty == PGGeography || ty == PGGeometry
+        if isScalarColumnWhere isGeoType ty
           then throw400 UnexpectedPayload $ mconcat
            [ fldName <<> " has type 'geometry'"
            , " and cannot be used in order_by"
@@ -127,12 +125,20 @@ convOrderByElem sessVarBldr (flds, spi) = \case
         [ fldName <<> " is a"
         , " relationship and should be expanded"
         ]
+      FIComputedField _ -> throw400 UnexpectedPayload $ mconcat
+        [ fldName <<> " is a"
+        , " computed field and can't be used in 'order_by'"
+        ]
   OCRel fldName rest -> do
     fldInfo <- askFieldInfo flds fldName
     case fldInfo of
       FIColumn _ -> throw400 UnexpectedPayload $ mconcat
         [ fldName <<> " is a Postgres column"
         , " and cannot be chained further"
+        ]
+      FIComputedField _ -> throw400 UnexpectedPayload $ mconcat
+        [ fldName <<> " is a"
+        , " computed field and can't be used in 'order_by'"
         ]
       FIRelationship relInfo -> do
         when (riType relInfo == ArrRel) $
@@ -147,11 +153,11 @@ convOrderByElem sessVarBldr (flds, spi) = \case
 
 convSelectQ
   :: (UserInfoM m, QErrM m, CacheRM m, HasSQLGenCtx m)
-  => FieldInfoMap  -- Table information of current table
+  => FieldInfoMap PGColumnInfo  -- Table information of current table
   -> SelPermInfo   -- Additional select permission info
   -> SelectQExt     -- Given Select Query
   -> SessVarBldr m
-  -> (PGColType -> Value -> m S.SQLExp)
+  -> (PGColumnType -> Value -> m S.SQLExp)
   -> m AnnSimpleSel
 convSelectQ fieldInfoMap selPermInfo selQ sessVarBldr prepValBldr = do
 
@@ -187,7 +193,7 @@ convSelectQ fieldInfoMap selPermInfo selQ sessVarBldr prepValBldr = do
   resolvedSelFltr <- convAnnBoolExpPartialSQL sessVarBldr $
                      spiFilter selPermInfo
 
-  let tabFrom = TableFrom (spiTable selPermInfo) Nothing
+  let tabFrom = FromTable $ spiTable selPermInfo
       tabPerm = TablePerm resolvedSelFltr mPermLimit
       tabArgs = TableArgs wClause annOrdByM mQueryLimit
                 (S.intToSQLExp <$> mQueryOffset) Nothing
@@ -202,10 +208,10 @@ convSelectQ fieldInfoMap selPermInfo selQ sessVarBldr prepValBldr = do
 
 convExtSimple
   :: (UserInfoM m, QErrM m)
-  => FieldInfoMap
+  => FieldInfoMap PGColumnInfo
   -> SelPermInfo
   -> PGCol
-  -> m PGColInfo
+  -> m PGColumnInfo
 convExtSimple fieldInfoMap selPermInfo pgCol = do
   checkSelOnCol selPermInfo pgCol
   askPGColInfo fieldInfoMap pgCol relWhenPGErr
@@ -214,12 +220,12 @@ convExtSimple fieldInfoMap selPermInfo pgCol = do
 
 convExtRel
   :: (UserInfoM m, QErrM m, CacheRM m, HasSQLGenCtx m)
-  => FieldInfoMap
+  => FieldInfoMap PGColumnInfo
   -> RelName
   -> Maybe RelName
   -> SelectQExt
   -> SessVarBldr m
-  -> (PGColType -> Value -> m S.SQLExp)
+  -> (PGColumnType -> Value -> m S.SQLExp)
   -> m (Either ObjSel ArrSel)
 convExtRel fieldInfoMap relName mAlias selQ sessVarBldr prepValBldr = do
   -- Point to the name key
@@ -249,58 +255,18 @@ convExtRel fieldInfoMap relName mAlias selQ sessVarBldr prepValBldr = do
               , " can't be used"
               ]
 
-partAnnFlds
-  :: [AnnFld]
-  -> ([(PGCol, PGColType)], [Either ObjSel ArrSel])
-partAnnFlds flds =
-  partitionEithers $ catMaybes $ flip map flds $ \case
-  FCol c _ -> Just $ Left (pgiName c, pgiType c)
-  FObj o -> Just $ Right $ Left o
-  FArr a -> Just $ Right $ Right a
-  FExp _ -> Nothing
-
-getSelectDeps
-  :: AnnSimpleSel
-  -> [SchemaDependency]
-getSelectDeps (AnnSelG flds tabFrm _ tableArgs _) =
-  mkParentDep tn
-  : fromMaybe [] whereDeps
-  <> colDeps
-  <> relDeps
-  <> nestedDeps
-  where
-    TableFrom tn _ = tabFrm
-    annWc = _taWhere tableArgs
-    (sCols, rCols) = partAnnFlds $ map snd flds
-    (objSels, arrSels) = partitionEithers rCols
-    colDeps      = map (mkColDep "untyped" tn . fst) sCols
-    relDeps      = map mkRelDep $ map aarName objSels
-                   <> mapMaybe getRelName arrSels
-    nestedDeps   = concatMap getSelectDeps $ map aarAnnSel objSels
-                   <> mapMaybe getAnnSel arrSels
-    whereDeps    = getBoolExpDeps tn <$> annWc
-    mkRelDep rn  =
-      SchemaDependency (SOTableObj tn (TORel rn)) "untyped"
-
-    -- ignore aggregate selections to calculate schema deps
-    getRelName (ASSimple aar) = Just $ aarName aar
-    getRelName (ASAgg _)      = Nothing
-
-    getAnnSel (ASSimple aar) = Just $ aarAnnSel aar
-    getAnnSel (ASAgg _)      = Nothing
-
 convSelectQuery
   :: (UserInfoM m, QErrM m, CacheRM m, HasSQLGenCtx m)
   => SessVarBldr m
-  -> (PGColType -> Value -> m S.SQLExp)
+  -> (PGColumnType -> Value -> m S.SQLExp)
   -> SelectQuery
   -> m AnnSimpleSel
 convSelectQuery sessVarBldr prepArgBuilder (DMLQuery qt selQ) = do
   tabInfo     <- withPathK "table" $ askTabInfo qt
   selPermInfo <- askSelPermInfo tabInfo
-  extSelQ <- resolveStar (tiFieldInfoMap tabInfo) selPermInfo selQ
+  extSelQ <- resolveStar (_tiFieldInfoMap tabInfo) selPermInfo selQ
   validateHeaders $ spiRequiredHeaders selPermInfo
-  convSelectQ (tiFieldInfoMap tabInfo) selPermInfo
+  convSelectQ (_tiFieldInfoMap tabInfo) selPermInfo
     extSelQ sessVarBldr prepArgBuilder
 
 mkFuncSelectSimple

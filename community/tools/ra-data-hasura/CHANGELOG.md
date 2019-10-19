@@ -1,3 +1,13 @@
+## 0.0.7 (September 17, 2019)
+
+- Bug Fix: Re-build library to fix discrepancies. Pass `where` arguments to `count` query.
+- Feature: Add support for httpClient to pass in dynamic headers. Backwards compatibility maintained for static headers.
+- Update package dependencies.
+
+## 0.0.6 (June 14, 2019)
+
+- Bug Fix: Fix sort order, fix primary key when response not an array and add filters to GET_* operations.
+
 ## 0.0.5 (May 16, 2019)
 
 - Feature: Support specifying primary keys other than id for tables using a config object 

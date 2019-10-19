@@ -10,9 +10,9 @@ import {
 } from './ViewActions';
 import { setTable } from '../DataActions';
 import TableHeader from '../TableCommon/TableHeader';
-import ViewHeader from './ViewHeader';
 import ViewRows from './ViewRows';
-import { replace } from 'react-router-redux';
+
+import { NotFoundError } from '../../../Error/PageNotFound';
 
 const genHeadings = headings => {
   if (headings.length === 0) {
@@ -141,12 +141,11 @@ class ViewTable extends Component {
   render() {
     const {
       tableName,
-      tableComment,
       schemas,
       query,
       curFilter,
       rows,
-      count, // eslint-disable-line no-unused-vars
+      count,
       activePath,
       migrationMode,
       ongoingRequest,
@@ -159,18 +158,22 @@ class ViewTable extends Component {
       manualTriggers = [],
       triggeredRow,
       triggeredFunction,
-    } = this.props; // eslint-disable-line no-unused-vars
+    } = this.props;
 
     // check if table exists
-    const currentTable = schemas.find(
+    const tableSchema = schemas.find(
       s => s.table_name === tableName && s.table_schema === currentSchema
     );
-    if (!currentTable) {
-      // dispatch a 404 route
-      dispatch(replace('/404'));
+
+    if (!tableSchema) {
+      // throw a 404 exception
+      throw new NotFoundError();
     }
+
+    const styles = require('../../../Common/Common.scss');
+
     // Is this a view
-    const isView = currentTable.table_type !== 'BASE TABLE';
+    const isView = tableSchema.table_type !== 'BASE TABLE';
 
     // Are there any expanded columns
     const viewRows = (
@@ -202,33 +205,31 @@ class ViewTable extends Component {
     );
 
     // Choose the right nav bar header thing
-    let header = (
+    const header = (
       <TableHeader
         count={count}
         dispatch={dispatch}
-        tableName={tableName}
-        tableComment={tableComment}
+        table={tableSchema}
         tabName="browse"
         migrationMode={migrationMode}
-        currentSchema={currentSchema}
       />
     );
-    if (isView) {
-      header = (
-        <ViewHeader
-          dispatch={dispatch}
-          tableName={tableName}
-          tabName="browse"
-          tableComment={tableComment}
-          migrationMode={migrationMode}
-          currentSchema={currentSchema}
-        />
+
+    let comment = null;
+    if (tableSchema.comment) {
+      comment = (
+        <div className={styles.add_mar_top}>
+          <div className={styles.commentText + ' alert alert-warning'}>
+            {tableSchema.comment}
+          </div>
+        </div>
       );
     }
 
     return (
       <div>
         {header}
+        {comment}
         <div>{viewRows}</div>
       </div>
     );

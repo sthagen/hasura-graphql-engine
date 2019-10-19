@@ -24,6 +24,8 @@ Available APIs
 +-----------------+----------------------------------------+------------------+
 | PG Dump         | :ref:`/v1alpha1/pg_dump <pg_dump_api>` | Admin only       |
 +-----------------+----------------------------------------+------------------+
+| Config          | :ref:`/v1alpha1/config <config_api>`   | Admin only       |
++-----------------+----------------------------------------+------------------+
 
 .. _graphql_api:
 
@@ -32,19 +34,19 @@ GraphQL API
 
 All GraphQL requests for queries, subscriptions and mutations are made to the GraphQL API.
 
-See details at :doc:`graphql-api/index`
+See details at :doc:`graphql-api/index`.
 
 .. _schema_metadata_api:
 
-Schema / Metadata API
+Schema / metadata API
 ^^^^^^^^^^^^^^^^^^^^^
 
-Hasura exposes a Schema / Metadata API for managing metadata for permissions/relationships or for directly
+Hasura exposes a schema / metadata API for managing metadata for permissions/relationships or for directly
 executing SQL on the underlying Postgres.
 
-This is primarily intended to be used as an ``admin`` API to manage Hasura schema and metadata.
+This is primarily intended to be used as an ``admin`` API to manage the Hasura schema and metadata.
 
-See details at :doc:`schema-metadata-api/index`
+See details at :doc:`schema-metadata-api/index`.
 
 .. _version_api:
 
@@ -64,7 +66,7 @@ Health check API
 ^^^^^^^^^^^^^^^^
 
 A ``GET`` request to the public ``/healthz`` endpoint will respond with ``200``
-if GraphQL Engine is ready to serve requests and there are no inconsistencies
+if the GraphQL engine is ready to serve requests and there are no inconsistencies
 with the metadata. The response will be ``500`` if there are metadata
 inconsistencies and you should use the console or check the server logs to find
 out what the errors are.
@@ -75,12 +77,22 @@ out what the errors are.
 pg_dump API
 ^^^^^^^^^^^
 
-The ``/v1alpha1/pg_dump`` is an admin-only endpoint that can be used to execute ``pg_dump`` on the
-Postgres instance connected to Hasura. The ``pg_dump`` CLI tool's argument can
-be passed as POST request body to the API and the response is sent back to the
-client.
+The ``/v1alpha1/pg_dump`` is an admin-only endpoint that can be used to execute
+``pg_dump`` on the Postgres instance connected to Hasura. The ``pg_dump`` CLI
+tool's argument can be passed as a POST request body to the API and the response
+is sent back to the client.
 
-See details at :doc:`pgdump`
+See details at :doc:`pgdump`.
+
+.. _config_api:
+
+Config API
+^^^^^^^^^^
+
+``v1alpha1/config`` is an admin-only endpoint to get the current server
+configuration.
+
+See details at :doc:`config`.
 
 Supported PostgreSQL types
 --------------------------
@@ -95,4 +107,5 @@ You can refer to the following to know about all PostgreSQL types supported by t
   GraphQL API <graphql-api/index>
   Schema / Metadata APIs <schema-metadata-api/index>
   PG Dump API <pgdump>
+  Config API <config>
   Supported PostgreSQL types <postgresql-types>

@@ -7,11 +7,12 @@ import PageContainer from '../../Common/Layout/PageContainer/PageContainer';
 import DataSubSidebar from './DataSubSidebar';
 
 import { updateCurrentSchema } from './DataActions';
+import { NotFoundError } from '../../Error/PageNotFound';
+import { CLI_CONSOLE_MODE } from '../../../constants';
 
 const sectionPrefix = '/data';
 
 const DataPageContainer = ({
-  schema,
   currentSchema,
   schemaList,
   children,
@@ -20,10 +21,17 @@ const DataPageContainer = ({
 }) => {
   const styles = require('../../Common/TableCommon/Table.scss');
 
+  if (!schemaList.map(s => s.schema_name).includes(currentSchema)) {
+    dispatch(updateCurrentSchema('public', false));
+
+    // throw a 404 exception
+    throw new NotFoundError();
+  }
+
   const currentLocation = location.pathname;
 
   let migrationTab = null;
-  if (globals.consoleMode === 'cli') {
+  if (globals.consoleMode === CLI_CONSOLE_MODE) {
     migrationTab = (
       <li
         role="presentation"
@@ -40,6 +48,14 @@ const DataPageContainer = ({
 
   const handleSchemaChange = e => {
     dispatch(updateCurrentSchema(e.target.value));
+  };
+
+  const getSchemaOptions = () => {
+    return schemaList.map(s => (
+      <option key={s.schema_name} value={s.schema_name}>
+        {s.schema_name}
+      </option>
+    ));
   };
 
   const sidebarContent = (
@@ -60,21 +76,12 @@ const DataPageContainer = ({
                 value={currentSchema}
                 className={styles.changeSchema + ' form-control'}
               >
-                {schemaList.map(s => (
-                  <option key={s.schema_name} value={s.schema_name}>
-                    {s.schema_name}
-                  </option>
-                ))}
+                {getSchemaOptions()}
               </select>
             </div>
           </div>
         </Link>
-        <DataSubSidebar
-          location={location}
-          schema={schema}
-          currentSchema={currentSchema}
-          dispatch={dispatch}
-        />
+        <DataSubSidebar location={location} />
       </li>
       <li
         role="presentation"
@@ -105,7 +112,6 @@ const DataPageContainer = ({
 
 const mapStateToProps = state => {
   return {
-    schema: state.tables.allSchemas,
     schemaList: state.tables.schemaList,
     currentSchema: state.tables.currentSchema,
   };

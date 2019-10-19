@@ -8,6 +8,8 @@ import {
 } from '../Common/ReusableComponents/utils';
 import { saveUniqueKey, removeUniqueKey } from './ModifyActions';
 
+import { getConfirmation } from '../../../Common/utils/jsUtils';
+
 const UniqueKeyEditor = ({
   uniqueKeys,
   tableSchema,
@@ -85,8 +87,12 @@ const UniqueKeyEditor = ({
     // label text when unique key is collapsed
     const collapsedLabel = () => {
       if (isLast) {
+        if (numUniqueKeys === 1) {
+          return 'No unique keys';
+        }
         return null;
       }
+
       return getKeyDef(uniqueKeyConfig, constraintName);
     };
 
@@ -99,20 +105,17 @@ const UniqueKeyEditor = ({
     let removeFunc;
     if (!isLast) {
       removeFunc = toggle => {
-        const isOk = window.confirm(
-          'Are you sure you want to remove this unique key constraint?'
-        );
-        if (!isOk) {
-          return;
+        const isOk = getConfirmation();
+        if (isOk) {
+          dispatch(
+            removeUniqueKey(
+              i,
+              tableSchema.table_name,
+              existingConstraints,
+              toggle
+            )
+          );
         }
-        dispatch(
-          removeUniqueKey(
-            i,
-            tableSchema.table_name,
-            existingConstraints,
-            toggle
-          )
-        );
       };
     }
 
@@ -154,8 +157,7 @@ const UniqueKeyEditor = ({
       expandButtonText = 'Edit';
       collapseButtonText = 'Close';
     } else {
-      expandButtonText =
-        numUniqueKeys === 1 ? 'Add a unique key' : 'Add a new unique key';
+      expandButtonText = numUniqueKeys === 1 ? 'Add' : 'Add a new unique key';
       collapseButtonText = 'Cancel';
     }
 

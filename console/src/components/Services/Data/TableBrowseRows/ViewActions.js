@@ -8,11 +8,11 @@ import {
   showErrorNotification,
 } from '../../Common/Notification';
 import dataHeaders from '../Common/Headers';
+import { getConfirmation } from '../../../Common/utils/jsUtils';
 
 /* ****************** View actions *************/
 const V_SET_DEFAULTS = 'ViewTable/V_SET_DEFAULTS';
 const V_REQUEST_SUCCESS = 'ViewTable/V_REQUEST_SUCCESS';
-const V_REQUEST_ERROR = 'ViewTable/V_REQUEST_ERROR';
 const V_EXPAND_REL = 'ViewTable/V_EXPAND_REL';
 const V_CLOSE_REL = 'ViewTable/V_CLOSE_REL';
 const V_SET_ACTIVE = 'ViewTable/V_SET_ACTIVE';
@@ -101,7 +101,12 @@ const vMakeRequest = () => {
         }
       },
       error => {
-        dispatch({ type: V_REQUEST_ERROR, data: error });
+        Promise.all([
+          dispatch(
+            showErrorNotification('Browse query failed!', error.error, error)
+          ),
+          dispatch({ type: V_REQUEST_PROGRESS, data: false }),
+        ]);
       }
     );
   };
@@ -162,18 +167,22 @@ const fetchManualTriggers = tableName => {
 
 const deleteItem = pkClause => {
   return (dispatch, getState) => {
-    const isOk = confirm('Permanently delete this row?');
+    const confirmMessage =
+      'This will permanently delete this row from this table';
+    const isOk = getConfirmation(confirmMessage);
     if (!isOk) {
       return;
     }
+
     const state = getState();
+
     const url = Endpoints.query;
     const reqBody = {
       type: 'delete',
       args: {
         table: {
           name: state.tables.currentTable,
-          schema: getState().tables.currentSchema,
+          schema: state.tables.currentSchema,
         },
         where: pkClause,
       },
@@ -195,9 +204,7 @@ const deleteItem = pkClause => {
         );
       },
       err => {
-        dispatch(
-          showErrorNotification('Deleting row failed!', err.error, reqBody, err)
-        );
+        dispatch(showErrorNotification('Deleting row failed!', err.error, err));
       }
     );
   };

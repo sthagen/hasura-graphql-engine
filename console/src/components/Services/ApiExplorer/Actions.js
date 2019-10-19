@@ -1,4 +1,7 @@
 import defaultState from './state';
+import requestAction from '../../../utils/requestAction';
+
+import Endpoints from '../../../Endpoints';
 // import fetch from 'isomorphic-fetch';
 
 import { SubscriptionClient } from 'subscriptions-transport-ws';
@@ -8,6 +11,7 @@ import { execute } from 'apollo-link';
 
 import { getHeadersAsJSON } from './utils';
 import { saveAppState, clearState } from '../../AppState.js';
+import { ADMIN_SECRET_HEADER_KEY } from '../../../constants';
 
 const CHANGE_TAB = 'ApiExplorer/CHANGE_TAB';
 const CHANGE_API_SELECTION = 'ApiExplorer/CHANGE_API_SELECTION';
@@ -25,6 +29,7 @@ const REQUEST_PARAMS_CHANGED = 'ApiExplorer/REQUEST_PARAMS_CHANGED';
 const REQUEST_HEADER_CHANGED = 'ApiExplorer/REQUEST_HEADER_CHANGED';
 const REQUEST_HEADER_ADDED = 'ApiExplorer/REQUEST_HEADER_ADDED';
 const REQUEST_HEADER_REMOVED = 'ApiExplorer/REQUEST_HEADER_REMOVED';
+const SET_REQUEST_HEADERS_BULK = 'ApiExplorer/SET_REQUEST_HEADERS_BULK';
 
 const MAKING_API_REQUEST = 'ApiExplorer/MAKING_API_REQUEST';
 const RESET_MAKING_REQUEST = 'ApiExplorer/RESET_MAKING_REQUEST';
@@ -43,6 +48,60 @@ const clearHistory = () => {
   return {
     type: CLEAR_HISTORY,
   };
+};
+
+// This method adds a new empty header if no empty header is present
+const getChangedHeaders = (headers, changedHeaderDetails) => {
+  const changedHeaderIndex = changedHeaderDetails.index;
+
+  const newHeaders = Object.assign([], headers);
+
+  if (newHeaders[changedHeaderIndex].isNewHeader) {
+    newHeaders[changedHeaderIndex].isNewHeader = false;
+    newHeaders[changedHeaderIndex].isActive = true;
+    newHeaders[changedHeaderIndex].isDisabled = false;
+  }
+
+  if (changedHeaderDetails.keyName === 'isActive') {
+    newHeaders[changedHeaderIndex].isActive = !newHeaders[changedHeaderIndex]
+      .isActive;
+  } else {
+    newHeaders[changedHeaderIndex][changedHeaderDetails.keyName] =
+      changedHeaderDetails.newValue;
+  }
+
+  newHeaders[changedHeaderIndex].isDisabled =
+    changedHeaderDetails.isDisabled === true;
+
+  const nonEmptyHeaders = newHeaders.filter(header => {
+    return !header.isNewHeader;
+  });
+
+  nonEmptyHeaders.push({
+    key: '',
+    value: '',
+    isActive: false,
+    isNewHeader: true,
+    isDisabled: false,
+  });
+
+  return nonEmptyHeaders;
+};
+
+const verifyJWTToken = token => dispatch => {
+  const url = Endpoints.graphQLUrl;
+  const body = {
+    query: '{ __type(name: "dummy") {name}}',
+    variables: null,
+  };
+  const options = {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  };
+  return dispatch(requestAction(url, options));
 };
 
 const updateFileObject = fileObj => {
@@ -88,11 +147,7 @@ const changeRequestParams = newParams => {
 
 const createWsClient = (url, headers) => {
   const gqlUrl = new URL(url);
-  const windowUrl = new URL(window.location);
-  let websocketProtocol = 'ws';
-  if (gqlUrl.protocol === 'https:' && windowUrl.protocol === 'https:') {
-    websocketProtocol = 'wss';
-  }
+  const websocketProtocol = gqlUrl.protocol === 'https:' ? 'wss' : 'ws';
   const headersFinal = getHeadersAsJSON(headers);
   const graphqlUrl = `${websocketProtocol}://${url.split('//')[1]}`;
   const client = new SubscriptionClient(graphqlUrl, {
@@ -163,8 +218,7 @@ const analyzeFetcher = (url, headers) => {
       const lHead = t.toLowerCase();
       if (
         lHead.slice(0, 'x-hasura-'.length) === 'x-hasura-' &&
-        lHead !== 'x-hasura-access-key' &&
-        lHead !== 'x-hasura-admin-secret'
+        lHead !== ADMIN_SECRET_HEADER_KEY
       ) {
         user[lHead] = reqHeaders[t];
         delete reqHeaders[t];
@@ -183,15 +237,52 @@ const analyzeFetcher = (url, headers) => {
 };
 /* End of it */
 
-const changeRequestHeader = (index, key, newValue, isDisabled) => ({
-  type: REQUEST_HEADER_CHANGED,
-  data: {
-    index: index,
-    keyName: key,
-    newValue: newValue,
-    isDisabled: isDisabled,
-  },
-});
+const changeRequestHeader = (index, key, newValue, isDisabled) => {
+  return (dispatch, getState) => {
+    const currentState = getState().apiexplorer;
+
+    const updatedHeader = {
+      index: index,
+      keyName: key,
+      newValue: newValue,
+      isDisabled: isDisabled,
+    };
+
+    const updatedHeaders = getChangedHeaders(
+      currentState.displayedApi.request.headers,
+      updatedHeader
+    );
+
+    dispatch({
+      type: REQUEST_HEADER_CHANGED,
+      data: updatedHeaders,
+    });
+
+    return Promise.resolve(updatedHeaders);
+  };
+};
+
+const setHeadersBulk = headers => ({ type: SET_REQUEST_HEADERS_BULK, headers });
+
+const removeRequestHeader = index => {
+  return (dispatch, getState) => {
+    const currentState = getState().apiexplorer;
+
+    const updatedHeaders = currentState.displayedApi.request.headers.filter(
+      (header, i) => {
+        return !(i === index);
+      }
+    );
+
+    dispatch({
+      type: REQUEST_HEADER_REMOVED,
+      data: updatedHeaders,
+    });
+
+    // const { headers } = getState().apiexplorer.displayedApi.request;
+    return Promise.resolve(updatedHeaders);
+  };
+};
 
 const addRequestHeader = (key, value) => ({
   type: REQUEST_HEADER_ADDED,
@@ -200,13 +291,6 @@ const addRequestHeader = (key, value) => ({
     value: value,
   },
 });
-
-const removeRequestHeader = index => {
-  return {
-    type: REQUEST_HEADER_REMOVED,
-    data: index,
-  };
-};
 
 const generateApiCodeClicked = () => {
   return {
@@ -270,40 +354,6 @@ const getHeadersAfterAddingNewHeader = (headers, newHeader) => {
     value: '',
     isActive: false,
     isNewHeader: true,
-  });
-  return nonEmptyHeaders;
-};
-
-// This method adds a new empty header if no empty header is present
-const getChangedHeaders = (headers, changedHeaderDetails) => {
-  const newHeaders = Object.assign([], headers);
-  if (newHeaders[changedHeaderDetails.index].isNewHeader) {
-    newHeaders[changedHeaderDetails.index].isNewHeader = false;
-    newHeaders[changedHeaderDetails.index].isActive = true;
-    newHeaders[changedHeaderDetails.index].isDisabled = false;
-  }
-  if (changedHeaderDetails.keyName === 'isActive') {
-    newHeaders[changedHeaderDetails.index].isActive = !newHeaders[
-      changedHeaderDetails.index
-    ].isActive;
-  } else {
-    newHeaders[changedHeaderDetails.index][changedHeaderDetails.keyName] =
-      changedHeaderDetails.newValue;
-  }
-  if (changedHeaderDetails.isDisabled === true) {
-    newHeaders[changedHeaderDetails.index].isDisabled = true;
-  } else {
-    newHeaders[changedHeaderDetails.index].isDisabled = false;
-  }
-  const nonEmptyHeaders = newHeaders.filter(header => {
-    return !header.isNewHeader;
-  });
-  nonEmptyHeaders.push({
-    key: '',
-    value: '',
-    isActive: false,
-    isNewHeader: true,
-    isDisabled: false,
   });
   return nonEmptyHeaders;
 };
@@ -454,10 +504,7 @@ const apiExplorerReducer = (state = defaultState, action) => {
           ...state.displayedApi,
           request: {
             ...state.displayedApi.request,
-            headers: getChangedHeaders(
-              state.displayedApi.request.headers,
-              action.data
-            ),
+            headers: [...action.data],
           },
         },
       };
@@ -519,9 +566,7 @@ const apiExplorerReducer = (state = defaultState, action) => {
           ...state.displayedApi,
           request: {
             ...state.displayedApi.request,
-            headers: state.displayedApi.request.headers.filter((header, i) => {
-              return !(i === action.data);
-            }),
+            headers: [...action.data],
           },
         },
       };
@@ -559,6 +604,18 @@ const apiExplorerReducer = (state = defaultState, action) => {
         ...state,
         headerFocus: true,
       };
+    case SET_REQUEST_HEADERS_BULK:
+      return {
+        ...state,
+        displayedApi: {
+          ...state.displayedApi,
+          request: {
+            ...state.displayedApi.request,
+            headers: action.headers,
+            headersInitialised: true,
+          },
+        },
+      };
     default:
       return state;
   }
@@ -589,4 +646,6 @@ export {
   unfocusTypingHeader,
   getRemoteQueries,
   analyzeFetcher,
+  verifyJWTToken,
+  setHeadersBulk,
 };

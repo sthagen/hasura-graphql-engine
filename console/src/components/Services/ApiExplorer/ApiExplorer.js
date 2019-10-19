@@ -4,6 +4,8 @@ import Helmet from 'react-helmet';
 
 import ApiRequestWrapper from './ApiRequestWrapper';
 
+import globals from '../../../Globals';
+
 /*
 import ApiCollectionPanel from './ApiCollectionPanel';
 
@@ -60,9 +62,15 @@ class ApiExplorer extends Component {
       headerFocus,
       location,
       serverVersion,
+      serverConfig,
     } = this.props;
 
     const styles = require('./ApiExplorer.scss');
+    const consoleUrl =
+      window.location.protocol +
+      '//' +
+      window.location.host +
+      globals.urlPrefix;
 
     return (
       <div className={'container-fluid ' + styles.padd_remove}>
@@ -80,6 +88,8 @@ class ApiExplorer extends Component {
             headerFocus={headerFocus}
             urlParams={location.query}
             serverVersion={serverVersion}
+            consoleUrl={consoleUrl}
+            serverConfig={serverConfig}
           />
         </div>
       </div>
@@ -97,4 +107,19 @@ ApiExplorer.propTypes = {
   location: PropTypes.object.isRequired,
 };
 
-export default ApiExplorer;
+const generatedApiExplorer = connect => {
+  const mapStateToProps = state => {
+    return {
+      ...state.apiexplorer,
+      serverVersion: state.main.serverVersion ? state.main.serverVersion : '',
+      credentials: {},
+      dataApiExplorerData: { ...state.dataApiExplorer },
+      dataHeaders: state.tables.dataHeaders,
+      tables: state.tables.allSchemas,
+      serverConfig: state.main.serverConfig ? state.main.serverConfig.data : {},
+    };
+  };
+  return connect(mapStateToProps)(ApiExplorer);
+};
+
+export default generatedApiExplorer;

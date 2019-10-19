@@ -28,18 +28,11 @@ class GraphiQLWrapper extends Component {
     clearCodeMirrorHints();
   }
 
-  shouldComponentUpdate(nextProps) {
-    return !nextProps.headerFocus;
-  }
-
   render() {
     const styles = require('../../../Common/Common.scss');
 
-    const { headerFocus } = this.state;
-
-    const { numberOfTables, urlParams } = this.props;
+    const { numberOfTables, urlParams, headerFocus } = this.props;
     const graphqlNetworkData = this.props.data;
-
     const graphQLFetcher = graphQLParams => {
       if (headerFocus) {
         return null;
@@ -58,10 +51,12 @@ class GraphiQLWrapper extends Component {
     );
 
     const renderGraphiql = graphiqlProps => {
+      const voyagerUrl = graphqlNetworkData.consoleUrl + '/voyager-view';
       return (
         <GraphiQL
           fetcher={graphQLFetcher}
           supportAnalyze
+          voyagerUrl={voyagerUrl}
           analyzeFetcher={analyzeFetcherInstance}
           {...graphiqlProps}
         />
@@ -82,6 +77,7 @@ class GraphiQLWrapper extends Component {
             renderGraphiql={renderGraphiql}
             endpoint={graphqlNetworkData.url}
             headers={graphqlNetworkData.headers}
+            headersInitialised={graphqlNetworkData.headersInitialised}
             headerFocus={headerFocus}
             urlParams={urlParams}
             numberOfTables={numberOfTables}

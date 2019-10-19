@@ -10,7 +10,7 @@ import dataHeaders from '../Common/Headers';
 import globals from '../../../../Globals';
 
 import returnMigrateUrl from '../Common/getMigrateUrl';
-import { SERVER_CONSOLE_MODE } from '../../../../constants';
+import { CLI_CONSOLE_MODE, SERVER_CONSOLE_MODE } from '../../../../constants';
 import { loadMigrationStatus } from '../../../Main/Actions';
 import { handleMigrationErrors } from '../../EventTrigger/EventActions';
 
@@ -73,7 +73,7 @@ const makeRequest = (
     let finalReqBody;
     if (globals.consoleMode === SERVER_CONSOLE_MODE) {
       finalReqBody = upQuery;
-    } else if (globals.consoleMode === 'cli') {
+    } else if (globals.consoleMode === CLI_CONSOLE_MODE) {
       finalReqBody = migrationBody;
     }
     const url = migrateUrl;
@@ -85,7 +85,7 @@ const makeRequest = (
     };
 
     const onSuccess = data => {
-      if (globals.consoleMode === 'cli') {
+      if (globals.consoleMode === CLI_CONSOLE_MODE) {
         dispatch(loadMigrationStatus()); // don't call for server mode
       }
       if (successMsg) {
@@ -157,10 +157,9 @@ const fetchCustomFunction = (functionName, schema) => {
           });
           return Promise.resolve();
         }
-        return dispatch(_push('/'));
       },
       error => {
-        console.error('Failed to fetch resolver' + JSON.stringify(error));
+        console.error('Failed to fetch function' + JSON.stringify(error));
         return dispatch({ type: CUSTOM_FUNCTION_FETCH_FAIL, data: error });
       }
     );
@@ -175,19 +174,24 @@ const deleteFunctionSql = () => {
       functionDefinition,
       inputArgTypes,
     } = getState().functions;
-    let functionWSchemaName =
+
+    const functionNameWithSchema =
       '"' + currentSchema + '"' + '.' + '"' + functionName + '"';
 
+    let functionArgString = '';
     if (inputArgTypes.length > 0) {
-      let functionString = '(';
-      inputArgTypes.forEach((i, index) => {
-        functionString +=
-          i + ' ' + (index === inputArgTypes.length - 1 ? ')' : ',');
+      functionArgString += '(';
+      inputArgTypes.forEach((inputArg, i) => {
+        functionArgString += i > 0 ? ', ' : '';
+
+        functionArgString +=
+          '"' + inputArg.schema + '"' + '.' + '"' + inputArg.name + '"';
       });
-      functionWSchemaName += functionString;
+      functionArgString += ')';
     }
 
-    const sqlDropFunction = 'DROP FUNCTION ' + functionWSchemaName;
+    const sqlDropFunction =
+      'DROP FUNCTION ' + functionNameWithSchema + functionArgString;
 
     const sqlUpQueries = [
       {
@@ -195,6 +199,7 @@ const deleteFunctionSql = () => {
         args: { sql: sqlDropFunction },
       },
     ];
+
     const sqlDownQueries = [];
     if (functionDefinition && functionDefinition.length > 0) {
       sqlDownQueries.push({
@@ -276,12 +281,9 @@ const unTrackCustomFunction = () => {
     const errorMsg = 'Delete custom function failed';
 
     const customOnSuccess = () => {
-      // dispatch({ type: REQUEST_SUCCESS });
-      Promise.all([
-        dispatch({ type: RESET }),
-        dispatch(_push('/')),
-        dispatch(fetchTrackedFunctions()),
-      ]);
+      dispatch(_push(`/schema/${currentSchema}`));
+      dispatch({ type: RESET });
+      dispatch(fetchTrackedFunctions());
     };
     const customOnError = error => {
       Promise.all([

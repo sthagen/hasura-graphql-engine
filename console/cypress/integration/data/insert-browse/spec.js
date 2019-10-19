@@ -13,6 +13,7 @@ import {
   setMetaData,
   validateCT,
 } from '../../validators/validators';
+import { setPromptValue } from '../../../helpers/common';
 
 const numOfDataTypes = dataTypes.length;
 const testName = 'ib';
@@ -295,44 +296,47 @@ export const deleteBITestTable = () => {
   // Go to the modify section of the table
   cy.get(getElementFromAlias('table-modify')).click();
   cy.wait(2000);
+  setPromptValue(getTableName(2, testName));
   // Click on delete
   cy.get(getElementFromAlias('delete-table')).click();
   // Confirm
-  cy.on('window:confirm', str => {
-    expect(str === 'Are you sure?').to.be.true;
-    return true;
-  });
+  cy.window()
+    .its('prompt')
+    .should('be.called');
   cy.wait(7000);
   // Match the URL
   cy.url().should('eq', `${baseUrl}/data/schema/public`);
   validateCT(getTableName(2, testName), 'failure');
+
   cy.get(getElementFromAlias(getTableName(1, testName))).click();
   // Go to the modify section of the table
   cy.get(getElementFromAlias('table-modify')).click();
   cy.wait(2000);
+  setPromptValue(getTableName(1, testName));
   // Click on delete
   cy.get(getElementFromAlias('delete-table')).click();
   // Confirm
-  cy.on('window:confirm', str => {
-    expect(str === 'Are you sure?').to.be.true;
-    return true;
-  });
+  cy.window()
+    .its('prompt')
+    .should('be.called');
   cy.wait(7000);
   // Match the URL
   cy.url().should('eq', `${baseUrl}/data/schema/public`);
   validateCT(getTableName(1, testName), 'failure');
+
   cy.get(getElementFromAlias(getTableName(0, testName))).click();
   // Go to the modify section of the table
   cy.get(getElementFromAlias('table-modify')).click();
+  setPromptValue(getTableName(0, testName));
   cy.wait(2000);
   // Click on delete
   cy.get(getElementFromAlias('delete-table')).click();
   // Confirm
-  cy.on('window:confirm', str => {
-    expect(str === 'Are you sure?').to.be.true;
-    return true;
-  });
+  cy.window()
+    .its('prompt')
+    .should('be.called');
   cy.wait(7000);
+
   // Match the URL
   cy.url().should('eq', `${baseUrl}/data/schema/public`);
   validateCT(getTableName(0, testName), 'failure');
@@ -413,7 +417,7 @@ export const passEditButton = () => {
     '{selectall}{del}'
   );
   cy.get(getElementFromAlias(`typed-input-${textIndex}`)).type('new-text');
-  cy.get(getElementFromAlias('save-button')).click();
+  cy.get(getElementFromAlias('edit-save-button')).click();
   // cy.get('h4').contains('Edited!', { timeout: 7000 });
   // cy.get('.notification-error');
   cy.wait(7000);
@@ -437,17 +441,14 @@ export const checkViewRelationship = () => {
   cy.get(getElementFromAlias('tableName')).type(getTableName(2, testName));
   cy.get(getElementFromAlias('column-0')).type('id');
   tableColumnTypeSelector('col-type-0');
-  // cy.get(getElementFromAlias('col-type-0')).click();
   cy.get(getElementFromAlias('data_test_column_type_value_serial'))
     .first()
     .click();
   cy.get(getElementFromAlias('column-1')).type('someID');
   tableColumnTypeSelector('col-type-1');
-  // cy.get(getElementFromAlias('col-type-1')).click();
   cy.get(getElementFromAlias('data_test_column_type_value_integer'))
     .first()
     .click();
-  // cy.get(getElementFromAlias('col-type-1')).select('integer');
   // Set primary key
   cy.get(getElementFromAlias('primary-key-select-0')).select('0');
   // Click on create
@@ -494,7 +495,10 @@ export const passDeleteRow = () => {
   cy.wait(5000);
   cy.get(getElementFromAlias('row-delete-button-0')).click();
   cy.on('window:confirm', str => {
-    expect(str === 'Permanently delete this row?').to.be.true;
+    expect(
+      str.indexOf('This will permanently delete this row from this table') !==
+        -1
+    ).to.be.true;
   });
   // cy.get('.notification-error');
   cy.wait(14000);

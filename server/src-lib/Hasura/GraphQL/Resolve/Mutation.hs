@@ -5,7 +5,6 @@ module Hasura.GraphQL.Resolve.Mutation
   , buildEmptyMutResp
   ) where
 
-import           Control.Arrow                     (second)
 import           Data.Has
 import           Hasura.Prelude
 
@@ -18,11 +17,10 @@ import qualified Hasura.RQL.DML.Delete             as RD
 import qualified Hasura.RQL.DML.Returning          as RR
 import qualified Hasura.RQL.DML.Update             as RU
 
-import qualified Hasura.SQL.DML                    as S
 import qualified Hasura.RQL.DML.Select             as RS
+import qualified Hasura.SQL.DML                    as S
 
 import           Hasura.EncJSON
-import           Hasura.GraphQL.Context
 import           Hasura.GraphQL.Resolve.BoolExp
 import           Hasura.GraphQL.Resolve.Context
 import           Hasura.GraphQL.Resolve.InputValue
@@ -33,15 +31,8 @@ import           Hasura.RQL.Types
 import           Hasura.SQL.Types
 import           Hasura.SQL.Value
 
--- withPrepFn
---   :: (MonadReader r m)
---   => PrepFn m -> ReaderT (r, PrepFn m) m a -> m a
--- withPrepFn fn m = do
---   r <- ask
---   runReaderT m (r, fn)
-
 convertMutResp
-  :: ( MonadError QErr m, MonadReader r m, Has FieldMap r
+  :: ( MonadReusability m, MonadError QErr m, MonadReader r m, Has FieldMap r
      , Has OrdByCtx r, Has SQLGenCtx r
      )
   => G.NamedType -> SelSet -> m (RR.MutFldsG UnresolvedVal)
@@ -62,57 +53,59 @@ convertMutResp ty selSet =
       UVSQL sqlExp -> pure $ UVSQL sqlExp
 
 convertRowObj
-  :: (MonadError QErr m)
-  => AnnInpVal
+  :: (MonadReusability m, MonadError QErr m)
+  => PGColGNameMap
+  -> AnnInpVal
   -> m [(PGCol, UnresolvedVal)]
-convertRowObj val =
+convertRowObj colGNameMap val =
   flip withObject val $ \_ obj ->
   forM (OMap.toList obj) $ \(k, v) -> do
-    prepExpM <- fmap UVPG <$> asPGColValM v
-    let prepExp = fromMaybe (UVSQL $ S.SEUnsafe "NULL") prepExpM
-    return (PGCol $ G.unName k, prepExp)
+    prepExpM <- fmap mkParameterizablePGValue <$> asPGColumnValueM v
+    pgCol <- pgiColumn <$> resolvePGCol colGNameMap k
+    let prepExp = fromMaybe (UVSQL S.SENull) prepExpM
+    return (pgCol, prepExp)
 
 type ApplySQLOp =  (PGCol, S.SQLExp) -> S.SQLExp
 
-rhsExpOp :: S.SQLOp -> S.AnnType -> ApplySQLOp
+rhsExpOp :: S.SQLOp -> S.TypeAnn -> ApplySQLOp
 rhsExpOp op annTy (col, e) =
   S.mkSQLOpExp op (S.SEIden $ toIden col) annExp
   where
     annExp = S.SETyAnn e annTy
 
-lhsExpOp :: S.SQLOp -> S.AnnType -> ApplySQLOp
+lhsExpOp :: S.SQLOp -> S.TypeAnn -> ApplySQLOp
 lhsExpOp op annTy (col, e) =
   S.mkSQLOpExp op annExp $ S.SEIden $ toIden col
   where
     annExp = S.SETyAnn e annTy
 
 convObjWithOp
-  :: (MonadError QErr m)
-  => ApplySQLOp -> AnnInpVal -> m [(PGCol, UnresolvedVal)]
-convObjWithOp opFn val =
+  :: (MonadReusability m, MonadError QErr m)
+  => PGColGNameMap -> ApplySQLOp -> AnnInpVal -> m [(PGCol, UnresolvedVal)]
+convObjWithOp colGNameMap opFn val =
   flip withObject val $ \_ obj -> forM (OMap.toList obj) $ \(k, v) -> do
-  colVal <- _apvValue <$> asPGColVal v
-  let pgCol = PGCol $ G.unName k
-      -- TODO: why are we using txtEncoder here?
-      encVal = txtEncoder colVal
+  colVal <- openOpaqueValue =<< asPGColumnValue v
+  pgCol <- pgiColumn <$> resolvePGCol colGNameMap k
+  -- TODO: why are we using txtEncoder here?
+  let encVal = txtEncoder $ pstValue $ _apvValue colVal
       sqlExp = opFn (pgCol, encVal)
   return (pgCol, UVSQL sqlExp)
 
 convDeleteAtPathObj
-  :: (MonadError QErr m)
-  => AnnInpVal -> m [(PGCol, UnresolvedVal)]
-convDeleteAtPathObj val =
+  :: (MonadReusability m, MonadError QErr m)
+  => PGColGNameMap -> AnnInpVal -> m [(PGCol, UnresolvedVal)]
+convDeleteAtPathObj colGNameMap val =
   flip withObject val $ \_ obj -> forM (OMap.toList obj) $ \(k, v) -> do
-    vals <- flip withArray v $ \_ annVals -> mapM asPGColVal annVals
-    let valExps = map (txtEncoder . _apvValue) vals
-        pgCol = PGCol $ G.unName k
-        annEncVal = S.SETyAnn (S.SEArray valExps) S.textArrType
+    vals <- traverse (openOpaqueValue <=< asPGColumnValue) =<< asArray v
+    pgCol <- pgiColumn <$> resolvePGCol colGNameMap k
+    let valExps = map (txtEncoder . pstValue . _apvValue) vals
+        annEncVal = S.SETyAnn (S.SEArray valExps) S.textArrTypeAnn
         sqlExp = S.SEOpApp S.jsonbDeleteAtPathOp
                  [S.SEIden $ toIden pgCol, annEncVal]
     return (pgCol, UVSQL sqlExp)
 
 convertUpdateP1
-  :: ( MonadError QErr m
+  :: ( MonadReusability m, MonadError QErr m
      , MonadReader r m, Has FieldMap r
      , Has OrdByCtx r, Has SQLGenCtx r
      )
@@ -121,26 +114,26 @@ convertUpdateP1
   -> m (RU.AnnUpdG UnresolvedVal)
 convertUpdateP1 opCtx fld = do
   -- a set expression is same as a row object
-  setExpM   <- withArgM args "_set" convertRowObj
+  setExpM   <- withArgM args "_set" $ convertRowObj colGNameMap
   -- where bool expression to filter column
   whereExp <- withArg args "where" parseBoolExp
   -- increment operator on integer columns
   incExpM <- withArgM args "_inc" $
-    convObjWithOp $ rhsExpOp S.incOp S.intType
+    convObjWithOp' $ rhsExpOp S.incOp S.intTypeAnn
   -- append jsonb value
   appendExpM <- withArgM args "_append" $
-    convObjWithOp $ rhsExpOp S.jsonbConcatOp S.jsonbType
+    convObjWithOp' $ rhsExpOp S.jsonbConcatOp S.jsonbTypeAnn
   -- prepend jsonb value
   prependExpM <- withArgM args "_prepend" $
-    convObjWithOp $ lhsExpOp S.jsonbConcatOp S.jsonbType
+    convObjWithOp' $ lhsExpOp S.jsonbConcatOp S.jsonbTypeAnn
   -- delete a key in jsonb object
   deleteKeyExpM <- withArgM args "_delete_key" $
-    convObjWithOp $ rhsExpOp S.jsonbDeleteOp S.textType
+    convObjWithOp' $ rhsExpOp S.jsonbDeleteOp S.textTypeAnn
   -- delete an element in jsonb array
   deleteElemExpM <- withArgM args "_delete_elem" $
-    convObjWithOp $ rhsExpOp S.jsonbDeleteOp S.intType
+    convObjWithOp' $ rhsExpOp S.jsonbDeleteOp S.intTypeAnn
   -- delete at path in jsonb value
-  deleteAtPathExpM <- withArgM args "_delete_at_path" convDeleteAtPathObj
+  deleteAtPathExpM <- withArgM args "_delete_at_path" $ convDeleteAtPathObj colGNameMap
   mutFlds <- convertMutResp (_fType fld) $ _fSelSet fld
 
   let resolvedPreSetItems =
@@ -164,11 +157,13 @@ convertUpdateP1 opCtx fld = do
   return $ RU.AnnUpd tn setItems
     (unresolvedPermFltr, whereExp) mutFlds allCols
   where
-    UpdOpCtx tn _ filterExp preSetCols allCols = opCtx
+    convObjWithOp' = convObjWithOp colGNameMap
+    allCols = Map.elems colGNameMap
+    UpdOpCtx tn _ colGNameMap filterExp preSetCols = opCtx
     args = _fArguments fld
 
 convertUpdate
-  :: ( MonadError QErr m
+  :: ( MonadReusability m, MonadError QErr m
      , MonadReader r m, Has FieldMap r
      , Has OrdByCtx r, Has SQLGenCtx r
      )
@@ -189,7 +184,7 @@ convertUpdate opCtx fld = do
   bool whenNonEmptyItems whenEmptyItems $ null $ RU.uqp1SetExps annUpdResolved
 
 convertDelete
-  :: ( MonadError QErr m
+  :: ( MonadReusability m, MonadError QErr m
      , MonadReader r m, Has FieldMap r
      , Has OrdByCtx r, Has SQLGenCtx r
      )

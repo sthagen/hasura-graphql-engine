@@ -2,28 +2,35 @@ import React from 'react';
 import { connect } from 'react-redux';
 import { Link } from 'react-router';
 import OverlayTrigger from 'react-bootstrap/lib/OverlayTrigger';
+import Tooltip from 'react-bootstrap/lib/Tooltip';
+
+import * as tooltips from './Tooltips';
 import globals from '../../Globals';
-import * as tooltip from './Tooltips';
-import 'react-toggle/style.css';
+import { getPathRoot } from '../Common/utils/urlUtils';
+
 import Spinner from '../Common/Spinner/Spinner';
+import WarningSymbol from '../Common/WarningSymbol/WarningSymbol';
+
 import {
   loadServerVersion,
+  fetchServerConfig,
   loadLatestServerVersion,
   featureCompatibilityInit,
 } from './Actions';
-import { loadConsoleOpts } from '../../telemetry/Actions.js';
-import './NotificationOverrides.css';
+
+import { loadConsoleTelemetryOpts } from '../../telemetry/Actions.js';
+
 import {
   loadInconsistentObjects,
   redirectToMetadataStatus,
-} from '../Services/Metadata/Actions';
+} from '../Services/Settings/Actions';
 
 import {
   getLoveConsentState,
   setLoveConsentState,
 } from './loveConsentLocalStorage';
 
-import { versionGT } from '../../helpers/versionUtils';
+import { versionGT, FT_JWT_ANALYZER } from '../../helpers/versionUtils';
 
 class Main extends React.Component {
   constructor(props) {
@@ -51,42 +58,70 @@ class Main extends React.Component {
         this.handleMetadataRedirect();
       });
 
-      dispatch(loadConsoleOpts());
+      dispatch(loadConsoleTelemetryOpts());
 
       dispatch(loadLatestServerVersion()).then(() => {
-        try {
-          const isClosedBefore = window.localStorage.getItem(
-            this.props.latestServerVersion + '_BANNER_NOTIFICATION_CLOSED'
-          );
-
-          if (isClosedBefore !== 'true') {
-            const isUpdateAvailable = versionGT(
-              this.props.latestServerVersion,
-              this.props.serverVersion
-            );
-
-            if (isUpdateAvailable) {
-              this.setState({
-                showUpdateNotification: true,
-              });
-            }
-          }
-        } catch (e) {
-          console.error(e);
-        }
+        this.setShowUpdateNotification();
       });
     });
   }
 
+  componentWillReceiveProps(nextProps) {
+    const {
+      [FT_JWT_ANALYZER]: currJwtAnalyzerCompatibility,
+    } = this.props.featuresCompatibility;
+    const {
+      [FT_JWT_ANALYZER]: nextJwtAnalyzerCompatibility,
+    } = nextProps.featuresCompatibility;
+
+    if (
+      currJwtAnalyzerCompatibility !== nextJwtAnalyzerCompatibility &&
+      nextJwtAnalyzerCompatibility
+    ) {
+      this.fetchServerConfig();
+    }
+  }
+
+  setShowUpdateNotification() {
+    const { latestServerVersion, serverVersion } = this.props;
+
+    try {
+      const isClosedBefore = window.localStorage.getItem(
+        latestServerVersion + '_BANNER_NOTIFICATION_CLOSED'
+      );
+
+      if (isClosedBefore !== 'true') {
+        const isUpdateAvailable = versionGT(latestServerVersion, serverVersion);
+
+        if (isUpdateAvailable) {
+          this.setState({
+            showUpdateNotification: true,
+          });
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  fetchServerConfig() {
+    const { dispatch } = this.props;
+
+    dispatch(fetchServerConfig());
+  }
+
   handleBodyClick(e) {
+    const heartDropDown = document.getElementById('dropdown_wrapper');
     const heartDropDownOpen = document.querySelectorAll(
       '#dropdown_wrapper.open'
     );
+
     if (
-      !document.getElementById('dropdown_wrapper').contains(e.target) &&
+      heartDropDown &&
+      !heartDropDown.contains(e.target) &&
       heartDropDownOpen.length !== 0
     ) {
-      document.getElementById('dropdown_wrapper').classList.remove('open');
+      heartDropDown.classList.remove('open');
     }
   }
 
@@ -138,11 +173,12 @@ class Main extends React.Component {
     const github = require('./images/Github.svg');
     const discord = require('./images/Discord.svg');
     const mail = require('./images/mail.svg');
-    const docs = require('./images/logo.svg');
+    const docs = require('./images/docs-logo.svg');
+    const about = require('./images/console-logo.svg');
     const pixHeart = require('./images/pix-heart.svg');
 
     const currentLocation = location.pathname;
-    const currentActiveBlock = currentLocation.split('/')[1];
+    const currentActiveBlock = getPathRoot(currentLocation);
 
     const getMainContent = () => {
       let mainContent = null;
@@ -160,17 +196,17 @@ class Main extends React.Component {
       return mainContent;
     };
 
-    const getMetadataSelectedMarker = () => {
+    const getSettingsSelectedMarker = () => {
       let metadataSelectedMarker = null;
 
-      if (currentActiveBlock === 'metadata') {
+      if (currentActiveBlock === 'settings') {
         metadataSelectedMarker = <span className={styles.selected} />;
       }
 
       return metadataSelectedMarker;
     };
 
-    const getMetadataIcon = () => {
+    const getMetadataStatusIcon = () => {
       if (metadata.inconsistentObjects.length === 0) {
         return <i className={styles.question + ' fa fa-cog'} />;
       }
@@ -190,22 +226,21 @@ class Main extends React.Component {
     const getAdminSecretSection = () => {
       let adminSecretHtml = null;
 
-      if (
-        !globals.isAdminSecretSet &&
-        (globals.adminSecret === '' || globals.adminSecret === null)
-      ) {
+      if (!globals.isAdminSecretSet) {
         adminSecretHtml = (
           <div className={styles.secureSection}>
-            <OverlayTrigger placement="left" overlay={tooltip.secureEndpoint}>
-              <a href="https://docs.hasura.io/1.0/graphql/manual/deployment/securing-graphql-endpoint.html">
-                <i
-                  className={
-                    styles.padd_small_right + ' fa fa-exclamation-triangle'
-                  }
-                />
-                Secure your endpoint
-              </a>
-            </OverlayTrigger>
+            <a
+              href="https://docs.hasura.io/1.0/graphql/manual/deployment/securing-graphql-endpoint.html"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <WarningSymbol
+                tooltipText={tooltips.secureEndpoint}
+                tooltipPlacement={'left'}
+                customStyle={styles.secureSectionSymbol}
+              />
+              &nbsp;Secure your endpoint
+            </a>
           </div>
         );
       }
@@ -388,6 +423,39 @@ class Main extends React.Component {
       return helpDropdownPosStyle;
     };
 
+    const getSidebarItem = (
+      title,
+      icon,
+      tooltipText,
+      path,
+      isDefault = false
+    ) => {
+      const itemTooltip = <Tooltip id={tooltipText}>{tooltipText}</Tooltip>;
+
+      const block = getPathRoot(path);
+
+      return (
+        <OverlayTrigger placement="right" overlay={itemTooltip}>
+          <li>
+            <Link
+              className={
+                currentActiveBlock === block ||
+                (isDefault && currentActiveBlock === '')
+                  ? styles.navSideBarActive
+                  : ''
+              }
+              to={appPrefix + path}
+            >
+              <div className={styles.iconCenter} data-test={block}>
+                <i className={`fa ${icon}`} aria-hidden="true" />
+              </div>
+              <p>{title}</p>
+            </Link>
+          </li>
+        </OverlayTrigger>
+      );
+    };
+
     return (
       <div className={styles.container}>
         <div className={styles.flexRow}>
@@ -406,106 +474,40 @@ class Main extends React.Component {
             </div>
             <div className={styles.header_items}>
               <ul className={styles.sidebarItems}>
-                <OverlayTrigger placement="right" overlay={tooltip.apiexplorer}>
-                  <li>
-                    <Link
-                      className={
-                        currentActiveBlock === 'api-explorer' ||
-                        currentActiveBlock === ''
-                          ? styles.navSideBarActive
-                          : ''
-                      }
-                      to={appPrefix + '/api-explorer'}
-                    >
-                      <div
-                        className={styles.iconCenter}
-                        data-test="api-explorer"
-                      >
-                        <i
-                          title="API Explorer"
-                          className="fa fa-flask"
-                          aria-hidden="true"
-                        />
-                      </div>
-                      <p>GraphiQL</p>
-                    </Link>
-                  </li>
-                </OverlayTrigger>
-                <OverlayTrigger placement="right" overlay={tooltip.data}>
-                  <li>
-                    <Link
-                      className={
-                        currentActiveBlock === 'data'
-                          ? styles.navSideBarActive
-                          : ''
-                      }
-                      to={appPrefix + '/data/schema/' + currentSchema}
-                    >
-                      <div className={styles.iconCenter}>
-                        <i
-                          title="Data Service"
-                          className="fa fa-database"
-                          aria-hidden="true"
-                        />
-                      </div>
-                      <p>Data</p>
-                    </Link>
-                  </li>
-                </OverlayTrigger>
-                <OverlayTrigger
-                  placement="right"
-                  overlay={tooltip.customresolver}
-                >
-                  <li>
-                    <Link
-                      className={
-                        currentActiveBlock === 'remote-schemas'
-                          ? styles.navSideBarActive
-                          : ''
-                      }
-                      to={appPrefix + '/remote-schemas/manage/schemas'}
-                    >
-                      <div className={styles.iconCenter}>
-                        <i
-                          title="Remote Schemas"
-                          className="fa fa-plug"
-                          aria-hidden="true"
-                        />
-                      </div>
-                      <p>Remote Schemas</p>
-                    </Link>
-                  </li>
-                </OverlayTrigger>
-                <OverlayTrigger placement="right" overlay={tooltip.events}>
-                  <li>
-                    <Link
-                      className={
-                        currentActiveBlock === 'events'
-                          ? styles.navSideBarActive
-                          : ''
-                      }
-                      to={appPrefix + '/events/manage/triggers'}
-                    >
-                      <div className={styles.iconCenter}>
-                        <i
-                          title="Events"
-                          className="fa fa-cloud"
-                          aria-hidden="true"
-                        />
-                      </div>
-                      <p>Events</p>
-                    </Link>
-                  </li>
-                </OverlayTrigger>
+                {getSidebarItem(
+                  'GraphiQL',
+                  'fa-flask',
+                  tooltips.apiExplorer,
+                  '/api-explorer',
+                  true
+                )}
+                {getSidebarItem(
+                  'Data',
+                  'fa-database',
+                  tooltips.data,
+                  '/data/schema/' + currentSchema
+                )}
+                {getSidebarItem(
+                  'Remote Schemas',
+                  'fa-plug',
+                  tooltips.remoteSchema,
+                  '/remote-schemas/manage/schemas'
+                )}
+                {getSidebarItem(
+                  'Events',
+                  'fa-cloud',
+                  tooltips.events,
+                  '/events/manage/triggers'
+                )}
               </ul>
             </div>
             <div id="dropdown_wrapper" className={styles.clusterInfoWrapper}>
               {getAdminSecretSection()}
 
-              <Link to="/metadata">
+              <Link to="/settings">
                 <div className={styles.helpSection + ' ' + styles.settingsIcon}>
-                  {getMetadataIcon()}
-                  {getMetadataSelectedMarker()}
+                  {getMetadataStatusIcon()}
+                  {getSettingsSelectedMarker()}
                 </div>
               </Link>
               <div className={styles.supportSection}>
@@ -579,6 +581,16 @@ class Main extends React.Component {
                         />
                         <span>Head to docs</span>
                       </a>
+                    </li>
+                    <li className={'dropdown-item'}>
+                      <Link to="/about">
+                        <img
+                          className={'img-responsive'}
+                          src={about}
+                          alt={'about'}
+                        />
+                        <span>About</span>
+                      </Link>
                     </li>
                   </div>
                 </ul>

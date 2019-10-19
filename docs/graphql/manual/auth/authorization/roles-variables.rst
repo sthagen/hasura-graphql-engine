@@ -43,7 +43,7 @@ of ``user-id``, the session variable.
 
 When you are constructing permission rules, however, there might be several variables that represent the business logic
 of having access to data. For example, if you have a SaaS application, you might restrict access based on a ``client_id``
-variable. If you want to provide different levels of access on different devices you might restrict access based on a
+variable. If you want to provide different levels of access on different devices, you might restrict access based on a
 ``device_type`` variable.
 
 Hasura allows you to create permission rules that can use any dynamic variable that is a property of the request.
@@ -89,7 +89,7 @@ Modelling Roles in Hasura
 
 General guidelines for modelling roles in Hasura.
 
-Roles are typically be modelled in two ways:
+Roles are typically modelled in two ways:
 
 1. **Hierarchical roles**: Access scopes are nested depending on available roles. `Roles in Github for organisations <https://help.github.com/en/articles/managing-peoples-access-to-your-organization-with-roles>`_
    is a great example of such modelling where access scopes are inherited by deeper roles:
@@ -124,7 +124,7 @@ partially captured by the table below (*showing access permissions for the* ``us
            }
 
   * - org-member
-    - Allow access to personally created repositories and the organisation's repositories.
+    - Allow access to personally created repositories and the organisation's repositories
     -
       .. code-block:: json
 
@@ -159,7 +159,7 @@ trivial row-level permission like ``"creator_id": {"_eq": "X-Hasura-User-Id"}`` 
 our example in the previous section, this user information (*ownership or relationship*) must be available for
 defining a permission rule.
 
-These non-trivial use-cases are to handled differently based on whether this information is available in the same
+These non-trivial use cases are to be handled differently based on whether this information is available in the same
 database or not.
 
 Relationship information is available in the same database
@@ -169,8 +169,8 @@ Let's take a closer look at the permission rule for the ``org-member`` rule in t
 section. The rule reads as "*allow access to this repository if it was created by this user or if this user is
 a member of the organisation that this repository belongs to*".
 
-The crucial piece of user information, that is presumed to be available in the same database, that makes this an
-effective rule is the mapping of users (*members*) to organizations.
+The crucial piece of user information that is presumed to be available in the same database and that makes this an
+effective rule, is the mapping of users (*members*) to organizations.
 
 Since this information is available in the same database, it can be easily leveraged via
 :ref:`Relationships in permissions <relationships-in-permissions>` (*see this reference for another
@@ -181,18 +181,66 @@ Relationship information is **not** available in the same database
 
 When this user information is not available in the database that Hasura is configured to use, session variables
 are the only avenue to pass this information to a permission rule. In our example, the mapping of users (members)
-to organizations may not have been in available in the same database.
+to organizations may not have been available in the same database.
 
 To convey this information, a session variable, say ``X-Hasura-Allowed-Organisations`` can be used by the
 configured authentication to relay this information. We can then check for the following condition to emulate
-the same rule - *is the organization that this repository belongs to part of the list of the organizations the
+the same rule: *is the organization that this repository belongs to part of the list of the organizations the
 user is a member of*.
+
+The permission for ``org-member`` role changes to this:
+
+.. code-block:: json
+
+  {
+    "_or": [
+      {
+        "creator_id": {
+          "_eq": "X-Hasura-User-Id"
+        }
+      },
+      {
+        "organization_id": {
+          "_in": "X-Hasura-Allowed-Organisations"
+        }
+      }
+    ]
+  }
 
 .. admonition:: Arrays in permission rules
 
-  The ability to use arrays and operators like ``contains`` or ``contained_by`` are currently work-in-progress
-  and will be available soon.
+   Support for using session variables for array operators like ``_in``, ``_nin``, ``_has_any_keys``,
+   ``_has_all_keys`` is only added in ``beta.3`` release.
 
+Format of session variables
+---------------------------
 
+Session variables are currently expected to be Strings and should be encoded as Postgres's literals for
+the relevant type.
 
+For example, in the above example, let's say ``creator_id`` and ``organisation_id`` columns are of
+type ``integer``, then the values of ``X-Hasura-User-Id`` and  ``X-Hasura-Allowed-Organisations`` should
+be of type ``integer`` and ``integer[]`` (an integer array) respectively. To pass say a value ``1`` for
+``X-Hasura-User-Id``, it'll be "``1``" and if the allowed organisations are ``1``, ``2`` and ``3``, then
+``X-Hasura-Allowed-Organisations`` will be "``{1,2,3}``". ``{}`` is the syntax for specifying
+`arrays in Postgres <https://www.postgresql.org/docs/current/arrays.html#ARRAYS-INPUT>`_.
 
+The types and their formats are detailed `here <https://www.postgresql.org/docs/current/datatype.html>`_. When
+in doubt about the Postgres format for a type, you can always test it in the SQL window. To check
+if ``s`` is a valid literal for type ``t`` then, you can check it as follows:
+
+.. code-block:: sql
+
+   select 's'::t;
+
+If the above command returns data, then ``s`` is a valid literal of type ``t``. For example, to check
+if ``{hello,world}`` is a valid format of type ``text[]``, you can run:
+
+.. code-block:: sql
+
+   select '{hello,world}'::text[];
+
+.. admonition:: JSON format
+
+   In future, we'll add support for passing session variables as JSON values where possible (i.e, auth
+   webhook and JWT but not in headers).
