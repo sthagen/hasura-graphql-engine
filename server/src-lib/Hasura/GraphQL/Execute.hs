@@ -11,6 +11,8 @@ module Hasura.GraphQL.Execute
   , getSubsOp
 
   , EP.PlanCache
+  , EP.mkPlanCacheOptions
+  , EP.PlanCacheOptions
   , EP.initPlanCache
   , EP.clearPlanCache
   , EP.dumpPlanCache
@@ -45,8 +47,7 @@ import           Hasura.Prelude
 import           Hasura.RQL.DDL.Headers
 import           Hasura.RQL.Types
 import           Hasura.Server.Context
-import           Hasura.Server.Utils                    (RequestId,
-                                                         filterRequestHeaders)
+import           Hasura.Server.Utils                    (RequestId, filterRequestHeaders)
 
 import qualified Hasura.GraphQL.Execute.LiveQuery       as EL
 import qualified Hasura.GraphQL.Execute.Plan            as EP
@@ -69,7 +70,7 @@ data GQExecPlan a
 -- | Execution context
 data ExecutionCtx
   = ExecutionCtx
-  { _ecxLogger          :: !L.Logger
+  { _ecxLogger          :: !(L.Logger L.Hasura)
   , _ecxSqlGenCtx       :: !SQLGenCtx
   , _ecxPgExecCtx       :: !PGExecCtx
   , _ecxPlanCache       :: !EP.PlanCache
@@ -127,7 +128,7 @@ getExecPlanPartial userInfo sc enableAL req = do
   -- check if query is in allowlist
   when enableAL checkQueryInAllowlist
 
-  (gCtx, _)  <- flip runStateT sc $ getGCtx role gCtxRoleMap
+  gCtx <- flip runCacheRT sc $ getGCtx role gCtxRoleMap
   queryParts <- flip runReaderT gCtx $ VQ.getQueryParts req
 
   let opDef = VQ.qpOpDef queryParts
@@ -383,7 +384,7 @@ execRemoteGQ reqId userInfo reqHdrs q rsi opDef = do
            , HTTP.responseTimeout = HTTP.responseTimeoutMicro (timeout * 1000000)
            }
 
-  liftIO $ logGraphqlQuery logger $ QueryLog q Nothing reqId
+  L.unLogger logger $ QueryLog q Nothing reqId
   res  <- liftIO $ try $ HTTP.httpLbs req manager
   resp <- either httpThrow return res
   let cookieHdrs = getCookieHdr (resp ^.. Wreq.responseHeader "Set-Cookie")
@@ -414,5 +415,4 @@ execRemoteGQ reqId userInfo reqHdrs q rsi opDef = do
 
     getCookieHdr = fmap (\h -> ("Set-Cookie", h))
 
-    mkRespHeaders hdrs =
-      map (\(k, v) -> Header (bsToTxt $ CI.original k, bsToTxt v)) hdrs
+    mkRespHeaders = map (\(k, v) -> Header (bsToTxt $ CI.original k, bsToTxt v))

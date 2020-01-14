@@ -1,6 +1,7 @@
 import sanitize from 'sanitize-filename';
 
 import { getSchemaBaseRoute } from '../../Common/utils/routesUtils';
+import { getRunSqlQuery } from '../../Common/utils/v1QueryUtils';
 import Endpoints, { globalCookiePolicy } from '../../../Endpoints';
 import requestAction from '../../../utils/requestAction';
 import defaultState from './DataState';
@@ -19,8 +20,6 @@ import returnMigrateUrl from './Common/getMigrateUrl';
 import { loadInconsistentObjects } from '../Settings/Actions';
 import { filterInconsistentMetadataObjects } from '../Settings/utils';
 import globals from '../../../Globals';
-
-import { COMPUTED_FIELDS_SUPPORT } from '../../../helpers/versionUtils';
 
 import {
   fetchTrackedTableReferencedFkQuery,
@@ -61,16 +60,6 @@ const MAKE_REQUEST = 'ModifyTable/MAKE_REQUEST';
 const REQUEST_SUCCESS = 'ModifyTable/REQUEST_SUCCESS';
 const REQUEST_ERROR = 'ModifyTable/REQUEST_ERROR';
 
-const useCompositeFnsNewCheck =
-  globals.featuresCompatibility &&
-  globals.featuresCompatibility[COMPUTED_FIELDS_SUPPORT];
-
-const compositeFnCheck = useCompositeFnsNewCheck
-  ? 'c'
-  : {
-    $ilike: '%composite%',
-  };
-
 const initQueries = {
   schemaList: {
     type: 'select',
@@ -101,8 +90,9 @@ const initQueries = {
         schema: 'hdb_catalog',
       },
       columns: ['function_name', 'function_schema', 'is_system_defined'],
+      order_by: [{ column: 'function_name', type: 'asc', nulls: 'last' }],
       where: {
-        function_schema: '',
+        function_schema: '', // needs to be set later
       },
     },
   },
@@ -128,11 +118,13 @@ const initQueries = {
           columns: ['table_schema', 'table_name'],
         },
       ],
+      order_by: [{ column: 'function_name', type: 'asc', nulls: 'last' }],
       where: {
-        function_schema: '',
+        function_schema: '', // needs to be set later
         has_variadic: false,
         returns_set: true,
-        return_type_type: compositeFnCheck, // COMPOSITE type
+        return_type_type: 'c', // COMPOSITE type
+        return_table_info: {},
         $or: [
           {
             function_type: {
@@ -165,15 +157,31 @@ const initQueries = {
         'return_type_name',
         'return_type_type',
         'returns_set',
+        {
+          name: 'return_table_info',
+          columns: ['table_schema', 'table_name'],
+        },
       ],
+      order_by: [{ column: 'function_name', type: 'asc', nulls: 'last' }],
       where: {
-        // TODO: set correct where
-        function_schema: '',
-        has_variadic: false,
-        returns_set: true,
-        return_type_type: compositeFnCheck, // COMPOSITE type
-        function_type: {
-          $ilike: '%volatile%',
+        function_schema: '', // needs to be set later
+        $not: {
+          has_variadic: false,
+          returns_set: true,
+          return_type_type: 'c', // COMPOSITE type
+          return_table_info: {},
+          $or: [
+            {
+              function_type: {
+                $ilike: '%stable%',
+              },
+            },
+            {
+              function_type: {
+                $ilike: '%immutable%',
+              },
+            },
+          ],
         },
       },
     },
@@ -366,7 +374,7 @@ const fetchDataInit = () => (dispatch, getState) => {
   );
 };
 
-const fetchFunctionInit = () => (dispatch, getState) => {
+const fetchFunctionInit = (schema = null) => (dispatch, getState) => {
   const url = Endpoints.getSchema;
   const body = {
     type: 'bulk',
@@ -378,10 +386,10 @@ const fetchFunctionInit = () => (dispatch, getState) => {
   };
 
   // set schema in queries
-  const currentSchema = getState().tables.currentSchema;
-  body.args[0].args.where.function_schema = currentSchema;
-  body.args[1].args.where.function_schema = currentSchema;
-  body.args[2].args.where.function_schema = currentSchema;
+  const fnSchema = schema || getState().tables.currentSchema;
+  body.args[0].args.where.function_schema = fnSchema;
+  body.args[1].args.where.function_schema = fnSchema;
+  body.args[2].args.where.function_schema = fnSchema;
 
   const options = {
     credentials: globalCookiePolicy,
@@ -389,10 +397,12 @@ const fetchFunctionInit = () => (dispatch, getState) => {
     headers: dataHeaders(getState),
     body: JSON.stringify(body),
   };
+
   return dispatch(requestAction(url, options)).then(
     data => {
       dispatch({ type: LOAD_FUNCTIONS, data: data[0] });
       dispatch({ type: LOAD_NON_TRACKABLE_FUNCTIONS, data: data[1] });
+
       let consistentFunctions = data[2];
       const { inconsistentObjects } = getState().metadata;
       if (inconsistentObjects.length > 0) {
@@ -540,25 +550,17 @@ const makeMigrationCall = (
 };
 
 const getBulkColumnInfoFetchQuery = schema => {
-  const fetchColumnTypes = {
-    type: 'run_sql',
-    args: {
-      sql: fetchColumnTypesQuery,
-    },
-  };
-  const fetchTypeDefaultValues = {
-    type: 'run_sql',
-    args: {
-      sql: fetchColumnDefaultFunctions(schema),
-    },
-  };
-
-  const fetchValidTypeCasts = {
-    type: 'run_sql',
-    args: {
-      sql: fetchColumnCastsQuery,
-    },
-  };
+  const fetchColumnTypes = getRunSqlQuery(fetchColumnTypesQuery, false, true);
+  const fetchTypeDefaultValues = getRunSqlQuery(
+    fetchColumnDefaultFunctions(schema),
+    false,
+    true
+  );
+  const fetchValidTypeCasts = getRunSqlQuery(
+    fetchColumnCastsQuery,
+    false,
+    true
+  );
 
   return {
     type: 'bulk',

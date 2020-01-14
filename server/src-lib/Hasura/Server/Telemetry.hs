@@ -5,14 +5,12 @@
 
 module Hasura.Server.Telemetry
   ( runTelemetry
-  , getDbId
   , mkTelemetryLog
   )
   where
 
 import           Control.Exception       (try)
 import           Control.Lens
-import           Data.IORef
 import           Data.List
 
 import           Hasura.HTTP
@@ -31,7 +29,6 @@ import qualified Data.ByteString.Lazy    as BL
 import qualified Data.HashMap.Strict     as Map
 import qualified Data.String.Conversions as CS
 import qualified Data.Text               as T
-import qualified Database.PG.Query       as Q
 import qualified Network.HTTP.Client     as HTTP
 import qualified Network.HTTP.Types      as HTTP
 import qualified Network.Wreq            as Wreq
@@ -95,16 +92,17 @@ mkPayload dbId instanceId version metrics = do
   where topic = bool "server" "server_test" isDevVersion
 
 runTelemetry
-  :: Logger
+  :: Logger Hasura
   -> HTTP.Manager
-  -> IORef (SchemaCache, SchemaCacheVer)
+  -> IO SchemaCache
+  -- ^ an action that always returns the latest schema cache
   -> Text
   -> InstanceId
   -> IO ()
-runTelemetry (Logger logger) manager cacheRef dbId instanceId = do
+runTelemetry (Logger logger) manager getSchemaCache dbId instanceId = do
   let options = wreqOptions manager []
   forever $ do
-    schemaCache <- fmap fst $ readIORef cacheRef
+    schemaCache <- getSchemaCache
     let metrics = computeMetrics schemaCache
     payload <- A.encode <$> mkPayload dbId instanceId currentVersion metrics
     logger $ debugLBS $ "metrics_info: " <> payload
@@ -129,10 +127,10 @@ runTelemetry (Logger logger) manager cacheRef dbId instanceId = do
 
 computeMetrics :: SchemaCache -> Metrics
 computeMetrics sc =
-  let nTables = countUserTables (isNothing . _tiViewInfo)
-      nViews = countUserTables (isJust . _tiViewInfo)
-      nEnumTables = countUserTables (isJust . _tiEnumValues)
-      allRels = join $ Map.elems $ Map.map (getRels . _tiFieldInfoMap) userTables
+  let nTables = countUserTables (isNothing . _tciViewInfo . _tiCoreInfo)
+      nViews = countUserTables (isJust . _tciViewInfo . _tiCoreInfo)
+      nEnumTables = countUserTables (isJust . _tciEnumValues . _tiCoreInfo)
+      allRels = join $ Map.elems $ Map.map (getRels . _tciFieldInfoMap . _tiCoreInfo) userTables
       (manualRels, autoRels) = partition riIsManual allRels
       relMetrics = RelationshipMetric (length manualRels) (length autoRels)
       rolePerms = join $ Map.elems $ Map.map permsOfTbl userTables
@@ -152,23 +150,14 @@ computeMetrics sc =
   in Metrics nTables nViews nEnumTables relMetrics permMetrics evtTriggers rmSchemas funcs
 
   where
-    userTables = Map.filter (not . isSystemDefined . _tiSystemDefined) $ scTables sc
+    userTables = Map.filter (not . isSystemDefined . _tciSystemDefined . _tiCoreInfo) $ scTables sc
     countUserTables predicate = length . filter predicate $ Map.elems userTables
 
     calcPerms :: (RolePermInfo -> Maybe a) -> [RolePermInfo] -> Int
     calcPerms fn perms = length $ catMaybes $ map fn perms
 
-    permsOfTbl :: TableInfo PGColumnInfo -> [(RoleName, RolePermInfo)]
+    permsOfTbl :: TableInfo -> [(RoleName, RolePermInfo)]
     permsOfTbl = Map.toList . _tiRolePermInfoMap
-
-
-getDbId :: Q.TxE QErr Text
-getDbId =
-  (runIdentity . Q.getRow) <$>
-  Q.withQE defaultTxErrorHandler
-  [Q.sql|
-    SELECT (hasura_uuid :: text) FROM hdb_catalog.hdb_version
-  |] () False
 
 
 -- | Logging related
@@ -205,8 +194,8 @@ instance A.ToJSON TelemetryHttpError where
              ]
 
 
-instance ToEngineLog TelemetryLog where
-  toEngineLog tl = (_tlLogLevel tl, ELTTelemetryLog, A.toJSON tl)
+instance ToEngineLog TelemetryLog Hasura where
+  toEngineLog tl = (_tlLogLevel tl, ELTInternal ILTTelemetry, A.toJSON tl)
 
 mkHttpError
   :: Text

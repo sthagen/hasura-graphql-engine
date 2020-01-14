@@ -29,8 +29,7 @@ import           Hasura.GraphQL.Resolve.Mutation
 import           Hasura.GraphQL.Resolve.Select
 import           Hasura.GraphQL.Validate.Field
 import           Hasura.GraphQL.Validate.Types
-import           Hasura.RQL.DML.Internal           (convPartialSQLExp,
-                                                    dmlTxErrorHandler,
+import           Hasura.RQL.DML.Internal           (convPartialSQLExp, dmlTxErrorHandler,
                                                     sessVarFromCurrentSetting)
 import           Hasura.RQL.DML.Mutation
 import           Hasura.RQL.GBoolExp               (toSQLBoolExp)
@@ -169,7 +168,7 @@ parseOnConflict
   -> m RI.ConflictClauseP1
 parseOnConflict tn updFiltrM allColMap val = withPathK "on_conflict" $
   flip withObject val $ \_ obj -> do
-    constraint <- RI.Constraint <$> parseConstraint obj
+    constraint <- RI.CTConstraint <$> parseConstraint obj
     updCols <- getUpdCols obj
     case updCols of
       [] -> return $ RI.CP1DoNothing $ Just constraint
@@ -244,7 +243,7 @@ mkInsertQ vn onConflictM insCols defVals role = do
 
 asSingleObject
   :: MonadError QErr m
-  => [ColVals] -> m (Maybe ColVals)
+  => [ColumnValues J.Value] -> m (Maybe (ColumnValues J.Value))
 asSingleObject = \case
   []  -> return Nothing
   [a] -> return $ Just a
@@ -252,7 +251,7 @@ asSingleObject = \case
 
 fetchFromColVals
   :: MonadError QErr m
-  => ColVals
+  => ColumnValues J.Value
   -> [PGColumnInfo]
   -> (PGColumnInfo -> a)
   -> m [(a, WithScalarType PGScalarValue)]
@@ -268,11 +267,13 @@ mkSelCTE
   :: MonadError QErr m
   => QualifiedTable
   -> [PGColumnInfo]
-  -> Maybe ColVals
+  -> Maybe (ColumnValues J.Value)
   -> m CTEExp
 mkSelCTE tn allCols colValM = do
-  selCTE <- mkSelCTEFromColVals tn allCols $ maybe [] pure colValM
+  selCTE <- mkSelCTEFromColVals parseFn tn allCols $ maybe [] pure colValM
   return $ CTEExp selCTE Seq.Empty
+  where
+    parseFn ty val = toTxtValue <$> parsePGScalarValue ty val
 
 execCTEExp
   :: Bool
@@ -301,7 +302,7 @@ validateInsert insCols objRels addCols = do
     <> " columns as their values are already being determined by parent insert"
 
   forM_ objRels $ \relInfo -> do
-    let lCols = map fst $ riMapping relInfo
+    let lCols = Map.keys $ riMapping relInfo
         relName = riName relInfo
         relNameTxt = relNameToTxt relName
         lColConflicts = lCols `intersect` (addCols <> insCols)
@@ -326,7 +327,7 @@ insertObjRel strfyNum role objRelIns =
     colValM <- asSingleObject colVals
     colVal <- onNothing colValM $ throw400 NotSupported errMsg
     retColsWithVals <- fetchFromColVals colVal rColInfos pgiColumn
-    let c = mergeListsWith mapCols retColsWithVals
+    let c = mergeListsWith (Map.toList mapCols) retColsWithVals
           (\(_, rCol) (col, _) -> rCol == col)
           (\(lCol, _) (_, cVal) -> (lCol, cVal))
     return (aRows, c)
@@ -338,7 +339,7 @@ insertObjRel strfyNum role objRelIns =
     mapCols = riMapping relInfo
     tn = riRTable relInfo
     allCols = _aiTableCols singleObjIns
-    rCols = map snd mapCols
+    rCols = Map.elems mapCols
     rColInfos = getColInfos rCols allCols
     errMsg = "cannot proceed to insert object relation "
              <> relName <<> " since insert to table "
@@ -363,7 +364,7 @@ insertArrRel
   -> Q.TxE QErr Int
 insertArrRel strfyNum role resCols arrRelIns =
     withPathK relNameTxt $ do
-    let addCols = mergeListsWith resCols colMapping
+    let addCols = mergeListsWith resCols (Map.toList colMapping)
                (\(col, _) (lCol, _) -> col == lCol)
                (\(_, colVal) (_, rCol) -> (rCol, colVal))
 
@@ -416,7 +417,7 @@ insertObj strfyNum role tn singleObjIns addCols = do
     AnnInsObj cols objRels arrRels = annObj
 
     arrRelDepCols = flip getColInfos allCols $
-      concatMap (map fst . riMapping . _riRelInfo) arrRels
+      concatMap (Map.keys . riMapping . _riRelInfo) arrRels
 
     withArrRels colValM = do
       colVal <- onNothing colValM $ throw400 NotSupported cannotInsArrRelErr
