@@ -185,6 +185,11 @@ const renderSorts = (orderBy, tableSchema, dispatch) => {
 class FilterQuery extends Component {
   componentDidMount() {
     const dispatch = this.props.dispatch;
+    if (!this.props.urlQuery) {
+      dispatch(setDefaultQuery(this.props.curQuery));
+      return;
+    }
+
     let urlFilters = [];
     if (typeof this.props.urlQuery.filter === 'string') {
       urlFilters = [this.props.urlQuery.filter];
@@ -264,13 +269,17 @@ class FilterQuery extends Component {
         >
           <div>
             <div
-              className={`${styles.queryBox} col-xs-6 ${styles.padd_left_remove}`}
+              className={`${styles.queryBox} col-xs-6 ${
+                styles.padd_left_remove
+              }`}
             >
               <span className={styles.subheading_text}>Filter</span>
               {renderWheres(whereAnd, tableSchema, dispatch)}
             </div>
             <div
-              className={`${styles.queryBox} col-xs-6 ${styles.padd_left_remove}`}
+              className={`${styles.queryBox} col-xs-6 ${
+                styles.padd_left_remove
+              }`}
             >
               <b className={styles.subheading_text}>Sort</b>
               {renderSorts(orderBy, tableSchema, dispatch)}
