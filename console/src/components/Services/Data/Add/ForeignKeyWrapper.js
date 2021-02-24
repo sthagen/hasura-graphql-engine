@@ -1,7 +1,7 @@
 import React from 'react';
 import ExpandableEditor from '../../../Common/Layout/ExpandableEditor/Editor';
-import ForeignKeySelector from '../Common/ReusableComponents/ForeignKeySelector';
-import { getForeignKeyConfig } from '../Common/ReusableComponents/utils';
+import ForeignKeySelector from '../Common/Components/ForeignKeySelector';
+import { getForeignKeyConfig } from '../Common/Components/utils';
 import { setForeignKeys, toggleFk, clearFkToggle } from './AddActions';
 
 const ForeignKeyWrapper = ({
@@ -43,7 +43,7 @@ const ForeignKeyWrapper = ({
       }
     });
 
-    const orderedSchemaList = schemaList.map(s => s.schema_name).sort();
+    const orderedSchemaList = schemaList.sort();
 
     // The content when the editor is expanded
     const expandedContent = () => (

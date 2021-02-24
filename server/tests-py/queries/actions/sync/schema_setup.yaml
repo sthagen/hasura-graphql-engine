@@ -1,5 +1,6 @@
 type: bulk
 args:
+
 - type: run_sql
   args:
     sql: |
@@ -9,10 +10,25 @@ args:
         email TEXT NOT NULL,
         is_admin BOOLEAN NOT NULL DEFAULT false
       );
+      CREATE TABLE "article"(
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        user_id INTEGER
+      );
+      INSERT INTO "article" (name, user_id) VALUES
+        ('foo', 1),
+        ('bar', 1),
+        ('bar', 1),
+        ('baz', 2);
 
 - type: track_table
   args:
     name: user
+    schema: public
+
+- type: track_table
+  args:
+    name: article
     schema: public
 
 - type: set_custom_types
@@ -25,6 +41,15 @@ args:
       - name: email
         type: String!
 
+    - name: InObject
+      fields:
+      - name: id
+        type: ID
+      - name: name
+        type: String
+      - name: age
+        type: Int
+
     objects:
     - name: UserId
       fields:
@@ -36,6 +61,18 @@ args:
         remote_table: user
         field_mapping:
           id: id
+      - name: articles
+        type: array
+        remote_table: article
+        field_mapping:
+          id: user_id
+
+    - name: OutObject
+      fields:
+      - name: id
+        type: ID! # For issue https://github.com/hasura/graphql-engine/issues/4061
+      - name: name
+        type: String
 
 - type: create_action
   args:
@@ -60,3 +97,53 @@ args:
         type: '[UserInput!]!'
       output_type: '[UserId]'
       handler: http://127.0.0.1:5593/create-users
+
+- type: create_action
+  args:
+    name: mirror
+    definition:
+      kind: synchronous
+      arguments:
+      - name: arg
+        type: InObject!
+      output_type: OutObject
+      handler: http://127.0.0.1:5593/mirror-action
+
+- type: create_action
+  args:
+    name: get_user_by_email
+    definition:
+      type: query
+      arguments:
+      - name: email
+        type: String!
+      output_type: UserId!
+      handler: http://127.0.0.1:5593/get-user-by-email
+
+- type: create_action
+  args:
+    name: get_users_by_email
+    definition:
+      type: query
+      arguments:
+      - name: email
+        type: String!
+      output_type: '[UserId]!'
+      handler: http://127.0.0.1:5593/get-users-by-email
+
+- type: create_select_permission
+  args:
+    table: user
+    role: user
+    permission:
+      columns:
+        - id
+        - name
+        - email
+      filter:
+        id: X-Hasura-User-Id
+
+- type: create_action_permission
+  args:
+    action: get_user_by_email
+    role: user

@@ -25,6 +25,12 @@ if [[ "$CIRCLE_BRANCH" = "release-"* ]]; then
     exit
 fi
 
+# always build commits tagged [force ci]
+if git log --format=%B -n 1 $CIRCLE_SHA | grep -q "\[force ci\]"; then
+  echo "Forcing CI run as requested"
+  exit
+fi
+
 # get the diff
 if [[ ! -z "$CIRCLE_COMPARE_URL" ]]; then
     # CIRCLE_COMPARE_URL is not empty, use it to get the diff
@@ -34,25 +40,25 @@ if [[ ! -z "$CIRCLE_COMPARE_URL" ]]; then
         COMMIT_RANGE=$(echo $CIRCLE_COMPARE_URL | sed 's:^.*/compare/::g')
     fi
     echo "Diff: $COMMIT_RANGE"
-    changes="$(git diff $COMMIT_RANGE --name-only -- . ':!scripts' ':!assets' ':!docs' ':!community' ':!install-manifests' ':!github' ':!*.md' ':!.ciignore' ':!.gitignore' ':!LICENSE')"
+    changes="$(git diff $COMMIT_RANGE --name-only -- . ':!scripts' ':!assets' ':!docs' ':!community' ':!install-manifests' ':!github' ':!*.md' ':!.ciignore' ':!.gitignore' ':!LICENSE' ':!.github')"
 elif [[ "$CIRCLE_BRANCH" == "master" ]]; then
     # CIRCLE_COMPARE_URL is not set, but branch is master, diff with last commit
     echo "Diff: HEAD~1"
-    changes="$(git diff HEAD~1 --name-only -- . ':!scripts' ':!assets' ':!docs' ':!community' ':!install-manifests' ':!github' ':!*.md' ':!.ciignore' ':!.gitignore' ':!LICENSE')"
+    changes="$(git diff HEAD~1 --name-only -- . ':!scripts' ':!assets' ':!docs' ':!community' ':!install-manifests' ':!github' ':!*.md' ':!.ciignore' ':!.gitignore' ':!LICENSE' ':!.github')"
 else
     # CIRCLE_COMPARE_URL is not set, branch is not master, diff with origin/master
     echo "Diff: origin/master..HEAD"
-    changes="$(git diff-tree --no-commit-id --name-only -r origin/master..HEAD -- . ':!scripts' ':!assets' ':!docs' ':!community' ':!install-manifests' ':!github' ':!*.md' ':!.ciignore' ':!.gitignore' ':!LICENSE')"
+    changes="$(git diff-tree --no-commit-id --name-only -r origin/master..HEAD -- . ':!scripts' ':!assets' ':!docs' ':!community' ':!install-manifests' ':!github' ':!*.md' ':!.ciignore' ':!.gitignore' ':!LICENSE' ':!.github')"
 fi
 
 echo "Changes in this build:"
 echo $changes
 echo
 
-if [[ ${#changes[@]} -gt 0 ]]; then
-	  # If there's still changes left, then we have stuff to build, leave the commit alone.
+if [[ ! -z "$changes" ]]; then
+	# If there's still changes left, then we have stuff to build, leave the commit alone.
     echo "Files that are not ignored present in commits, need to build, succeed the job"
-	  exit
+	exit
 fi
 
 echo "Only ignored files are present in commits, build is not required, write the skip_job file"

@@ -3,10 +3,10 @@ import React, { Component } from 'react';
 import Helmet from 'react-helmet';
 
 import Button from '../../../Common/Button/Button';
-import PrimaryKeySelector from '../Common/ReusableComponents/PrimaryKeySelector';
+import PrimaryKeySelector from '../Common/Components/PrimaryKeySelector';
 import ForeignKeyWrapper from './ForeignKeyWrapper';
 import UniqueKeyWrapper from './UniqueKeyWrapper';
-import FrequentlyUsedColumnSelector from '../Common/ReusableComponents/FrequentlyUsedColumnSelector';
+import FrequentlyUsedColumnSelector from '../Common/Components/FrequentlyUsedColumnSelector';
 
 import { showErrorNotification } from '../../Common/Notification';
 
@@ -14,8 +14,7 @@ import TableName from './TableName';
 import TableColumns from './TableColumns';
 import TableComment from './TableComment';
 
-import * as tooltip from './Tooltips';
-import OverlayTrigger from 'react-bootstrap/lib/OverlayTrigger';
+import CheckConstraints from './CheckConstraints';
 
 import {
   setTableName,
@@ -37,7 +36,7 @@ import { resetValidation } from './AddActions';
 import gqlPattern, {
   gqlTableErrorNotif,
   gqlColumnErrorNotif,
-} from '../Common/GraphQLValidation'; // TODO add the others
+} from '../Common/GraphQLValidation';
 
 import {
   tableNameNullNotif,
@@ -49,6 +48,13 @@ import {
 } from './AddWarning';
 
 import styles from '../../../Common/TableCommon/Table.scss';
+import ToolTip from '../../../Common/Tooltip/Tooltip';
+import {
+  foreignKeyDescription,
+  primaryKeyDescription,
+  uniqueKeyDescription,
+  checkConstraintsDescription,
+} from '../Common/TooltipMessages';
 
 /* AddTable is a wrapper which wraps
  *  1) Table Name input
@@ -103,6 +109,15 @@ class AddTable extends Component {
   onTableNameChange = e => {
     const { dispatch } = this.props;
     dispatch(setTableName(e.target.value));
+  };
+
+  trimTableName = tableName => {
+    const trimmedName = tableName ? tableName.trim() : tableName;
+    const { dispatch } = this.props;
+    if (tableName !== trimmedName) {
+      dispatch(setTableName(trimmedName));
+    }
+    return trimmedName;
   };
 
   onTableCommentChange = e => {
@@ -189,12 +204,12 @@ class AddTable extends Component {
     }
   }
 
-  tableNameEmptyCheck() {
-    return this.props.tableName !== null;
+  tableNameEmptyCheck(name) {
+    return name !== null;
   }
 
-  tableNameCheck() {
-    return gqlPattern.test(this.props.tableName);
+  tableNameCheck(name) {
+    return gqlPattern.test(name);
   }
 
   isModified(x) {
@@ -220,6 +235,20 @@ class AddTable extends Component {
       c = c.slice(0, c.length - 1);
     }
     return c;
+  }
+
+  trimColumnNames(columns) {
+    const trimmedColumns = columns.map((column, index) => {
+      const trimmedColumn = column.name.trim();
+      if (trimmedColumn !== column.name) {
+        this.props.dispatch(setColName(trimmedColumn, index, column.nullable));
+      }
+      return {
+        ...column,
+        name: trimmedColumn,
+      };
+    });
+    return trimmedColumns;
   }
 
   validateEnoughColumns(cols) {
@@ -291,11 +320,11 @@ class AddTable extends Component {
     return '';
   }
 
-  /* eslint-disable no-unused-vars */
-  isValidDefault(type, d) {
+  /* eslint-disable @typescript-eslint/no-unused-vars */
+  isValidDefault() {
     return true;
   }
-  /* eslint-enable no-unused-vars */
+  /* eslint-enable @typescript-eslint/no-unused-vars */
 
   /* punting for now
     isValidDefault(type, d) {
@@ -352,28 +381,39 @@ class AddTable extends Component {
   validateAndSubmit() {
     this.props.dispatch(resetValidation());
     const validColumns = this.trimEmptyColumns(this.props.columns);
+    // trim white spaces on table name.
+    const tableNameTrimmed = this.trimTableName(this.props.tableName);
+
+    // trim all validColumns names
+    const trimmedColumns = this.trimColumnNames(validColumns);
 
     if (
-      this.checkAndNotify(this.tableNameEmptyCheck(), tableNameNullNotif) &&
-      this.checkAndNotify(this.tableNameCheck(), gqlTableErrorNotif) &&
       this.checkAndNotify(
-        this.validateEnoughColumns(validColumns),
+        this.tableNameEmptyCheck(tableNameTrimmed),
+        tableNameNullNotif
+      ) &&
+      this.checkAndNotify(
+        this.tableNameCheck(tableNameTrimmed),
+        gqlTableErrorNotif
+      ) &&
+      this.checkAndNotify(
+        this.validateEnoughColumns(trimmedColumns),
         tableEnufColumnsNotif
       ) &&
       this.checkAndNotify(
-        this.validateColumnNames(validColumns),
+        this.validateColumnNames(trimmedColumns),
         gqlColumnErrorNotif
       ) &&
       this.checkAndNotify(
-        this.validateNoDupNames(validColumns),
+        this.validateNoDupNames(trimmedColumns),
         tableColumnNoDupsNotif
       ) &&
       this.checkAndNotify(
-        this.validateColumnTypes(validColumns),
+        this.validateColumnTypes(trimmedColumns),
         tableColumnTypesNotif
       ) &&
       this.checkAndNotify(
-        this.validateColumnDefaults(validColumns),
+        this.validateColumnDefaults(trimmedColumns),
         tableColumnDefaultsNotif
       ) &&
       this.checkAndNotify(this.minPrimaryKeyCheck(), tableMinPrimaryKeyNotif)
@@ -402,7 +442,10 @@ class AddTable extends Component {
       schemaList,
       columnDefaultFunctions,
       columnTypeCasts,
+      checkConstraints,
+      postgresVersion,
     } = this.props;
+
     const getCreateBtnText = () => {
       let createBtnText = 'Add Table';
       if (ongoingRequest) {
@@ -419,11 +462,9 @@ class AddTable extends Component {
 
     return (
       <div
-        className={`${styles.addTablesBody} ${styles.clear_fix} ${
-          styles.padd_left
-        }`}
+        className={`${styles.addTablesBody} ${styles.clear_fix} ${styles.padd_left}`}
       >
-        <Helmet title="Add Table - Data | Hasura" />
+        <Helmet title={`Add Table - Data | Hasura`} />
         <div className={styles.subHeader}>
           <h2 className={styles.heading_text}>Add a new table</h2>
           <div className="clearfix" />
@@ -453,18 +494,13 @@ class AddTable extends Component {
                 onSelect={setFreqUsedColumn}
                 action={'add'}
                 dispatch={dispatch}
+                postgresVersion={postgresVersion}
               />
             </div>
             <hr />
             <h4 className={styles.subheading_text}>
               Primary Key &nbsp; &nbsp;
-              <OverlayTrigger
-                placement="right"
-                overlay={tooltip.primaryKeyDescription}
-              >
-                <i className={'fa fa-question-circle'} aria-hidden="true" />
-              </OverlayTrigger>{' '}
-              &nbsp; &nbsp;
+              <ToolTip message={primaryKeyDescription} />
             </h4>
             <PrimaryKeySelector
               primaryKeys={primaryKeys}
@@ -475,13 +511,7 @@ class AddTable extends Component {
             <hr />
             <h4 className={styles.subheading_text}>
               Foreign Keys &nbsp; &nbsp;
-              <OverlayTrigger
-                placement="right"
-                overlay={tooltip.foreignKeyDescription}
-              >
-                <i className={'fa fa-question-circle'} aria-hidden="true" />
-              </OverlayTrigger>{' '}
-              &nbsp; &nbsp;
+              <ToolTip message={foreignKeyDescription} />
             </h4>
             <ForeignKeyWrapper
               allSchemas={allSchemas}
@@ -497,13 +527,7 @@ class AddTable extends Component {
             <hr />
             <h4 className={styles.subheading_text}>
               Unique Keys &nbsp; &nbsp;
-              <OverlayTrigger
-                placement="right"
-                overlay={tooltip.uniqueKeyDescription}
-              >
-                <i className={'fa fa-question-circle'} aria-hidden="true" />
-              </OverlayTrigger>{' '}
-              &nbsp; &nbsp;
+              <ToolTip message={uniqueKeyDescription} />
             </h4>
             <UniqueKeyWrapper
               allSchemas={allSchemas}
@@ -513,6 +537,15 @@ class AddTable extends Component {
               uniqueKeys={uniqueKeys}
               dispatch={dispatch}
               setUniqueKeys={setUniqueKeys}
+            />
+            <hr />
+            <h4 className={styles.subheading_text}>
+              Check Constraints &nbsp; &nbsp;
+              <ToolTip message={checkConstraintsDescription} />
+            </h4>
+            <CheckConstraints
+              constraints={checkConstraints}
+              dispatch={dispatch}
             />
             <hr />
             <TableComment onChange={this.onTableCommentChange} />
@@ -555,6 +588,7 @@ const mapStateToProps = state => ({
   columnTypeCasts: state.tables.columnTypeCasts,
   columnDataTypeFetchErr: state.tables.columnDataTypeFetchErr,
   schemaList: state.tables.schemaList,
+  postgresVersion: state.main.postgresVersion,
 });
 
 const addTableConnector = connect => connect(mapStateToProps)(AddTable);

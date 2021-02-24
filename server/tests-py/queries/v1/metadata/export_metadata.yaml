@@ -1,5 +1,5 @@
 description: Export metadata
-url: /v1/query
+url: /v1/metadata
 status: 200
 response:
   version: 2
@@ -30,6 +30,12 @@ response:
           schema: public
           name: fetch_articles
         table_argument: author_row
+    - name: test_session
+      definition:
+        function:
+          schema: public
+          name: test_session
+        session_argument: session
   functions:
   - function:
       schema: public

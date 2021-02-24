@@ -15,6 +15,7 @@ const webpackIsomorphicToolsPlugin = new WebpackIsomorphicToolsPlugin(
 
 const TerserPlugin = require('terser-webpack-plugin');
 const OptimizeCssAssetsPlugin = require('optimize-css-assets-webpack-plugin');
+const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
 
 const cleanOptions = {
   root: process.cwd(),
@@ -48,7 +49,7 @@ module.exports = {
         type: 'javascript/auto',
       },
       {
-        test: /\.jsx?$/,
+        test: /\.(j|t)sx?$/,
         exclude: /node_modules/,
         use: 'babel-loader',
       },
@@ -72,7 +73,14 @@ module.exports = {
         test: /\.scss$/,
         use: [
           MiniCssExtractPlugin.loader,
-          'css-loader?modules&importLoaders=2&sourceMap=false',
+          {
+            loader: 'css-loader',
+            options: {
+              importLoaders: 2,
+              sourceMap: false,
+              modules: {},
+            },
+          },
           'sass-loader?outputStyle=expanded&sourceMap=false&sourceMapContents=false',
         ],
       },
@@ -124,7 +132,7 @@ module.exports = {
   },
   resolve: {
     modules: ['src', 'node_modules'],
-    extensions: ['.json', '.js', '.jsx', '.mjs'],
+    extensions: ['.json', '.js', '.jsx', '.mjs', '.ts', '.tsx'],
   },
   optimization: {
     minimize: true,
@@ -195,6 +203,13 @@ module.exports = {
         NODE_ENV: JSON.stringify('production'),
       },
       CONSOLE_ASSET_VERSION: Date.now().toString(),
+      'process.hrtime': () => null,
+    }),
+    new ForkTsCheckerWebpackPlugin({
+      compilerOptions: {
+        allowJs: true,
+        checkJs: false,
+      },
     }),
   ],
 };

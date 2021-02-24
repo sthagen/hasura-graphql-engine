@@ -8,6 +8,8 @@ import (
 type MetadataDriver interface {
 	SetMetadataPlugins(types.MetadataPlugins)
 
+	EnableCheckMetadataConsistency(bool)
+
 	ExportMetadata() (map[string][]byte, error)
 
 	ResetMetadata() error
@@ -21,8 +23,6 @@ type MetadataDriver interface {
 	BuildMetadata() (yaml.MapSlice, error)
 
 	ApplyMetadata() error
-
-	Query(data interface{}) error
 }
 
 type InconsistentMetadataInterface interface {

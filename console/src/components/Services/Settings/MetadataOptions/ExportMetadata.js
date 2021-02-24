@@ -6,8 +6,11 @@ import {
   showSuccessNotification,
   showErrorNotification,
 } from '../../Common/Notification';
-import { exportMetadata } from '../Actions';
-import { downloadObjectAsJsonFile } from '../../../Common/utils/jsUtils';
+import {
+  downloadObjectAsJsonFile,
+  getCurrTimeForFileName,
+} from '../../../Common/utils/jsUtils';
+import { exportMetadata } from '../../../../metadata/actions';
 
 class ExportMetadata extends Component {
   constructor() {
@@ -31,11 +34,19 @@ class ExportMetadata extends Component {
       this.setState({ isExporting: true });
 
       const successCallback = data => {
-        downloadObjectAsJsonFile('metadata', data);
+        const fileName =
+          'hasura_metadata_' + getCurrTimeForFileName() + '.json';
+
+        downloadObjectAsJsonFile(fileName, data);
 
         this.setState({ isExporting: false });
 
-        dispatch(showSuccessNotification('Metadata exported successfully!'));
+        dispatch(
+          showSuccessNotification(
+            'Metadata exported successfully!',
+            `Metadata file "${fileName}"`
+          )
+        );
       };
 
       const errorCallback = error => {

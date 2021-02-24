@@ -1,48 +1,35 @@
 package hasuradb
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"os"
+
+	"github.com/hasura/graphql-engine/cli/internal/hasura"
 
 	gyaml "github.com/ghodss/yaml"
 	"github.com/hasura/graphql-engine/cli/metadata/types"
 	"github.com/hasura/graphql-engine/cli/migrate/database"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
-
-	"github.com/oliveagle/jsonpath"
 )
 
 func (h *HasuraDB) SetMetadataPlugins(plugins types.MetadataPlugins) {
 	h.config.Plugins = plugins
 }
 
-func (h *HasuraDB) ExportMetadata() (map[string][]byte, error) {
-	query := HasuraQuery{
-		Type: "export_metadata",
-		Args: HasuraArgs{},
-	}
+func (h *HasuraDB) EnableCheckMetadataConsistency(enabled bool) {
+	h.config.enableCheckMetadataConsistency = enabled
+}
 
-	resp, body, err := h.sendv1Query(query)
+func (h *HasuraDB) ExportMetadata() (map[string][]byte, error) {
+	resp, err := h.metadataops.ExportMetadata()
 	if err != nil {
-		h.logger.Debug(err)
 		return nil, err
 	}
-	h.logger.Debug("response: ", string(body))
-
-	var horror HasuraError
-	if resp.StatusCode != http.StatusOK {
-		err = json.Unmarshal(body, &horror)
-		if err != nil {
-			h.logger.Debug(err)
-			return nil, fmt.Errorf("failed parsing json: %v; response from API: %s", err, string(body))
-		}
-		return nil, horror.Error(h.config.isCMD)
-	}
-
 	var c yaml.MapSlice
-	err = yaml.Unmarshal(body, &c)
+	err = yaml.NewDecoder(resp).Decode(&c)
 	if err != nil {
 		h.logger.Debug(err)
 		return nil, err
@@ -62,81 +49,30 @@ func (h *HasuraDB) ExportMetadata() (map[string][]byte, error) {
 }
 
 func (h *HasuraDB) ResetMetadata() error {
-	query := HasuraInterfaceQuery{
-		Type: "clear_metadata",
-		Args: HasuraArgs{},
-	}
-
-	resp, body, err := h.sendv1Query(query)
+	_, err := h.metadataops.ClearMetadata()
 	if err != nil {
-		h.logger.Debug(err)
 		return err
-	}
-	h.logger.Debug("response: ", string(body))
-
-	var horror HasuraError
-	if resp.StatusCode != http.StatusOK {
-		err = json.Unmarshal(body, &horror)
-		if err != nil {
-			h.logger.Debug(err)
-			return fmt.Errorf("failed parsing json: %v; response from API: %s", err, string(body))
-		}
-		return horror.Error(h.config.isCMD)
 	}
 	return nil
 }
 
 // ReloadMetadata - Reload Hasura GraphQL Engine metadata on the database
 func (h *HasuraDB) ReloadMetadata() error {
-	query := HasuraInterfaceQuery{
-		Type: "reload_metadata",
-		Args: HasuraArgs{},
-	}
-
-	resp, body, err := h.sendv1Query(query)
+	_, err := h.metadataops.ReloadMetadata()
 	if err != nil {
-		h.logger.Debug(err)
 		return err
-	}
-	h.logger.Debug("response: ", string(body))
-
-	var horror HasuraError
-	if resp.StatusCode != http.StatusOK {
-		err = json.Unmarshal(body, &horror)
-		if err != nil {
-			h.logger.Debug(err)
-			return fmt.Errorf("failed parsing json: %v; response from API: %s", err, string(body))
-		}
-		return horror.Error(h.config.isCMD)
 	}
 	return nil
 }
 
 func (h *HasuraDB) GetInconsistentMetadata() (bool, []database.InconsistentMetadataInterface, error) {
-	query := HasuraInterfaceQuery{
-		Type: "get_inconsistent_metadata",
-		Args: HasuraArgs{},
-	}
-
-	resp, body, err := h.sendv1Query(query)
+	resp, err := h.metadataops.GetInconsistentMetadataReader()
 	if err != nil {
-		h.logger.Debug(err)
 		return false, nil, err
-	}
-	h.logger.Debug("response: ", string(body))
-
-	var horror HasuraError
-	if resp.StatusCode != http.StatusOK {
-		err = json.Unmarshal(body, &horror)
-		if err != nil {
-			h.logger.Debug(err)
-			return false, nil, err
-		}
-		return false, nil, horror.Error(h.config.isCMD)
 	}
 
 	var inMet InconsistentMetadata
-	err = json.Unmarshal(body, &inMet)
+	err = json.NewDecoder(resp).Decode(&inMet)
 	if err != nil {
 		return false, nil, err
 	}
@@ -148,26 +84,9 @@ func (h *HasuraDB) GetInconsistentMetadata() (bool, []database.InconsistentMetad
 }
 
 func (h *HasuraDB) DropInconsistentMetadata() error {
-	query := HasuraInterfaceQuery{
-		Type: "drop_inconsistent_metadata",
-		Args: HasuraArgs{},
-	}
-
-	resp, body, err := h.sendv1Query(query)
+	_, err := h.metadataops.DropInconsistentMetadata()
 	if err != nil {
-		h.logger.Debug(err)
 		return err
-	}
-	h.logger.Debug("response: ", string(body))
-
-	var horror HasuraError
-	if resp.StatusCode != http.StatusOK {
-		err = json.Unmarshal(body, &horror)
-		if err != nil {
-			h.logger.Debug(err)
-			return err
-		}
-		return horror.Error(h.config.isCMD)
 	}
 	return nil
 }
@@ -177,6 +96,10 @@ func (h *HasuraDB) BuildMetadata() (yaml.MapSlice, error) {
 	for _, plg := range h.config.Plugins {
 		err := plg.Build(&tmpMeta)
 		if err != nil {
+			if os.IsNotExist(errors.Cause(err)) {
+				h.logger.Debugf("metadata file for %s was not found, assuming an empty file", plg.Name())
+				continue
+			}
 			return tmpMeta, errors.Wrap(err, fmt.Sprintf("cannot build %s from metadata", plg.Name()))
 		}
 	}
@@ -196,84 +119,25 @@ func (h *HasuraDB) ApplyMetadata() error {
 	if err != nil {
 		return err
 	}
-	var obj interface{}
-	err = json.Unmarshal(jbyt, &obj)
-	if err != nil {
-		return err
-	}
-	query := HasuraInterfaceBulk{
-		Type: "bulk",
-		Args: []interface{}{
-			HasuraInterfaceQuery{
-				Type: "clear_metadata",
-				Args: HasuraArgs{},
-			},
-			HasuraInterfaceQuery{
-				Type: "replace_metadata",
-				Args: obj,
-			},
-		},
-	}
-	resp, body, err := h.sendv1Query(query)
-	if err != nil {
-		h.logger.Debug(err)
-		return err
-	}
-	h.logger.Debug("response: ", string(body))
-
-	var horror HasuraError
-	if resp.StatusCode != http.StatusOK {
-		err = json.Unmarshal(body, &horror)
+	if h.v2metadataops != nil {
+		var metadata interface{}
+		if err := json.Unmarshal(jbyt, &metadata); err != nil {
+			return err
+		}
+		_, err = h.v2metadataops.V2ReplaceMetadata(hasura.V2ReplaceMetadataArgs{
+			AllowInconsistentMetadata: true,
+			Metadata:                  metadata,
+		})
 		if err != nil {
 			h.logger.Debug(err)
-			return fmt.Errorf("failed parsing json: %v; response from API: %s", err, string(body))
+			return err
 		}
-
-		if horror.Path != "" {
-			jsonData, err := json.Marshal(query)
-			if err != nil {
-				return err
-			}
-			var metadataQuery interface{}
-			err = json.Unmarshal(jsonData, &metadataQuery)
-			if err != nil {
-				return err
-			}
-			lookup, err := jsonpath.JsonPathLookup(metadataQuery, horror.Path)
-			if err == nil {
-				queryData, err := json.MarshalIndent(lookup, "", "  ")
-				if err != nil {
-					return err
-				}
-				horror.migrationQuery = "offending object: \n\r\n\r" + string(queryData)
-			}
-		}
-		return horror.Error(h.config.isCMD)
-	}
-	return nil
-}
-
-func (h *HasuraDB) Query(data interface{}) error {
-	query := HasuraInterfaceQuery{
-		Type: "bulk",
-		Args: data,
-	}
-
-	resp, body, err := h.sendv1Query(query)
-	if err != nil {
-		h.logger.Debug(err)
-		return err
-	}
-	h.logger.Debug("response: ", string(body))
-
-	var horror HasuraError
-	if resp.StatusCode != http.StatusOK {
-		err = json.Unmarshal(body, &horror)
+	} else {
+		_, err := h.metadataops.ReplaceMetadata(bytes.NewReader(jbyt))
 		if err != nil {
 			h.logger.Debug(err)
-			return fmt.Errorf("failed parsing json: %v; response from API: %s", err, string(body))
+			return err
 		}
-		return horror.Error(h.config.isCMD)
 	}
 	return nil
 }

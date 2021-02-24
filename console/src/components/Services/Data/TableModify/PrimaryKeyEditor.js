@@ -1,16 +1,13 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   DELETE_PK_WARNING,
   setPrimaryKeys,
   savePrimaryKeys,
 } from './ModifyActions';
-import PrimaryKeySelector from '../Common/ReusableComponents/PrimaryKeySelector';
+import PrimaryKeySelector from '../Common/Components/PrimaryKeySelector';
 import ExpandableEditor from '../../../Common/Layout/ExpandableEditor/Editor';
 import { showSuccessNotification } from '../../Common/Notification';
-import {
-  getUkeyPkeyConfig,
-  getKeyDef,
-} from '../Common/ReusableComponents/utils';
+import { getUkeyPkeyConfig, getKeyDef } from '../Common/Components/utils';
 
 import styles from './ModifyTable.scss';
 
@@ -58,7 +55,9 @@ const PrimaryKeyEditor = ({
   );
 
   // label next to the button when the editor is expanded
-  const pkEditorExpandedLabel = () => <div>{pkConfigText}</div>;
+  const pkEditorExpandedLabel = () => (
+    <div data-test="pk-config-text">{pkConfigText}</div>
+  );
 
   // expanded editor content
   const pkEditorExpanded = () => (
@@ -97,6 +96,10 @@ const PrimaryKeyEditor = ({
       savePrimaryKeys(tableSchema.table_name, currentSchema, pkConstraintName)
     );
   };
+
+  useEffect(() => {
+    setPkEditState();
+  }, [columns.length]);
 
   // remove
   const onRemove = () => {

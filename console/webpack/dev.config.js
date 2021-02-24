@@ -1,5 +1,3 @@
-// require('babel-polyfill');
-
 // Webpack config for development
 const fs = require('fs');
 const path = require('path');
@@ -10,15 +8,12 @@ const host = hasuraConfig.hmrHost;
 const port = hasuraConfig.hmrPort;
 
 const autoprefixer = require('autoprefixer');
-const BundleAnalyzerPlugin = require('webpack-bundle-analyzer')
-  .BundleAnalyzerPlugin;
 
 const WebpackIsomorphicToolsPlugin = require('webpack-isomorphic-tools/plugin');
 const webpackIsomorphicToolsPlugin = new WebpackIsomorphicToolsPlugin(
   require('./webpack-isomorphic-tools')
 );
-
-// const { UnusedFilesWebpackPlugin } = require('unused-files-webpack-plugin');
+const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
 
 module.exports = {
   mode: 'development',
@@ -56,7 +51,7 @@ module.exports = {
         type: 'javascript/auto',
       },
       {
-        test: /\.jsx?$/,
+        test: /\.(j|t)sx?$/,
         exclude: /node_modules/,
         use: 'babel-loader',
       },
@@ -80,7 +75,15 @@ module.exports = {
         test: /\.scss$/,
         use: [
           'style-loader',
-          'css-loader?modules&importLoaders=2&sourceMap&localIdentName=[local]___[hash:base64:5]',
+          {
+            loader: 'css-loader',
+            options: {
+              importLoaders: 2,
+              modules: {
+                localIdentName: '[local]___[hash:base64:5]',
+              },
+            },
+          },
           'sass-loader?outputStyle=expanded&sourceMap',
         ],
       },
@@ -132,7 +135,7 @@ module.exports = {
   },
   resolve: {
     modules: ['src', 'node_modules'],
-    extensions: ['.json', '.js', '.jsx', '.mjs'],
+    extensions: ['.json', '.js', '.jsx', '.mjs', '.ts', '.tsx'],
   },
   plugins: [
     // hot reload
@@ -156,7 +159,14 @@ module.exports = {
     // set global consts
     new webpack.DefinePlugin({
       CONSOLE_ASSET_VERSION: Date.now().toString(),
+      'process.hrtime': () => null,
     }),
     webpackIsomorphicToolsPlugin.development(),
+    new ForkTsCheckerWebpackPlugin({
+      compilerOptions: {
+        allowJs: true,
+        checkJs: false,
+      },
+    }),
   ],
 };

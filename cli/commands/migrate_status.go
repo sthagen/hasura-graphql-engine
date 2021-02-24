@@ -3,11 +3,13 @@ package commands
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"text/tabwriter"
+
+	"github.com/hasura/graphql-engine/cli/util"
 
 	"github.com/hasura/graphql-engine/cli"
 	"github.com/hasura/graphql-engine/cli/migrate"
-	"github.com/hasura/graphql-engine/cli/util"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -27,26 +29,27 @@ func newMigrateStatusCmd(ec *cli.ExecutionContext) *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.EC.Spin("Fetching migration status...")
+			opts.Database = ec.Database
 			status, err := opts.Run()
 			opts.EC.Spinner.Stop()
 			if err != nil {
 				return err
 			}
 			buf := printStatus(status)
-			fmt.Println(buf.String())
+			fmt.Fprintf(os.Stdout, "%s", buf)
 			return nil
 		},
 	}
-
 	return migrateStatusCmd
 }
 
 type MigrateStatusOptions struct {
-	EC *cli.ExecutionContext
+	EC       *cli.ExecutionContext
+	Database string
 }
 
 func (o *MigrateStatusOptions) Run() (*migrate.Status, error) {
-	migrateDrv, err := newMigrate(o.EC, true)
+	migrateDrv, err := migrate.NewMigrate(o.EC, true, o.Database)
 	if err != nil {
 		return nil, err
 	}

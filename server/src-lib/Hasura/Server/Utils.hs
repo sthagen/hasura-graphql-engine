@@ -1,10 +1,13 @@
-{-# LANGUAGE TypeApplications #-}
 module Hasura.Server.Utils where
 
+import           Hasura.Prelude
+
+import           Control.Lens               ((^..))
 import           Data.Aeson
+import           Data.Aeson.Internal
 import           Data.Char
-import           Data.List                  (find)
-import           Language.Haskell.TH.Syntax (Lift)
+import           Data.Text.Extended
+import           Language.Haskell.TH.Syntax (Q, TExp)
 import           System.Environment
 import           System.Exit
 import           System.Process
@@ -14,66 +17,70 @@ import qualified Data.CaseInsensitive       as CI
 import qualified Data.HashSet               as Set
 import qualified Data.List.NonEmpty         as NE
 import qualified Data.Text                  as T
-import qualified Data.Text.Encoding         as TE
 import qualified Data.Text.IO               as TI
 import qualified Data.UUID                  as UUID
 import qualified Data.UUID.V4               as UUID
+import qualified Data.Vector                as V
 import qualified Language.Haskell.TH.Syntax as TH
 import qualified Network.HTTP.Client        as HC
 import qualified Network.HTTP.Types         as HTTP
+import qualified Network.Wreq               as Wreq
 import qualified Text.Regex.TDFA            as TDFA
-import qualified Text.Regex.TDFA.ByteString as TDFA
+import qualified Text.Regex.TDFA.ReadRegex  as TDFA
+import qualified Text.Regex.TDFA.TDFA       as TDFA
 
-import           Hasura.Prelude
+import           Hasura.RQL.Instances       ()
 
-newtype RequestId
-  = RequestId { unRequestId :: Text }
-  deriving (Show, Eq, ToJSON, FromJSON)
-
-jsonHeader :: (T.Text, T.Text)
+jsonHeader :: HTTP.Header
 jsonHeader = ("Content-Type", "application/json; charset=utf-8")
 
-sqlHeader :: (T.Text, T.Text)
+sqlHeader :: HTTP.Header
 sqlHeader = ("Content-Type", "application/sql; charset=utf-8")
 
-htmlHeader :: (T.Text, T.Text)
+htmlHeader :: HTTP.Header
 htmlHeader = ("Content-Type", "text/html; charset=utf-8")
 
-gzipHeader :: (T.Text, T.Text)
+gzipHeader :: HTTP.Header
 gzipHeader = ("Content-Encoding", "gzip")
 
-brHeader :: (T.Text, T.Text)
-brHeader = ("Content-Encoding", "br")
-
-userRoleHeader :: T.Text
+userRoleHeader :: IsString a => a
 userRoleHeader = "x-hasura-role"
 
-deprecatedAccessKeyHeader :: T.Text
+deprecatedAccessKeyHeader :: IsString a => a
 deprecatedAccessKeyHeader = "x-hasura-access-key"
 
-adminSecretHeader :: T.Text
+adminSecretHeader :: IsString a => a
 adminSecretHeader = "x-hasura-admin-secret"
 
-userIdHeader :: T.Text
+userIdHeader :: IsString a => a
 userIdHeader = "x-hasura-user-id"
 
-requestIdHeader :: T.Text
+requestIdHeader :: IsString a => a
 requestIdHeader = "x-request-id"
 
-getRequestHeader :: B.ByteString -> [HTTP.Header] -> Maybe B.ByteString
+useBackendOnlyPermissionsHeader :: IsString a => a
+useBackendOnlyPermissionsHeader = "x-hasura-use-backend-only-permissions"
+
+getRequestHeader :: HTTP.HeaderName -> [HTTP.Header] -> Maybe B.ByteString
 getRequestHeader hdrName hdrs = snd <$> mHeader
   where
-    mHeader = find (\h -> fst h == CI.mk hdrName) hdrs
+    mHeader = find (\h -> fst h == hdrName) hdrs
 
-getRequestId :: (MonadIO m) => [HTTP.Header] -> m RequestId
-getRequestId headers =
-  -- generate a request id for every request if the client has not sent it
-  case getRequestHeader (txtToBs requestIdHeader) headers  of
-    Nothing    -> RequestId <$> liftIO generateFingerprint
-    Just reqId -> return $ RequestId $ bsToTxt reqId
+parseStringAsBool :: String -> Either String Bool
+parseStringAsBool t
+  | map toLower t `elem` truthVals = Right True
+  | map toLower t `elem` falseVals = Right False
+  | otherwise = Left errMsg
+  where
+    truthVals = ["true", "t", "yes", "y"]
+    falseVals = ["false", "f", "no", "n"]
+
+    errMsg = " Not a valid boolean text. " ++ "True values are "
+             ++ show truthVals ++ " and  False values are " ++ show falseVals
+             ++ ". All values are case insensitive"
 
 -- Get an env var during compile time
-getValFromEnvOrScript :: String -> String -> TH.Q (TH.TExp String)
+getValFromEnvOrScript :: String -> String -> Q (TExp String)
 getValFromEnvOrScript n s = do
   maybeVal <- TH.runIO $ lookupEnv n
   case maybeVal of
@@ -81,7 +88,7 @@ getValFromEnvOrScript n s = do
     Nothing  -> runScript s
 
 -- Run a shell script during compile time
-runScript :: FilePath -> TH.Q (TH.TExp String)
+runScript :: FilePath -> Q (TExp String)
 runScript fp = do
   TH.addDependentFile fp
   fileContent <- TH.runIO $ TI.readFile fp
@@ -92,25 +99,11 @@ runScript fp = do
     ++ show exitCode ++ " and with error : " ++ stdErr
   [|| stdOut ||]
 
--- find duplicates
-duplicates :: Ord a => [a] -> [a]
-duplicates = mapMaybe greaterThanOne . group . sort
-  where
-    greaterThanOne l = bool Nothing (Just $ head l) $ length l > 1
-
--- regex related
-matchRegex :: B.ByteString -> Bool -> T.Text -> Either String Bool
-matchRegex regex caseSensitive src =
-  fmap (`TDFA.match` TE.encodeUtf8 src) compiledRegexE
-  where
-    compOpt = TDFA.defaultCompOpt
-      { TDFA.caseSensitive = caseSensitive
-      , TDFA.multiline = True
-      , TDFA.lastStarGreedy = True
-      }
-    execOption = TDFA.defaultExecOpt {TDFA.captureGroups = False}
-    compiledRegexE = TDFA.compile compOpt execOption regex
-
+-- | Quotes a regex using Template Haskell so syntax errors can be reported at compile-time.
+quoteRegex :: TDFA.CompOption -> TDFA.ExecOption -> String -> Q (TExp TDFA.Regex)
+quoteRegex compOption execOption regexText = do
+  regex <- TDFA.parseRegex regexText `onLeft` (fail . show)
+  [|| TDFA.patternToRegex regex compOption execOption ||]
 
 fmapL :: (a -> a') -> Either a b -> Either a' b
 fmapL fn (Left e) = Left (fn e)
@@ -139,7 +132,7 @@ httpExceptToJSON e = case e of
   _        -> toJSON $ show e
   where
     showProxy (HC.Proxy h p) =
-      "host: " <> bsToTxt h <> " port: " <> T.pack (show p)
+      "host: " <> bsToTxt h <> " port: " <> tshow p
 
 -- ignore the following request headers from the client
 commonClientHeadersIgnored :: (IsString a) => [a]
@@ -159,19 +152,28 @@ commonResponseHeadersIgnored =
   , "Content-Type", "Content-Length"
   ]
 
-isUserVar :: Text -> Bool
-isUserVar = T.isPrefixOf "x-hasura-" . T.toLower
+isSessionVariable :: Text -> Bool
+isSessionVariable = T.isPrefixOf "x-hasura-" . T.toLower
+
+isReqUserId :: Text -> Bool
+isReqUserId = (== "req_user_id") . T.toLower
 
 mkClientHeadersForward :: [HTTP.Header] -> [HTTP.Header]
 mkClientHeadersForward reqHeaders =
-  xForwardedHeaders <> (filterUserVars . filterRequestHeaders) reqHeaders
+  xForwardedHeaders <> (filterSessionVariables . filterRequestHeaders) reqHeaders
   where
-    filterUserVars = filter (\(k, _) -> not $ isUserVar $ bsToTxt $ CI.original k)
+    filterSessionVariables = filter (\(k, _) -> not $ isSessionVariable $ bsToTxt $ CI.original k)
     xForwardedHeaders = flip mapMaybe reqHeaders $ \(hdrName, hdrValue) ->
       case hdrName of
         "Host"       -> Just ("X-Forwarded-Host", hdrValue)
         "User-Agent" -> Just ("X-Forwarded-User-Agent", hdrValue)
         _            -> Nothing
+
+mkSetCookieHeaders :: Wreq.Response a -> HTTP.ResponseHeaders
+mkSetCookieHeaders resp =
+  map (headerName,) $ resp ^.. Wreq.responseHeader headerName
+  where
+    headerName = "Set-Cookie"
 
 filterRequestHeaders :: [HTTP.Header] -> [HTTP.Header]
 filterRequestHeaders =
@@ -200,7 +202,7 @@ applyFirst f (x:xs) = f x: xs
 data APIVersion
   = VIVersion1
   | VIVersion2
-  deriving (Show, Eq, Lift)
+  deriving (Show, Eq)
 
 instance ToJSON APIVersion where
   toJSON VIVersion1 = toJSON @Int 1
@@ -214,13 +216,13 @@ instance FromJSON APIVersion where
       2 -> return VIVersion2
       i -> fail $ "expected 1 or 2, encountered " ++ show i
 
-englishList :: NonEmpty Text -> Text
-englishList = \case
+englishList :: Text -> NonEmpty Text -> Text
+englishList joiner = \case
   one :| []    -> one
-  one :| [two] -> one <> " and " <> two
+  one :| [two] -> one <> " " <> joiner <> " " <> two
   several      ->
     let final :| initials = NE.reverse several
-    in T.intercalate ", " (reverse initials) <> ", and " <> final
+    in commaSeparated (reverse initials) <> ", " <> joiner <> " " <> final
 
 makeReasonMessage :: [a] -> (a -> Text) -> Text
 makeReasonMessage errors showError =
@@ -228,3 +230,16 @@ makeReasonMessage errors showError =
     [singleError] -> "because " <> showError singleError
     _ -> "for the following reasons:\n" <> T.unlines
          (map (("  • " <>) . showError) errors)
+
+executeJSONPath :: JSONPath -> Value -> IResult Value
+executeJSONPath jsonPath = iparse (valueParser jsonPath)
+  where
+    valueParser path value = case path of
+      []                      -> pure value
+      (pathElement:remaining) -> parseWithPathElement pathElement value >>=
+                                 ((<?> pathElement) . valueParser remaining)
+      where
+        parseWithPathElement = \case
+                  Key k   -> withObject "Object" (.: k)
+                  Index i -> withArray "Array" $
+                             maybe (fail "Array index out of range") pure . (V.!? i)

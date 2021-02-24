@@ -2,13 +2,24 @@ import { defaultViewState } from '../DataState';
 import Endpoints, { globalCookiePolicy } from '../../../../Endpoints';
 import requestAction from 'utils/requestAction';
 import filterReducer from './FilterActions';
-import { findTableFromRel } from '../utils';
 import {
   showSuccessNotification,
   showErrorNotification,
 } from '../../Common/Notification';
 import dataHeaders from '../Common/Headers';
 import { getConfirmation } from '../../../Common/utils/jsUtils';
+import {
+  getBulkDeleteQuery,
+  getSelectQuery,
+  getDeleteQuery,
+  getRunSqlQuery,
+} from '../../../Common/utils/v1QueryUtils';
+import { COUNT_LIMIT } from '../constants';
+import {
+  generateTableDef,
+  dataSource,
+  findTableFromRel,
+} from '../../../../dataSources';
 
 /* ****************** View actions *************/
 const V_SET_DEFAULTS = 'ViewTable/V_SET_DEFAULTS';
@@ -21,19 +32,12 @@ const V_REQUEST_PROGRESS = 'ViewTable/V_REQUEST_PROGRESS';
 const V_EXPAND_ROW = 'ViewTable/V_EXPAND_ROW';
 const V_COLLAPSE_ROW = 'ViewTable/V_COLLAPSE_ROW';
 
+const V_COUNT_REQUEST_SUCCESS = 'ViewTable/V_COUNT_REQUEST_SUCCESS';
+const V_COUNT_REQUEST_ERROR = 'ViewTable/V_COUNT_REQUEST_SUCCESS';
+
 const FETCHING_MANUAL_TRIGGER = 'ViewTable/FETCHING_MANUAL_TRIGGER';
 const FETCH_MANUAL_TRIGGER_SUCCESS = 'ViewTable/FETCH_MANUAL_TRIGGER_SUCCESS';
 const FETCH_MANUAL_TRIGGER_FAIL = 'ViewTable/FETCH_MANUAL_TRIGGER_SUCCESS';
-
-const UPDATE_TRIGGER_ROW = 'ViewTable/UPDATE_TRIGGER_ROW';
-const UPDATE_TRIGGER_FUNCTION = 'ViewTable/UPDATE_TRIGGER_FUNCTION';
-
-// const V_ADD_WHERE;
-// const V_REMOVE_WHERE;
-// const V_SET_LIMIT;
-// const V_SET_OFFSET;
-// const V_ADD_SORT;
-// const V_REMOVE_SORT;
 
 /* ****************** action creators *************/
 
@@ -46,38 +50,38 @@ const vCollapseRow = () => ({
   type: V_COLLAPSE_ROW,
 });
 
-const vSetDefaults = () => ({ type: V_SET_DEFAULTS });
+const vSetDefaults = limit => ({ type: V_SET_DEFAULTS, limit });
 
-const vMakeRequest = () => {
+const vMakeRowsRequest = () => {
   return (dispatch, getState) => {
-    const state = getState();
+    const {
+      currentTable: originalTable,
+      currentSchema,
+      currentDataSource,
+      view,
+    } = getState().tables;
+
     const url = Endpoints.query;
-    const originalTable = getState().tables.currentTable;
     dispatch({ type: V_REQUEST_PROGRESS, data: true });
 
     const requestBody = {
       type: 'bulk',
+      source: currentDataSource,
       args: [
-        {
-          type: 'select',
-          args: {
-            ...state.tables.view.query,
-            table: {
-              name: state.tables.currentTable,
-              schema: getState().tables.currentSchema,
-            },
-          },
-        },
-        {
-          type: 'count',
-          args: {
-            ...state.tables.view.query,
-            table: {
-              name: state.tables.currentTable,
-              schema: getState().tables.currentSchema,
-            },
-          },
-        },
+        getSelectQuery(
+          'select',
+          generateTableDef(originalTable, currentSchema),
+          view.query.columns,
+          view.query.where,
+          view.query.offset,
+          view.query.limit,
+          view.query.order_by,
+          currentDataSource
+        ),
+        getRunSqlQuery(
+          dataSource.getEstimateCountQuery(currentSchema, originalTable),
+          currentDataSource
+        ),
       ],
     };
     const options = {
@@ -89,12 +93,21 @@ const vMakeRequest = () => {
     return dispatch(requestAction(url, options)).then(
       data => {
         const currentTable = getState().tables.currentTable;
-        if (originalTable === currentTable) {
+        const estimatedCount =
+          data.length > 1 && data[0].result > 1 && data.result[1].length
+            ? data[1].result[1][0]
+            : null;
+
+        // in case table has changed before count load
+        if (currentTable === originalTable) {
           Promise.all([
             dispatch({
               type: V_REQUEST_SUCCESS,
               data: data[0],
-              count: data[1].count,
+              estimatedCount:
+                estimatedCount !== null
+                  ? parseInt(data[1]?.result[1][0], 10)
+                  : null,
             }),
             dispatch({ type: V_REQUEST_PROGRESS, data: false }),
           ]);
@@ -111,61 +124,138 @@ const vMakeRequest = () => {
     );
   };
 };
-
-const fetchManualTriggers = tableName => {
+const vMakeExportRequest = () => {
   return (dispatch, getState) => {
-    const url = Endpoints.getSchema;
-    const body = {
-      type: 'select',
-      args: {
-        table: {
-          name: 'event_triggers',
-          schema: 'hdb_catalog',
-        },
-        columns: ['*'],
-        order_by: {
-          column: 'name',
-          type: 'asc',
-          nulls: 'last',
-        },
-        where: {
-          table_name: tableName,
-        },
-      },
+    const {
+      currentTable: originalTable,
+      currentSchema,
+      view,
+      currentDataSource,
+    } = getState().tables;
+
+    const url = Endpoints.query;
+
+    const requestBody = {
+      type: 'bulk',
+      args: [
+        getSelectQuery(
+          'select',
+          generateTableDef(originalTable, currentSchema),
+          view.query.columns,
+          view.query.where,
+          null,
+          null,
+          view.query.order_by,
+          currentDataSource
+        ),
+        getRunSqlQuery(
+          dataSource.getEstimateCountQuery(currentSchema, originalTable)
+        ),
+      ],
+    };
+    const options = {
+      method: 'POST',
+      body: JSON.stringify(requestBody),
+      headers: dataHeaders(getState),
+      credentials: globalCookiePolicy,
+    };
+    return new Promise((resolve, reject) => {
+      dispatch(requestAction(url, options))
+        .then(data => {
+          resolve(data);
+        })
+        .catch(reject);
+    });
+  };
+};
+const vMakeCountRequest = () => {
+  return (dispatch, getState) => {
+    const {
+      currentTable: originalTable,
+      currentSchema,
+      view,
+      currentDataSource,
+    } = getState().tables;
+    const url = Endpoints.query;
+
+    const selectQuery = getSelectQuery(
+      'count',
+      generateTableDef(originalTable, currentSchema),
+      view.query.columns,
+      view.query.where,
+      view.query.offset,
+      view.query.limit,
+      view.query.order_by,
+      currentDataSource
+    );
+
+    let queries = [selectQuery];
+
+    if (dataSource.getStatementTimeoutSql) {
+      queries = [
+        getRunSqlQuery(dataSource.getStatementTimeoutSql(2), currentDataSource),
+        ...queries,
+      ];
+    }
+
+    const requestBody = {
+      type: 'bulk',
+      source: currentDataSource,
+      args: queries,
     };
 
     const options = {
-      credentials: globalCookiePolicy,
       method: 'POST',
+      body: JSON.stringify(requestBody),
       headers: dataHeaders(getState),
-      body: JSON.stringify(body),
+      credentials: globalCookiePolicy,
     };
-
-    dispatch({ type: FETCHING_MANUAL_TRIGGER });
 
     return dispatch(requestAction(url, options)).then(
       data => {
-        // Filter only triggers whose configuration has `enable_manual` key as true
-        const manualTriggers = data.filter(trigger => {
-          const triggerDef = trigger.configuration.definition;
+        if (data.length > 1) {
+          const currentTable = getState().tables.currentTable;
 
-          return (
-            Object.keys(triggerDef).includes('enable_manual') &&
-            triggerDef.enable_manual
-          );
-        });
-
-        dispatch({ type: FETCH_MANUAL_TRIGGER_SUCCESS, data: manualTriggers });
+          // in case table has changed before count load
+          if (currentTable === originalTable) {
+            dispatch({
+              type: V_COUNT_REQUEST_SUCCESS,
+              count: data[1].count,
+            });
+          }
+        }
       },
       error => {
-        dispatch({ type: FETCH_MANUAL_TRIGGER_FAIL, data: error });
-        console.error('Failed to load triggers' + JSON.stringify(error));
+        dispatch({
+          type: V_COUNT_REQUEST_ERROR,
+        });
+
+        if (!dataSource.isTimeoutError(error)) {
+          dispatch(
+            showErrorNotification('Count query failed!', error.error, error)
+          );
+        }
       }
     );
   };
 };
 
-const deleteItem = pkClause => {
+const vMakeTableRequests = () => (dispatch, getState) => {
+  dispatch(vMakeRowsRequest()).then(() => {
+    const { estimatedCount } = getState().tables.view;
+    if (estimatedCount > COUNT_LIMIT) {
+      dispatch({
+        type: V_COUNT_REQUEST_SUCCESS,
+        count: estimatedCount,
+        isEstimated: true,
+      });
+    } else {
+      dispatch(vMakeCountRequest());
+    }
+  });
+};
+
+const deleteItem = (pkClause, tableName, tableSchema) => {
   return (dispatch, getState) => {
     const confirmMessage =
       'This will permanently delete this row from this table';
@@ -174,19 +264,12 @@ const deleteItem = pkClause => {
       return;
     }
 
-    const state = getState();
+    const source = getState().tables.currentDataSource;
 
     const url = Endpoints.query;
-    const reqBody = {
-      type: 'delete',
-      args: {
-        table: {
-          name: state.tables.currentTable,
-          schema: state.tables.currentSchema,
-        },
-        where: pkClause,
-      },
-    };
+
+    const reqBody = getDeleteQuery(pkClause, tableName, tableSchema, source);
+
     const options = {
       method: 'POST',
       body: JSON.stringify(reqBody),
@@ -195,7 +278,7 @@ const deleteItem = pkClause => {
     };
     dispatch(requestAction(url, options)).then(
       data => {
-        dispatch(vMakeRequest());
+        dispatch(vMakeTableRequests());
         dispatch(
           showSuccessNotification(
             'Row deleted!',
@@ -210,12 +293,49 @@ const deleteItem = pkClause => {
   };
 };
 
+const deleteItems = (pkClauses, tableName, tableSchema) => {
+  return (dispatch, getState) => {
+    const confirmMessage = 'This will permanently delete rows from this table';
+    const isOk = getConfirmation(confirmMessage);
+    if (!isOk) {
+      return;
+    }
+    const source = getState().tables.currentDataSource;
+
+    const reqBody = {
+      type: 'bulk',
+      source,
+      args: getBulkDeleteQuery(pkClauses, tableName, tableSchema, source),
+    };
+    const options = {
+      method: 'POST',
+      body: JSON.stringify(reqBody),
+      headers: dataHeaders(getState),
+      credentials: globalCookiePolicy,
+    };
+    dispatch(requestAction(Endpoints.query, options)).then(
+      data => {
+        const affected = data.reduce((acc, d) => acc + d.affected_rows, 0);
+        dispatch(vMakeTableRequests());
+        dispatch(
+          showSuccessNotification('Rows deleted!', 'Affected rows: ' + affected)
+        );
+      },
+      err => {
+        dispatch(
+          showErrorNotification('Deleting rows failed!', err.error, err)
+        );
+      }
+    );
+  };
+};
+
 const vExpandRel = (path, relname, pk) => {
   return dispatch => {
     // Modify the query (UI will automatically change)
     dispatch({ type: V_EXPAND_REL, path, relname, pk });
     // Make a request
-    return dispatch(vMakeRequest());
+    return dispatch(vMakeTableRequests());
   };
 };
 const vCloseRel = (path, relname) => {
@@ -223,7 +343,7 @@ const vCloseRel = (path, relname) => {
     // Modify the query (UI will automatically change)
     dispatch({ type: V_CLOSE_REL, path, relname });
     // Make a request
-    return dispatch(vMakeRequest());
+    return dispatch(vMakeTableRequests());
   };
 };
 /* ************ helpers ************************/
@@ -443,7 +563,11 @@ const viewReducer = (tableName, currentSchema, schemas, viewState, action) => {
         ...defaultViewState,
         query: {
           columns: currentColumns,
-          limit: 10,
+          limit: action.limit || 10,
+        },
+        curFilter: {
+          ...defaultViewState.curFilter,
+          limit: action.limit || 10,
         },
         activePath: [tableName],
         rows: [],
@@ -501,9 +625,25 @@ const viewReducer = (tableName, currentSchema, schemas, viewState, action) => {
         ),
       };
     case V_REQUEST_SUCCESS:
-      return { ...viewState, rows: action.data, count: action.count };
+      return {
+        ...viewState,
+        rows: action.data,
+        estimatedCount: action.estimatedCount,
+      };
     case V_REQUEST_PROGRESS:
       return { ...viewState, isProgressing: action.data };
+    case V_COUNT_REQUEST_SUCCESS:
+      return {
+        ...viewState,
+        count: action.count,
+        isCountEstimated: action.isEstimated === true,
+      };
+    case V_COUNT_REQUEST_ERROR:
+      return {
+        ...viewState,
+        count: null,
+        isCountEstimated: false,
+      };
     case V_EXPAND_ROW:
       return {
         ...viewState,
@@ -533,17 +673,6 @@ const viewReducer = (tableName, currentSchema, schemas, viewState, action) => {
         ongoingRequest: false,
         lastError: action.data,
       };
-    case UPDATE_TRIGGER_ROW:
-      return {
-        ...viewState,
-        triggeredRow: action.data,
-      };
-
-    case UPDATE_TRIGGER_FUNCTION:
-      return {
-        ...viewState,
-        triggeredFunction: action.data,
-      };
     default:
       return viewState;
   }
@@ -551,15 +680,14 @@ const viewReducer = (tableName, currentSchema, schemas, viewState, action) => {
 
 export default viewReducer;
 export {
-  fetchManualTriggers,
   vSetDefaults,
-  vMakeRequest,
   vExpandRel,
   vCloseRel,
   vExpandRow,
   vCollapseRow,
   V_SET_ACTIVE,
   deleteItem,
-  UPDATE_TRIGGER_ROW,
-  UPDATE_TRIGGER_FUNCTION,
+  deleteItems,
+  vMakeTableRequests,
+  vMakeExportRequest,
 };

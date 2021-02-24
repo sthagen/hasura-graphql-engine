@@ -33,6 +33,10 @@ def pytest_addoption(parser):
         help="Run Test cases for insecure https webhook"
     )
     parser.addoption(
+        "--test-webhook-request-context", action="store_true",
+        help="Run Test cases for testing webhook request context"
+    )
+    parser.addoption(
         "--hge-jwt-key-file", metavar="HGE_JWT_KEY_FILE", help="File containting the private key used to encode jwt tokens using RS512 algorithm", required=False
     )
     parser.addoption(
@@ -80,6 +84,13 @@ def pytest_addoption(parser):
         default=False,
         required=False,
         help="Run testcases for logging"
+    )
+
+    parser.addoption(
+        "--test-function-permissions",
+        action="store_true",
+        required=False,
+        help="Run manual function permission tests"
     )
 
     parser.addoption(
@@ -136,6 +147,26 @@ This option may result in test failures if the schema has to change between the 
         help="When used along with collect-only, it will write the list of upgrade tests into the file specified"
     )
 
+    parser.addoption(
+        "--test-unauthorized-role",
+        action="store_true",
+        help="Run testcases for unauthorized role",
+    )
+
+    parser.addoption(
+        "--enable-remote-schema-permissions",
+        action="store_true",
+        default=False,
+        help="Flag to indicate if the graphql-engine has enabled remote schema permissions",
+    )
+
+    parser.addoption(
+        "--redis-url",
+        metavar="REDIS_URL",
+        help="redis url for cache server",
+        default=False
+    )
+
 #By default,
 #1) Set default parallelism to one
 #2) Set test grouping to by filename (--dist=loadfile)
@@ -157,7 +188,7 @@ def pytest_configure(config):
         if not config.getoption('--pg-urls'):
             print("pg-urls should be specified")
         config.hge_url_list = config.getoption('--hge-urls')
-        config.pg_url_list =  config.getoption('--pg-urls')
+        config.pg_url_list = config.getoption('--pg-urls')
         config.hge_ctx_gql_server = HGECtxGQLServer(config.hge_url_list)
         if config.getoption('-n', default=None):
             xdist_threads = config.getoption('-n')
@@ -240,7 +271,6 @@ def hge_ctx(request):
         # TODO this breaks things (https://github.com/pytest-dev/pytest-xdist/issues/86)
         #      so at least make sure the real error gets printed (above)
         pytest.exit(str(e))
-
     yield hge_ctx  # provide the fixture value
     print("teardown hge_ctx")
     hge_ctx.teardown()
@@ -257,7 +287,12 @@ def evts_webhook(request):
     web_server.join()
 
 @pytest.fixture(scope='module')
-def actions_webhook(hge_ctx):
+def actions_fixture(hge_ctx):
+    pg_version = hge_ctx.pg_version
+    if pg_version < 100000: # version less than 10.0
+        pytest.skip('Actions are not supported on Postgres version < 10')
+
+    # Start actions' webhook server
     webhook_httpd = ActionsWebhookServer(hge_ctx, server_address=('127.0.0.1', 5593))
     web_server = threading.Thread(target=webhook_httpd.serve_forever)
     web_server.start()
@@ -265,6 +300,29 @@ def actions_webhook(hge_ctx):
     webhook_httpd.shutdown()
     webhook_httpd.server_close()
     web_server.join()
+
+@pytest.fixture(scope='class')
+def functions_permissions_fixtures(hge_ctx):
+    if not hge_ctx.function_permissions:
+        pytest.skip('These tests are meant to be run with --test-function-permissions set')
+        return
+
+@pytest.fixture(scope='class')
+def scheduled_triggers_evts_webhook(request):
+    webhook_httpd = EvtsWebhookServer(server_address=('127.0.0.1', 5594))
+    web_server = threading.Thread(target=webhook_httpd.serve_forever)
+    web_server.start()
+    yield webhook_httpd
+    webhook_httpd.shutdown()
+    webhook_httpd.server_close()
+    web_server.join()
+
+@pytest.fixture(scope='class')
+def gql_server(request, hge_ctx):
+    server = HGECtxGQLServer(request.config.getoption('--pg-urls'), 5991)
+    yield server
+    server.teardown()
+
 
 @pytest.fixture(scope='class')
 def ws_client(request, hge_ctx):
