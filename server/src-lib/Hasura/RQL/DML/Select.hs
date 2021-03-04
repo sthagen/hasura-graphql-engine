@@ -76,7 +76,7 @@ convSelCol fieldInfoMap _ (SCExtRel rn malias selQ) = do
   let pgWhenRelErr = "only relationships can be expanded"
   relInfo <- withPathK "name" $
     askRelType fieldInfoMap rn pgWhenRelErr
-  let (RelInfo _ _ _ relTab _ _) = relInfo
+  let (RelInfo _ _ _ relTab _ _ _) = relInfo
   (rfim, rspi) <- fetchRelDet rn relTab
   resolvedSelQ <- resolveStar rfim rspi selQ
   return [ECRel rn malias resolvedSelQ]
@@ -271,7 +271,7 @@ convExtRel fieldInfoMap relName mAlias selQ sessVarBldr prepValBldr = do
   -- Point to the name key
   relInfo <- withPathK "name" $
     askRelType fieldInfoMap relName pgWhenRelErr
-  let (RelInfo _ relTy colMapping relTab _ _) = relInfo
+  let (RelInfo _ relTy colMapping relTab _ _ _) = relInfo
   (relCIM, relSPI) <- fetchRelDet relName relTab
   annSel <- convSelectQ relTab relCIM relSPI selQ sessVarBldr prepValBldr
   case relTy of
@@ -334,7 +334,7 @@ phaseTwo =
 runSelect
   :: ( QErrM m, UserInfoM m, CacheRM m
      , HasServerConfigCtx m, MonadIO m, MonadBaseControl IO m
-     , Tracing.MonadTrace m
+     , Tracing.MonadTrace m, MetadataM m
      )
   => SelectQuery -> m EncJSON
 runSelect q = do

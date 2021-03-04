@@ -297,7 +297,7 @@ const AddRelationship = ({
   );
 };
 
-const supportedDrivers = ['postgres'];
+const supportedDrivers = ['postgres', 'mssql'];
 
 const Relationships = ({
   tableName,
@@ -483,19 +483,21 @@ const Relationships = ({
               Table Relationships
               <ToolTip message={'Relationships to tables / views'} />
               &nbsp;
-              <KnowMoreLink href="https://hasura.io/docs/1.0/graphql/manual/schema/table-relationships/index.html" />
+              <KnowMoreLink href="https://hasura.io/docs/latest/graphql/core/schema/table-relationships/index.html" />
             </h4>
             {addedRelationshipsView}
             {getAddRelSection()}
           </div>
-          <div className={`${styles.padd_left_remove} col-xs-10 col-md-10`}>
-            <RemoteRelationships
-              relationships={existingRemoteRelationships}
-              reduxDispatch={dispatch}
-              table={tableSchema}
-              remoteSchemas={remoteSchemas}
-            />
-          </div>
+          {currentDriver === 'postgres' ? (
+            <div className={`${styles.padd_left_remove} col-xs-10 col-md-10`}>
+              <RemoteRelationships
+                relationships={existingRemoteRelationships}
+                reduxDispatch={dispatch}
+                table={tableSchema}
+                remoteSchemas={remoteSchemas}
+              />
+            </div>
+          ) : null}
         </div>
         <div className={`${styles.fixed} hidden`}>{alert}</div>
       </div>
