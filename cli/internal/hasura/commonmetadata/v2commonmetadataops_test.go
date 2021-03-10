@@ -42,6 +42,7 @@ func TestClientCommonMetadataOps_V2ReplaceMetadata(t *testing.T) {
     "sources": [
         {
             "name": "default",
+			"kind": "postgres",
            	"tables": [
                         {
                             "table": {
@@ -83,7 +84,7 @@ func TestClientCommonMetadataOps_V2ReplaceMetadata(t *testing.T) {
                 "schema": "default",
                 "name": "test"
             },
-            "reason": "no such table/view exists in postgres: \"default.test\"",
+            "reason": "no such table/view exists in source: \"default.test\"",
             "type": "table"
         }
     ]
@@ -108,6 +109,7 @@ func TestClientCommonMetadataOps_V2ReplaceMetadata(t *testing.T) {
     "sources": [
         {
             "name": "default",
+			"kind": "postgres",
            	"tables": [], 
             "configuration": {
                 "connection_info": {

@@ -4,7 +4,7 @@
 
 .. _metadata_api_sources:
 
-Metadata API Reference: Databases (v1.4 and above)
+Metadata API Reference: Databases (v2.0 and above)
 ==================================================
 
 .. contents:: Table of contents
@@ -16,6 +16,11 @@ Introduction
 ------------
 
 Add/remove databases in Hasura GraphQL engine.
+
+.. admonition:: Supported from
+
+  The metadata API is supported for versions ``v2.0.0`` and above and replaces the older
+  :ref:`schema/metadata API <schema_metadata_apis>`.
 
 .. _pg_add_source:
 
@@ -38,7 +43,9 @@ Add a database with name ``pg1``:
       "name": "pg1",
       "configuration": {
         "connection_info": {
-          "database_url": "<db-connection-string>",
+          "database_url": {
+             "from_env": "<DB_URL_ENV_VAR>"
+           },
           "pool_settings": {
             "max_connections": 50,
             "idle_timeout": 180,

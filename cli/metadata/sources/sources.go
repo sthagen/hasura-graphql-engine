@@ -1,20 +1,18 @@
 package sources
 
 import (
-  "bytes"
-  "fmt"
-  "io/ioutil"
-  "os"
-  "path/filepath"
+	"bytes"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 
-  "github.com/hasura/graphql-engine/cli/metadata/tables"
+	"github.com/sirupsen/logrus"
 
-  "github.com/sirupsen/logrus"
-
-  "github.com/goccy/go-yaml"
-  "github.com/hasura/graphql-engine/cli"
-  goyaml "gopkg.in/yaml.v2"
-  v3yaml "gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
+	"github.com/hasura/graphql-engine/cli"
+	goyaml "gopkg.in/yaml.v2"
+	v3yaml "gopkg.in/yaml.v3"
 )
 
 const (
@@ -26,6 +24,7 @@ const (
 
 type SourceWithNormalFields struct {
 	Name          string      `yaml:"name"`
+	Kind          string      `yaml:"kind"`
 	Configuration interface{} `yaml:"configuration"`
 }
 type Source struct {
@@ -59,7 +58,7 @@ func (t *SourceConfig) CreateFiles() error {
 	}
 	path := filepath.Join(t.MetadataDir, sourcesDirectory, fileName)
 	if err := os.MkdirAll(filepath.Dir(path), 0744); err != nil {
-	  return err
+		return err
 	}
 	err = ioutil.WriteFile(path, data, 0644)
 	if err != nil {
@@ -99,7 +98,7 @@ func (t *SourceConfig) Build(metadata *goyaml.MapSlice) error {
 			var tablesKey interface{}
 			err = v3yaml.Unmarshal(tableNodeBytes, newSourcesYamlDecoder(
 				sourcesYamlDecoderOpts{
-					IncludeTagBaseDirectory: filepath.Join(t.MetadataDir, sourcesDirectory, source.Name, tablesDirectory),
+					IncludeTagBaseDirectory: filepath.Join(t.MetadataDir, sourcesDirectory),
 				},
 				&tablesKey,
 			))
@@ -125,7 +124,7 @@ func (t *SourceConfig) Build(metadata *goyaml.MapSlice) error {
 			var functionsKey interface{}
 			err = v3yaml.Unmarshal(functionsNodeBytes, newSourcesYamlDecoder(
 				sourcesYamlDecoderOpts{
-					IncludeTagBaseDirectory: filepath.Join(t.MetadataDir, sourcesDirectory, source.Name, functionsDirectory),
+					IncludeTagBaseDirectory: filepath.Join(t.MetadataDir, sourcesDirectory),
 				},
 				&functionsKey,
 			))
@@ -239,8 +238,22 @@ func (t *SourceConfig) Export(metadata goyaml.MapSlice) (map[string][]byte, erro
 			functionFilePath := filepath.Join(t.MetadataDir, sourcesDirectory, source.Name, functionsDirectory, functionFileName)
 			files[functionFilePath] = b
 		}
-		source.Tables = tableTags
-		source.Functions = functionTags
+		tableTagsFilePath := filepath.Join(t.MetadataDir, sourcesDirectory, source.Name, tablesDirectory, "tables.yaml")
+		tableTagsBytes, err := yaml.Marshal(tableTags)
+		if err != nil {
+			return nil, fmt.Errorf("building contents for %v: %w", tableTagsFilePath, err)
+		}
+		files[tableTagsFilePath] = tableTagsBytes
+
+		functionsTagsFilePath := filepath.Join(t.MetadataDir, sourcesDirectory, source.Name, functionsDirectory, "functions.yaml")
+		functionTagsBytes, err := yaml.Marshal(functionTags)
+		if err != nil {
+			return nil, fmt.Errorf("building contents for %v: %w", functionsTagsFilePath, err)
+		}
+		files[functionsTagsFilePath] = functionTagsBytes
+
+		source.Tables = fmt.Sprintf("!include %s", filepath.Join(source.Name, tablesDirectory, "tables.yaml"))
+		source.Functions = fmt.Sprintf("!include %s", filepath.Join(source.Name, functionsDirectory, "functions.yaml"))
 	}
 
 	sourcesYamlBytes, err := yaml.Marshal(sources)
@@ -248,15 +261,6 @@ func (t *SourceConfig) Export(metadata goyaml.MapSlice) (map[string][]byte, erro
 		return nil, err
 	}
 	files[filepath.Join(t.MetadataDir, sourcesDirectory, fileName)] = sourcesYamlBytes
-
-	// clear old tables.yaml and functions.yaml files if exists
-	if f, _ := os.Stat(filepath.Join(t.MetadataDir, tables.MetadataFilename)); f != nil {
-		os.Remove(filepath.Join(t.MetadataDir, tables.MetadataFilename))
-	}
-	if f, _ := os.Stat(filepath.Join(t.MetadataDir, tables.MetadataFilename)); f != nil {
-		os.Remove(filepath.Join(t.MetadataDir, tables.MetadataFilename))
-	}
-
 	return files, nil
 }
 

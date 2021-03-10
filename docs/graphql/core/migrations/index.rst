@@ -22,7 +22,7 @@ a dev -> staging -> production environment promotion scenario.
 .. note::
 
   This documentation is for Hasura migrations ``config v3``, supported from
-  ``v2.0-alpha.1``. (See :ref:`upgrade guide <migrations_upgrade_v3>`).
+  ``v2.0.0-alpha.1``. (See :ref:`upgrade guide <migrations_upgrade_v3>`).
 
   For ``config v2``, see :ref:`migrations_v2`.
 
@@ -82,7 +82,7 @@ Reference documentation
 - :ref:`Metadata format <metadata_format>`
 
 .. toctree::
-  :maxdepth: 1
+  :maxdepth: 10
   :hidden:
 
   Setting up migrations <migrations-setup>
@@ -92,3 +92,7 @@ Reference documentation
   Upgrading to config v3 <upgrade-v3>
   Config v2 <config-v2/index>
   Config v1 <config-v1/index>
+
+.. admonition:: Additional Resources
+
+  Hasura Database Schema Migrations - `Watch Webinar <https://hasura.io/events/webinar/hasura-database-schema-migrations/?pg=docs&plcmt=body&cta=watch-webinar&tech=>`__.

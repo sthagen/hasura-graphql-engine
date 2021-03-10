@@ -1,15 +1,14 @@
 package scripts
 
 import (
-	"io/ioutil"
 	"path/filepath"
 	"regexp"
 
-	"github.com/fatih/color"
-	"github.com/goccy/go-yaml"
-	"github.com/goccy/go-yaml/parser"
+	"github.com/hasura/graphql-engine/cli/internal/metadatautil"
+
 	"github.com/hasura/graphql-engine/cli/internal/hasura"
 
+	"github.com/fatih/color"
 	"github.com/hasura/graphql-engine/cli/migrate"
 
 	"github.com/hasura/graphql-engine/cli/internal/statestore"
@@ -50,13 +49,26 @@ func UpdateProjectV3(opts UpgradeToMuUpgradeProjectToMultipleSourcesOpts) error 
 		- Update config file and version
 	*/
 
-	// Validate config version is
+	// pre checks
 	if opts.EC.Config.Version != cli.V2 {
 		return fmt.Errorf("project should be using config V2 to be able to update to V3")
 	}
+	if !opts.EC.HasMetadataV3 {
+		return fmt.Errorf("unsupported server version %v, config V3 is supported only on server with metadata version >= 3", opts.EC.Version.Server)
+	}
+	if r, err := opts.EC.APIClient.V1Metadata.GetInconsistentMetadata(); err != nil {
+		return fmt.Errorf("determing server metadata inconsistency: %w", err)
+	} else {
+		if !r.IsConsistent {
+			return fmt.Errorf("cannot continue: metadata is inconsistent on the server")
+		}
+	}
 
-	opts.Logger.Warn("The upgrade process will make some changes to your project directory, It is advised to create a backup project directory before continuing")
-	opts.Logger.Warn("This script will rewrite the project metadata with metadata on server")
+	opts.Logger.Infof("The upgrade process will make some changes to your project directory, It is advised to create a backup project directory before continuing")
+	opts.Logger.Warn(`Config V3 is expected to be used with servers >=v2.0.0-alpha.1`)
+	opts.Logger.Warn(`During the update process CLI uses the server as the source of truth, so make sure your server is upto date`)
+	opts.Logger.Warn(`The update process replaces project metadata with metadata on the server`)
+
 	response, err := util.GetYesNoPrompt("continue?")
 	if err != nil {
 		return err
@@ -74,7 +86,7 @@ func UpdateProjectV3(opts UpgradeToMuUpgradeProjectToMultipleSourcesOpts) error 
 	opts.EC.Spin("updating project... ")
 	// copy state
 	// if a default database is setup copy state from it
-	sources, err := ListDatabases(opts.EC.APIClient.V1Metadata)
+	sources, err := metadatautil.GetSources(opts.EC.APIClient.V1Metadata.ExportMetadata)
 	if err != nil {
 		return err
 	}
@@ -140,7 +152,7 @@ func UpdateProjectV3(opts UpgradeToMuUpgradeProjectToMultipleSourcesOpts) error 
 		return err
 	}
 	// do a metadata export
-	m, err := migrate.NewMigrate(opts.EC, true, "")
+	m, err := migrate.NewMigrate(opts.EC, true, "", hasura.SourceKindPG)
 	if err != nil {
 		return err
 	}
@@ -277,7 +289,7 @@ func CheckIfUpdateToConfigV3IsRequired(ec *cli.ExecutionContext) error {
 		return errors.New("please upgrade your project to a newer version.\ntip: use " + color.New(color.FgCyan).SprintFunc()("hasura scripts update-project-v2") + " to upgrade your project to config v2")
 	}
 	if ec.Config.Version < cli.V3 && ec.HasMetadataV3 {
-		sources, err := ListDatabases(ec.APIClient.V1Metadata)
+		sources, err := metadatautil.GetSources(ec.APIClient.V1Metadata.ExportMetadata)
 		if err != nil {
 			return err
 		}
@@ -299,35 +311,4 @@ func CheckIfUpdateToConfigV3IsRequired(ec *cli.ExecutionContext) error {
 		}
 	}
 	return nil
-}
-
-func ListDatabases(client hasura.CommonMetadataOperations) ([]string, error) {
-	metadata, err := client.ExportMetadata()
-	if err != nil {
-		return nil, err
-	}
-	jsonb, err := ioutil.ReadAll(metadata)
-	if err != nil {
-		return nil, err
-	}
-	yamlb, err := yaml.JSONToYAML(jsonb)
-	if err != nil {
-		return nil, err
-	}
-	ast, err := parser.ParseBytes(yamlb, 0)
-	if err != nil {
-		return nil, err
-	}
-	if len(ast.Docs) <= 0 {
-		return nil, fmt.Errorf("failed listing sources from metadata")
-	}
-	var sources []string
-	path, err := yaml.PathString("$.sources[*].name")
-	if err != nil {
-		return nil, err
-	}
-	if err := path.Read(ast.Docs[0], &sources); err != nil {
-		return nil, err
-	}
-	return sources, nil
 }

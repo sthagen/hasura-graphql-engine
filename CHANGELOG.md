@@ -7,6 +7,23 @@
 (Add entries here in the order of: server, console, cli, docs, others)
 
 
+## v2.0.0-alpha.4
+
+### Bug fixes and improvements
+
+- server/mssql: support tracking and querying from views
+- server: inherited roles for PG queries and subscription
+- server: fix issue when a remote relationship's joining field had a custom GraphQL name defined (fix #6626)
+- server: fix handling of nullable object relationships (fix #6633)
+- console: add inherited roles support (#483)
+- console: add permissions support for mssql tables (#677)
+- cli: support rest endpoints
+- cli: support mssql sources
+- cli: use relative paths in metadata !include directives
+- cli: rename `--database` flag in `migrate` and `seed` command to `--database-name`
+- cli: support inherited roles
+
+
 ## v2.0.0-alpha.3
 
 ### Bug fixes and improvements
@@ -14,9 +31,11 @@
 - server/mssql: fix malformed JSON answer on empty tables
 - server/mssql: fix runtime errors when selecting geography/geometry columns
 - server/mssql: supports connection pooling to sql server
+- server/mssql: fix text values erroneously being parsed as varchar
 - server: improve errors messages for inconsistent sources
 - console: add relationship tab for mssql tables (#677)
 - build: fix the packaging of static console assets (fix #6610)
+- server: make REST endpoint errors compatible with inconsistent metadata
 
 
 ## v2.0.0-alpha.2

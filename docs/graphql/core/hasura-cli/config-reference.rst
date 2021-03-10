@@ -40,7 +40,8 @@ The configuration file can be configured with the following config keys:
     pg_dump: 
     version: 
   metadata_directory:
-  migrations_directory: 
+  migrations_directory:
+  seeds_directory:
   actions:
     kind: 
     handler_webhook_baseurl: 
@@ -112,6 +113,10 @@ The configuration file can be configured with the following config keys:
      - false
      - 1
      - migrations
+   * - seeds_directory
+     - false
+     - 2
+     - 
    * - actions
      - false
      - 2
@@ -143,7 +148,7 @@ The configuration file can be configured with the following config keys:
 
 .. note::
 
-  The above structure is for the ``config v3`` file which is supported since ``v2.0-alpha.1``. Refer to :ref:`this page <migrations_upgrade_v3>` on how to upgrade to ``config v2``.
+  The above structure is for the ``config v3`` file which is supported since ``v2.0.0-alpha.1``. Refer to :ref:`this page <migrations_upgrade_v3>` on how to upgrade to ``config v2``.
 
 Environment variables
 ---------------------
@@ -212,6 +217,10 @@ The configuration can also be set in the form of environment variables:
      - ``migrations_directory``
      - Defines the directory where the migration files were stored.
 
+   * - ``HASURA_GRAPHQL_SEEDS_DIRECTORY``
+     - ``seeds_directory``
+     - Defines the directory where the seed files were stored.
+
    * - ``HASURA_GRAPHQL_ACTIONS_KIND``
      - ``actions.kind``
      - Kind to be used for actions.
@@ -260,7 +269,7 @@ project root directory.
 
 .. admonition:: Supported from
 
-   ``.env`` file is supported in versions ``v.1.2.0`` and above.
+   ``.env`` file is supported in versions ``v1.2.0`` and above.
 
 .. note::
 

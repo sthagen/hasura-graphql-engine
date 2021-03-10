@@ -21,8 +21,8 @@ import qualified Hasura.GraphQL.Execute.LiveQuery.Options as LQ
 import qualified Hasura.GraphQL.Execute.Plan              as E
 import qualified Hasura.Logging                           as L
 import qualified System.Metrics                           as EKG
+import qualified System.Metrics.Distribution              as EKG.Distribution
 import qualified System.Metrics.Gauge                     as EKG.Gauge
-
 
 import           Hasura.Prelude
 import           Hasura.RQL.Types
@@ -79,6 +79,7 @@ data RawServeOptions impl
   , rsoWebSocketKeepAlive            :: !(Maybe Int)
   , rsoInferFunctionPermissions      :: !(Maybe Bool)
   , rsoEnableMaintenanceMode         :: !Bool
+  , rsoExperimentalFeatures          :: !(Maybe [ExperimentalFeature])
   }
 
 -- | @'ResponseInternalErrorsConfig' represents the encoding of the internal
@@ -93,7 +94,7 @@ data ResponseInternalErrorsConfig
 shouldIncludeInternal :: RoleName -> ResponseInternalErrorsConfig -> Bool
 shouldIncludeInternal role = \case
   InternalErrorsAllRequests -> True
-  InternalErrorsAdminOnly   -> isAdmin role
+  InternalErrorsAdminOnly   -> role == adminRoleName
   InternalErrorsDisabled    -> False
 
 newtype KeepAliveDelay
@@ -131,6 +132,7 @@ data ServeOptions impl
   , soWebsocketKeepAlive            :: !KeepAliveDelay
   , soInferFunctionPermissions      :: !FunctionPermissionsCtx
   , soEnableMaintenanceMode         :: !MaintenanceMode
+  , soExperimentalFeatures          :: !(Set.HashSet ExperimentalFeature)
   }
 
 data DowngradeOptions
@@ -251,6 +253,12 @@ readAPIs = mapM readAPI . T.splitOn "," . T.pack
           "CONFIG"    -> Right CONFIG
           _            -> Left "Only expecting list of comma separated API types metadata,graphql,pgdump,developer,config"
 
+readExperimentalFeatures :: String -> Either String [ExperimentalFeature]
+readExperimentalFeatures = mapM readAPI . T.splitOn "," . T.pack
+  where readAPI si = case T.toLower $ T.strip si of
+          "inherited_roles" -> Right EFInheritedRoles
+          _                 -> Left "Only expecting list of comma separated experimental features"
+
 readLogLevel :: String -> Either String L.LogLevel
 readLogLevel s = case T.toLower $ T.strip $ T.pack s of
   "debug" -> Right L.LevelDebug
@@ -305,6 +313,9 @@ instance FromEnv CorsConfig where
 instance FromEnv [API] where
   fromEnv = readAPIs
 
+instance FromEnv [ExperimentalFeature] where
+  fromEnv = readExperimentalFeatures
+
 instance FromEnv LQ.BatchSize where
   fromEnv s = do
     val <- readEither s
@@ -338,12 +349,23 @@ type WithEnv a = ReaderT Env (ExceptT String Identity) a
 runWithEnv :: Env -> WithEnv a -> Either String a
 runWithEnv env m = runIdentity $ runExceptT $ runReaderT m env
 
+-- | Collection of various server metrics
 data ServerMetrics
   = ServerMetrics
-  { smWarpThreads :: !EKG.Gauge.Gauge
+  { smWarpThreads         :: !EKG.Gauge.Gauge
+  -- ^ Current Number of warp threads
+  , smNumEventsFetched    :: !EKG.Distribution.Distribution
+  -- ^ Total Number of events fetched from last 'Event Trigger Fetch'
+  , smNumEventHTTPWorkers :: !EKG.Gauge.Gauge
+  -- ^ Current number of Event trigger's HTTP workers in process
+  , smEventLockTime       :: !EKG.Distribution.Distribution
+  -- ^ Time between the 'Event Trigger Fetch' from DB and the processing of the event
   }
 
 createServerMetrics :: EKG.Store -> IO ServerMetrics
 createServerMetrics store = do
   smWarpThreads <- EKG.createGauge "warp_threads" store
+  smNumEventsFetched <- EKG.createDistribution "num_events_fetched" store
+  smNumEventHTTPWorkers <- EKG.createGauge "num_event_trigger_http_workers" store
+  smEventLockTime <- EKG.createDistribution "event_lock_time" store
   pure ServerMetrics { .. }

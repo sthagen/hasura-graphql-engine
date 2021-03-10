@@ -42,6 +42,7 @@ func TestSourceConfig_Export(t *testing.T) {
 			},
 			map[string][]byte{
 				"metadata/databases/databases.yaml": []byte(`- name: default
+  kind: postgres
   configuration:
     connection_info:
       database_url:
@@ -50,12 +51,8 @@ func TestSourceConfig_Export(t *testing.T) {
         idle_timeout: 180
         max_connections: 50
         retries: 1
-  tables:
-  - "!include public_t1.yaml"
-  - "!include public_t2.yaml"
-  functions:
-  - "!include public_get_t1.yaml"
-  - "!include public_get_t2.yaml"
+  tables: "!include default/tables/tables.yaml"
+  functions: "!include default/functions/functions.yaml"
 `),
 				"metadata/databases/default/tables/public_t1.yaml": []byte(`table:
   name: t1
@@ -64,6 +61,12 @@ func TestSourceConfig_Export(t *testing.T) {
 				"metadata/databases/default/tables/public_t2.yaml": []byte(`table:
   name: t2
   schema: public
+`),
+				"metadata/databases/default/tables/tables.yaml": []byte(`- "!include public_t1.yaml"
+- "!include public_t2.yaml"
+`),
+				"metadata/databases/default/functions/functions.yaml": []byte(`- "!include public_get_t1.yaml"
+- "!include public_get_t2.yaml"
 `),
 				"metadata/databases/default/functions/public_get_t1.yaml": []byte(`function:
   name: get_t1
@@ -141,6 +144,7 @@ func TestSourceConfig_Build(t *testing.T) {
   - function:
       name: get_t2
       schema: public
+  kind: postgres
   name: s1
   tables:
   - table:
@@ -164,6 +168,7 @@ func TestSourceConfig_Build(t *testing.T) {
   - function:
       name: get_t2
       schema: public
+  kind: postgres
   name: s2
   tables:
   - table:

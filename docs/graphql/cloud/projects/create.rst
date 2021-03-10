@@ -41,7 +41,7 @@ Step 2: Database setup
 
 To get started, Click ``Launch Console`` to open the Hasura console in your browser.
 
-.. thumbnail:: /img/graphql/cloud/getting-started/project-launch-console.png
+.. thumbnail:: /img/graphql/cloud/getting-started/details-launch-console.png
    :alt: database setup with new database
    :width: 900px
 
@@ -62,9 +62,15 @@ Existing database
 ^^^^^^^^^^^^^^^^^
 To use an existing database, choose ``Connect existing database`` and enter your database connection URL and enter your database connection string (looks like ``postgres://username:password@hostname:port/dbname``).
 
-.. thumbnail:: /img/graphql/cloud/projects/existing-db-setup.png
+.. thumbnail:: /img/graphql/cloud/getting-started/connect-db.png
    :alt: database setup with existing database
    :width: 700px
+
+.. note::
+
+  You can connect to databases either using env vars or by using their raw connection string/parameters. It is
+  recommended to use env vars for better security *(as connection details are part of Hasura metadata)* as well as
+  to allow configuring different databases in different environments *(like staging/production)* easily.
 
 Allowing connections from Hasura Cloud IP
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

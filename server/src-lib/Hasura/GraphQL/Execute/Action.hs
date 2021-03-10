@@ -1,8 +1,5 @@
 module Hasura.GraphQL.Execute.Action
-  ( ActionExecution(..)
-  , runActionExecution
-  , ActionExecutionPlan(..)
-  , ActionExecuteResult(..)
+  ( runActionExecution
   , asyncActionsProcessor
   , resolveActionExecution
   , resolveActionMutationAsync
@@ -12,6 +9,7 @@ module Hasura.GraphQL.Execute.Action
   , setActionStatusTx
   , fetchActionResponseTx
   , clearActionDataTx
+  , module Types
   ) where
 
 import           Hasura.Prelude
@@ -55,6 +53,7 @@ import           Hasura.Backends.Postgres.SQL.Value          (PGScalarValue (..)
 import           Hasura.Backends.Postgres.Translate.Column   (toTxtValue)
 import           Hasura.Backends.Postgres.Translate.Select   (asSingleRowJsonResp)
 import           Hasura.EncJSON
+import           Hasura.GraphQL.Execute.Action.Types         as Types
 import           Hasura.GraphQL.Execute.Prepare
 import           Hasura.GraphQL.Parser
 import           Hasura.HTTP
@@ -67,20 +66,6 @@ import           Hasura.Server.Utils                         (mkClientHeadersFor
                                                               mkSetCookieHeaders)
 import           Hasura.Server.Version                       (HasVersion)
 import           Hasura.Session
-
-
-newtype ActionExecution =
-  ActionExecution {
-    unActionExecution
-      :: forall m
-       . (MonadIO m, MonadBaseControl IO m, MonadError QErr m, Tracing.MonadTrace m) => m EncJSON
-  }
-
--- A plan to execute any action
-data ActionExecutionPlan
-  = AEPSync !ActionExecution
-  | AEPAsyncQuery !ActionId !(ActionLogResponse -> ActionExecution)
-  | AEPAsyncMutation !EncJSON
 
 runActionExecution
   :: ( MonadIO m, MonadBaseControl IO m
@@ -167,12 +152,6 @@ $(J.deriveJSON hasuraJSON{J.omitNothingFields=True} ''ActionHandlerLog)
 instance L.ToEngineLog ActionHandlerLog L.Hasura where
   toEngineLog ahl = (L.LevelInfo, L.ELTActionHandler, J.toJSON ahl)
 
-
-data ActionExecuteResult
-  = ActionExecuteResult
-  { _aerExecution :: !ActionExecution
-  , _aerHeaders   :: !HTTP.ResponseHeaders
-  }
 
 -- | Synchronously execute webhook handler and resolve response to action "output"
 resolveActionExecution
@@ -337,7 +316,8 @@ resolveAsyncActionQuery userInfo annAction actionLogResponse = ActionExecution
     sessionVarsColumn = (unsafePGCol "session_variables", PGJSONB)
 
     -- TODO (from master):- Avoid using ColumnInfo
-    mkAnnFldFromPGCol = flip RS.mkAnnColumnField Nothing . mkPGColumnInfo
+    mkAnnFldFromPGCol columnInfoArgs =
+      RS.mkAnnColumnField (mkPGColumnInfo columnInfoArgs) Nothing Nothing
 
     mkPGColumnInfo (column', columnType) =
       ColumnInfo column' (G.unsafeMkName $ getPGColTxt column') 0 (ColumnScalar columnType) True Nothing
@@ -354,7 +334,7 @@ resolveAsyncActionQuery userInfo annAction actionLogResponse = ActionExecution
       -- For non-admin roles, accessing an async action's response should be allowed only for the user
       -- who initiated the action through mutation. The action's response is accessible for a query/subscription
       -- only when it's session variables are equal to that of action's.
-      in if isAdmin (_uiRole userInfo) then actionIdColumnEq
+      in if (adminRoleName == (_uiRole userInfo))  then actionIdColumnEq
          else BoolAnd [actionIdColumnEq, sessionVarsColumnEq]
 
 
