@@ -49,6 +49,7 @@ import qualified Hasura.GraphQL.Parser.Internal.Parser      as P
 import qualified Hasura.RQL.IR.BoolExp                      as IR
 import qualified Hasura.RQL.IR.OrderBy                      as IR
 import qualified Hasura.RQL.IR.Select                       as IR
+import qualified Hasura.SQL.AnyBackend                      as AB
 
 import           Hasura.GraphQL.Context
 import           Hasura.GraphQL.Parser                      (FieldParser, InputFieldsParser,
@@ -1077,7 +1078,7 @@ computedFieldPG ComputedFieldInfo{..} selectPermissions = runMaybeT do
       in mkDescriptionWith (_cffDescription _cfiFunction) defaultDescription
 
     computedFieldFunctionArgs
-      :: ComputedFieldFunction -> m (InputFieldsParser n (IR.FunctionArgsExpTableRow 'Postgres (UnpreparedValue 'Postgres)))
+      :: ComputedFieldFunction 'Postgres -> m (InputFieldsParser n (IR.FunctionArgsExpTableRow 'Postgres (UnpreparedValue 'Postgres)))
     computedFieldFunctionArgs ComputedFieldFunction{..} =
       functionArgs _cffName (IAUserProvided <$> _cffInputArgs) <&> fmap addTableAndSessionArgument
       where
@@ -1294,7 +1295,7 @@ functionArgs functionName (toList -> inputArgs) = do
         Nothing -> whenMaybe (not $ unHasDefault $ faHasDefault arg) $
           parseErrorWith NotSupported "Non default arguments cannot be omitted"
 
-tablePermissionsInfo :: SelPermInfo b -> TablePerms b
+tablePermissionsInfo :: Backend b => SelPermInfo b -> TablePerms b
 tablePermissionsInfo selectPermissions = IR.TablePerm
   { IR._tpFilter = fmapAnnBoolExp partialSQLExpToUnpreparedValue $ spiFilter selectPermissions
   , IR._tpLimit  = spiLimit selectPermissions
@@ -1419,19 +1420,25 @@ nodeField = do
         onNothing (Map.lookup table parseds) $
         withArgsPath $  throwInvalidNodeId $ "the table " <>> ident
       whereExp <- buildNodeIdBoolExp columnValues pkeyColumns
-      return $ RFDB source sourceConfig $ QDBR $ QDBSingleRow $ IR.AnnSelectG
-        { IR._asnFields   = fields
-        , IR._asnFrom     = IR.FromTable table
-        , IR._asnPerm     = tablePermissionsInfo perms
-        , IR._asnArgs     = IR.SelectArgs
-          { IR._saWhere    = Just whereExp
-          , IR._saOrderBy  = Nothing
-          , IR._saLimit    = Nothing
-          , IR._saOffset   = Nothing
-          , IR._saDistinct = Nothing
+      return
+        $ RFDB source
+        $ AB.mkAnyBackend
+        $ SourceConfigWith sourceConfig
+        $ QDBR
+        $ QDBSingleRow
+        $ IR.AnnSelectG
+          { IR._asnFields   = fields
+          , IR._asnFrom     = IR.FromTable table
+          , IR._asnPerm     = tablePermissionsInfo perms
+          , IR._asnArgs     = IR.SelectArgs
+            { IR._saWhere    = Just whereExp
+            , IR._saOrderBy  = Nothing
+            , IR._saLimit    = Nothing
+            , IR._saOffset   = Nothing
+            , IR._saDistinct = Nothing
+            }
+          , IR._asnStrfyNum = stringifyNum
           }
-        , IR._asnStrfyNum = stringifyNum
-        }
   where
     parseNodeId :: Text -> n NodeId
     parseNodeId =

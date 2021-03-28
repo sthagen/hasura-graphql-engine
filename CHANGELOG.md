@@ -1,11 +1,78 @@
 # Hasura GraphQL Engine Changelog
 
 ## Next release
+(Add entries here in the order of: server, console, cli, docs, others)
+
+- server: add a comment field for actions (#231)
+- server: accept GeoJSON for MSSQL geometry and geography operators (#787)
+- console: add a comment field for actions (#231)
+
+## v2.0.0-alpha.6
+
+### Support geometry and geography spatial data comparison operators in MS SQL Server
+
+Comparison operators on spatial data types, geometry and geography, are now supported in MS SQL Server. The following operators are supported:
+
+- STEquals
+- STIntersects
+- STTouches
+- STOverlaps
+- STCrosses
+- STWithin
+- STContains
+
+**Example query:** Select values equal to a given geography instance
+
+```
+query {
+  spatial_types_geog(
+    where: {
+      point: { _st_equals: "POINT(3 4)" }
+      }
+    ) {
+    point
+  }
+}
+```
+
+**Example query:** Select values that spatially contain a given geometry instance
+
+```
+query {
+  spatial_types_geom(
+    where: {
+      compoundcurve: { _st_contains: "POINT(0.5 0)" }
+    }
+  ) {
+    compoundcurve
+  }
+}
+```
 
 ### Bug fixes and improvements
 
-(Add entries here in the order of: server, console, cli, docs, others)
+- server: fix action output type schema generation (fix #6631)
+- server/mssql: `mssql_add_source` can now take connection strings from environment variables
+- server: support `IN`, `NIN`, `LIKE` and `NLIKE` operators in MS SQL Server
+- server: remove the restriction of supporting only base type function arguments. The type of an argument with a table type is now `<tablename>_scalar` to avoid conflicts with the object type `<tablename>`.
+- server: fix inherited_roles issue when some of the underlying roles don't have permissions configured (fixes #6672)
+- server: fix action custom types failing to parse when mutually recursive
+- server: fix MSSQL table name descriptions
+- server: emit `postgres-max-connections-error` when max postgres connections are reached
+- console: allow editing rest endpoints queries and misc ui improvements
+- console: display collection names and queries from all collections in allowlist
+- cli: match ordering of keys in project metadata files with server metadata
 
+## v2.0.0-alpha.5
+
+### Bug fixes and improvements
+
+- server: fix issue with parsing of remote schema list of input objects (fix #6584)
+- server: support tracking functions having only base type arguments (fix #6628)
+- console: add browse rows for mssql tables (#805)
+- console: remote schema permissions bug fixes (#439)
+- cli: cli-ext is now a native part of cli binary (no longer needed as a plugin)
+- cli: fix issue with adding operation to allow list in console mode (fix #6617)
 
 ## v2.0.0-alpha.4
 
@@ -68,7 +135,6 @@ keys in the response body.
 - server: fix issue with queries on character column types (close #6217)
 - server: optimize resolving source. Resolving a source would create connection pools every time. Optimize that to re-create connection pools only when necessary. (#609)
 - server: fix issues with remote schema introspection and queries over TLS.
-- console: add support for MS SQL Server
 - server: Prohibit Invalid slashes, duplicate variables, subscriptions for REST endpoints
 - server: Prohibit non-singular query definitions for REST endpoints
 - server: better handling for one-to-one relationships via both `manual_configuration` and `foreign_key_constraint_on` (#2576)

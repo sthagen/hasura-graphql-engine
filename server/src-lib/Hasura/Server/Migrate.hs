@@ -33,9 +33,11 @@ import qualified Language.Haskell.TH.Lib             as TH
 import qualified Language.Haskell.TH.Syntax          as TH
 
 import           Control.Monad.Trans.Control         (MonadBaseControl)
+import           Data.FileEmbed                      (makeRelativeToProject)
 import           Data.Time.Clock                     (UTCTime)
-import           Data.Typeable                       (cast)
 import           System.Directory                    (doesFileExist)
+
+import qualified Hasura.SQL.AnyBackend               as AB
 
 import           Hasura.Backends.Postgres.SQL.Types
 import           Hasura.Logging                      (Hasura, LogLevel (..), ToEngineLog (..))
@@ -125,14 +127,14 @@ migrateCatalog maybeDefaultSourceConfig maintenanceMode migrationTime = do
       liftTx $ Q.catchE defaultTxErrorHandler $
         when createSchema $ Q.unitQ "CREATE SCHEMA hdb_catalog" () False
       enablePgcryptoExtension
-      runTx $(Q.sqlFromFile "src-rsr/initialise.sql")
+      runTx $(makeRelativeToProject "src-rsr/initialise.sql" >>= Q.sqlFromFile)
       updateCatalogVersion
 
       let emptyMetadata' = case maybeDefaultSourceConfig of
             Nothing -> emptyMetadata
             Just defaultSourceConfig ->
               -- insert metadata with default source
-              let defaultSourceMetadata = BackendSourceMetadata $
+              let defaultSourceMetadata = AB.mkAnyBackend $
                     SourceMetadata defaultSource mempty mempty defaultSourceConfig
                   sources = OMap.singleton defaultSource defaultSourceMetadata
               in emptyMetadata{_metaSources = sources}
@@ -234,9 +236,9 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
     -- compile-time), but putting a `let` inside the splice itself is allowed.
     $(let migrationFromFile from to =
             let path = "src-rsr/migrations/" <> from <> "_to_" <> to <> ".sql"
-             in [| runTxOrPrint $(Q.sqlFromFile path) |]
+             in [| runTxOrPrint $(makeRelativeToProject path >>= Q.sqlFromFile) |]
           migrationFromFileMaybe from to = do
-            let path = "src-rsr/migrations/" <> from <> "_to_" <> to <> ".sql"
+            path <- makeRelativeToProject $ "src-rsr/migrations/" <> from <> "_to_" <> to <> ".sql"
             exists <- TH.runIO (doesFileExist path)
             if exists
               then [| Just (runTxOrPrint $(Q.sqlFromFile path)) |]
@@ -268,7 +270,7 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
     from42To43 = do
       when (maintenanceMode == MaintenanceModeEnabled) $
         throw500 "cannot migrate to catalog version 43 in maintenance mode"
-      let query = $(Q.sqlFromFile "src-rsr/migrations/42_to_43.sql")
+      let query = $(makeRelativeToProject "src-rsr/migrations/42_to_43.sql" >>=  Q.sqlFromFile)
       if dryRun then (liftIO . TIO.putStrLn . Q.getQueryText) query
         else do
         metadataV2 <- fetchMetadataFromHdbTables
@@ -277,7 +279,7 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
           "cannot migrate to catalog version 43 without --database-url or env var " <> tshow (fst databaseUrlEnv)
         let metadataV3 =
               let MetadataNoSources{..} = metadataV2
-                  defaultSourceMetadata = BackendSourceMetadata $
+                  defaultSourceMetadata = AB.mkAnyBackend $
                     SourceMetadata defaultSource _mnsTables _mnsFunctions defaultSourceConfig
               in Metadata (OMap.singleton defaultSource defaultSourceMetadata)
                    _mnsRemoteSchemas _mnsQueryCollections _mnsAllowlist _mnsCustomTypes _mnsActions _mnsCronTriggers mempty
@@ -285,7 +287,7 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
         liftTx $ insertMetadataInCatalog metadataV3
 
     from43To42 = do
-      let query = $(Q.sqlFromFile "src-rsr/migrations/43_to_42.sql")
+      let query = $(makeRelativeToProject "src-rsr/migrations/43_to_42.sql" >>= Q.sqlFromFile)
       if dryRun then (liftIO . TIO.putStrLn . Q.getQueryText) query
         else do
         Metadata{..} <- liftTx fetchMetadataFromCatalog
@@ -294,8 +296,8 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
               MetadataNoSources mempty mempty mempty mempty mempty emptyCustomTypes mempty mempty
         metadataV2 <- case OMap.toList _metaSources of
           [] -> pure emptyMetadataNoSources
-          [(_, BackendSourceMetadata sm)] ->
-            pure $ case cast sm of
+          [(_, exists)] ->
+            pure $ case AB.unpackAnyBackend exists of
               Nothing -> emptyMetadataNoSources
               Just SourceMetadata{..} ->
                 MetadataNoSources _smTables _smFunctions _metaRemoteSchemas _metaQueryCollections

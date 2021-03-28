@@ -1,6 +1,7 @@
 import React from 'react';
 import { DataSourcesAPI } from '../..';
-import { TableColumn, Table } from '../../types';
+import { TableColumn, Table, BaseTableColumn } from '../../types';
+import { getTableRowRequest } from './utils';
 
 const permissionColumnDataTypes = {
   character: [
@@ -68,6 +69,15 @@ const columnDataTypes = {
   TEXT: 'text',
 };
 
+const operators = [
+  { name: 'equals', value: '$eq', graphqlOp: '_eq' },
+  { name: 'not equals', value: '$ne', graphqlOp: '_neq' },
+  { name: '>', value: '$gt', graphqlOp: '_gt' },
+  { name: '<', value: '$lt', graphqlOp: '_lt' },
+  { name: '>=', value: '$gte', graphqlOp: '_gte' },
+  { name: '<=', value: '$lte', graphqlOp: '_lte' },
+];
+
 // eslint-disable-next-line no-useless-escape
 const createSQLRegex = /create\s*(?:|or\s*replace)\s*(view|table|function)\s*(?:\s*if*\s*not\s*exists\s*)?((\"?\w+\"?)\.(\"?\w+\"?)|(\"?\w+\"?))/g;
 
@@ -77,9 +87,31 @@ export const displayTableName = (table: Table) => {
   return isTable(table) ? <span>{tableName}</span> : <i>{tableName}</i>;
 };
 
+export const isJsonColumn = (column: BaseTableColumn): boolean => {
+  return column.data_type_name === 'json' || column.data_type_name === 'jsonb';
+};
+
+const processTableRowData = (
+  data: any,
+  config?: { originalTable: string; currentSchema: string }
+) => {
+  const { originalTable, currentSchema } = config!;
+  const rows =
+    data.data[
+      currentSchema === 'dbo'
+        ? originalTable
+        : `${currentSchema}_${originalTable}`
+    ];
+  return { estimatedCount: rows.length, rows };
+};
+
 export const mssql: DataSourcesAPI = {
   isTable,
+  isJsonColumn,
   displayTableName,
+  operators,
+  getTableRowRequest,
+  processTableRowData,
   getFunctionSchema: () => {
     return '';
   },
@@ -106,7 +138,7 @@ export const mssql: DataSourcesAPI = {
   arrayToPostgresArray: () => {
     return '';
   },
-  schemaListSql: `SELECT
+  schemaListSql: () => `SELECT
 	s.name AS schema_name
 FROM
 	sys.schemas s
@@ -183,7 +215,7 @@ FROM sys.objects as obj
             JOIN sys.types t ON a.user_type_id = t.user_type_id
         WHERE a.column_id > 0 and a.object_id = obj.object_id
         FOR JSON path
-) AS [isc](json) where obj.type_desc in ('USER_TABLE') ${whereClause};`;
+) AS [isc](json) where obj.type_desc in ('USER_TABLE', 'VIEW') ${whereClause};`;
   },
   commonDataTypes: [],
   fetchColumnTypesQuery: '',

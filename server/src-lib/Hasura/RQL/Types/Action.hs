@@ -204,7 +204,7 @@ getActionOutputFields =
 data ActionInfo
   = ActionInfo
   { _aiName         :: !ActionName
-  , _aiOutputObject :: !AnnotatedObjectType
+  , _aiOutputObject :: !(G.GType, AnnotatedObjectType)
   , _aiDefinition   :: !ResolvedActionDefinition
   , _aiPermissions  :: !ActionPermissionMap
   , _aiComment      :: !(Maybe Text)
@@ -230,6 +230,7 @@ data UpdateAction
   = UpdateAction
   { _uaName       :: !ActionName
   , _uaDefinition :: !ActionDefinitionInput
+  , _usComment    :: !(Maybe Text)
   } deriving (Show, Eq)
 $(J.deriveJSON hasuraJSON ''UpdateAction)
 
@@ -305,7 +306,7 @@ data AnnActionExecution (b :: BackendType) v
   }
 
 traverseAnnActionExecution
-  :: Applicative f
+  :: (Applicative f, Backend backend)
   => (a -> f b)
   -> AnnActionExecution backend a
   -> f (AnnActionExecution backend b)
@@ -326,7 +327,7 @@ data AsyncActionQueryFieldG (b :: BackendType) v
   | AsyncErrors
 
 traverseAsyncActionQueryField
-  :: Applicative f
+  :: (Applicative f, Backend backend)
   => (a -> f b)
   -> AsyncActionQueryFieldG backend a
   -> f (AsyncActionQueryFieldG backend b)
@@ -351,7 +352,7 @@ data AnnActionAsyncQuery (b :: BackendType) v
   }
 
 traverseAnnActionAsyncQuery
-  :: Applicative f
+  :: (Applicative f, Backend backend)
   => (a -> f b)
   -> AnnActionAsyncQuery backend a
   -> f (AnnActionAsyncQuery backend b)

@@ -25,6 +25,7 @@ import qualified System.Log.FastLogger                     as FL
 import qualified System.Metrics                            as EKG
 import qualified System.Metrics.Gauge                      as EKG.Gauge
 import qualified Text.Mustache.Compile                     as M
+import qualified Web.Spock.Core                            as Spock
 
 import           Control.Concurrent.STM.TVar               (TVar, readTVarIO)
 import           Control.Exception                         (bracket_, throwIO)
@@ -36,6 +37,7 @@ import           Control.Monad.Stateless
 import           Control.Monad.Trans.Control               (MonadBaseControl (..))
 import           Control.Monad.Trans.Managed               (ManagedT (..), allocate)
 import           Control.Monad.Unique
+import           Data.FileEmbed                            (makeRelativeToProject)
 import           Data.Time.Clock                           (UTCTime)
 #ifndef PROFILING
 import           GHC.AssertNF
@@ -57,7 +59,7 @@ import           Hasura.Eventing.ScheduledTrigger
 import           Hasura.GraphQL.Execute                    (MonadGQLExecutionCheck (..),
                                                             checkQueryInAllowlist)
 import           Hasura.GraphQL.Execute.Action
-import           Hasura.GraphQL.Logging                    (MonadQueryLog (..), QueryLog (..))
+import           Hasura.GraphQL.Logging                    (MonadQueryLog (..))
 import           Hasura.GraphQL.Transport.HTTP             (MonadExecuteQuery (..))
 import           Hasura.GraphQL.Transport.HTTP.Protocol    (toParsed)
 import           Hasura.Logging
@@ -80,7 +82,7 @@ import           Hasura.Server.Telemetry
 import           Hasura.Server.Types
 import           Hasura.Server.Version
 import           Hasura.Session
-import qualified Web.Spock.Core                            as Spock
+
 
 data ExitCode
 -- these are used during server initialization:
@@ -272,11 +274,11 @@ initialiseServeCtx env GlobalCtx{..} so@ServeOptions{..} = do
 
   let maybeDefaultSourceConfig = fst _gcDefaultPostgresConnInfo <&> \(dbUrlConf, _) ->
         let connSettings = PostgresPoolSettings
-                           { _ppsMaxConnections = Q.cpConns soConnParams
-                           , _ppsIdleTimeout    = Q.cpIdleTime soConnParams
-                           , _ppsRetries        = fromMaybe 1 $ snd _gcDefaultPostgresConnInfo
+                           { _ppsMaxConnections = Just $ Q.cpConns soConnParams
+                           , _ppsIdleTimeout    = Just $ Q.cpIdleTime soConnParams
+                           , _ppsRetries        = snd _gcDefaultPostgresConnInfo <|> Just 1
                            }
-            sourceConnInfo = PostgresSourceConnInfo dbUrlConf connSettings
+            sourceConnInfo = PostgresSourceConnInfo dbUrlConf (Just connSettings)
         in PostgresConnConfiguration sourceConnInfo Nothing
       sqlGenCtx = SQLGenCtx soStringifyNum
 
@@ -741,8 +743,7 @@ instance MonadConfigApiHandler PGMetadataStorageApp where
   runConfigApiHandler = configApiGetHandler
 
 instance MonadQueryLog PGMetadataStorageApp where
-  logQueryLog logger query genSqlM reqId =
-    unLogger logger $ QueryLog query genSqlM reqId
+  logQueryLog = unLogger
 
 instance WS.MonadWSLog PGMetadataStorageApp where
   logWSLog = unLogger
@@ -809,7 +810,7 @@ instance MonadMetadataStorage (MetadataStorageT PGMetadataStorageApp) where
   setCatalogState a b = runInSeparateTx $ setCatalogStateTx a b
 
   getDatabaseUid      = runInSeparateTx getDbId
-  checkMetadataStorageHealth = (lift (asks fst)) >>= checkDbConnection
+  checkMetadataStorageHealth = lift (asks fst) >>= checkDbConnection
 
   getDeprivedCronTriggerStats        = runInSeparateTx getDeprivedCronTriggerStatsTx
   getScheduledEventsForDelivery      = runInSeparateTx getScheduledEventsForDeliveryTx
@@ -848,7 +849,7 @@ mkConsoleHTML path authMode enableTelemetry consoleAssetsDir =
         "" -> "/console"
         r  -> "/console/" <> r
 
-      consoleTmplt = $(M.embedSingleTemplate "src-rsr/console.html")
+      consoleTmplt = $(makeRelativeToProject "src-rsr/console.html" >>= M.embedSingleTemplate)
 
 telemetryNotice :: String
 telemetryNotice =

@@ -1,7 +1,7 @@
 # anchor refs to be used elsewhere
 refs:
   constants:
-  - &server_builder_image hasura/graphql-engine-server-builder:0a016555f4fcea810ea4efcd024c11cb66cb4921928e5e59f5c8e44338a05287
+  - &server_builder_image hasura/graphql-engine-server-builder:252ba880c8ca6b189f9959962c7b8e2602539cbc4b18e259a76c90b74eb87353
   skip_job_on_ciignore: &skip_job_on_ciignore
     run:
       name: checking if job should be terminated or not
@@ -126,6 +126,8 @@ refs:
           DATABASE_URL: 'postgresql://gql_test:@localhost:5432/gql_test'
         command: |
           psql "$DATABASE_URL" -c "SELECT 1 FROM pg_database WHERE datname = 'gql_test2'" | grep -q -F '(1 row)' || psql "$DATABASE_URL" -c 'CREATE DATABASE gql_test2;'
+          psql "$DATABASE_URL" -c "SELECT 1 FROM pg_database WHERE datname = 'pg_source_1'" | grep -q -F '(1 row)' || psql "$DATABASE_URL" -c 'CREATE DATABASE pg_source_1;'
+          psql "$DATABASE_URL" -c "SELECT 1 FROM pg_database WHERE datname = 'pg_source_2'" | grep -q -F '(1 row)' || psql "$DATABASE_URL" -c 'CREATE DATABASE pg_source_2;'
     - run:
         name: Run tests
         environment:
@@ -136,6 +138,8 @@ refs:
           HASURA_GRAPHQL_EVENTS_HTTP_POOL_SIZE: 8
           HASURA_GRAPHQL_DATABASE_URL: postgresql://gql_test:@localhost:5432/gql_test
           HASURA_GRAPHQL_DATABASE_URL_2: postgresql://gql_test:@localhost:5432/gql_test2
+          HASURA_GRAPHQL_PG_SOURCE_URL_1: postgresql://gql_test@localhost:5432/pg_source_1
+          HASURA_GRAPHQL_PG_SOURCE_URL_2: postgresql://gql_test@localhost:5432/pg_source_2
           GRAPHQL_ENGINE: /build/_server_output/graphql-engine
           GRAPHQL_ENGINE_TESTS: /build/_server_output/graphql-engine-tests
           MIX_FILES_FOLDER: /build/_server_output/mix
@@ -155,7 +159,7 @@ jobs:
   # changes only contains files in .ciignore
   check_build_worthiness:
     docker:
-    - image: hasura/graphql-engine-cli-builder:20191205
+    - image: hasura/graphql-engine-cli-builder:20210310
     working_directory: ~/graphql-engine
     steps:
     - attach_workspace:
@@ -338,7 +342,7 @@ jobs:
 
   test_cli_with_last_release:
     docker:
-    - image: hasura/graphql-engine-cli-builder:20191205
+    - image: hasura/graphql-engine-cli-builder:20210310
     - image: circleci/postgres:10-alpine
       environment:
         POSTGRES_USER: gql_test
@@ -396,8 +400,7 @@ jobs:
         name: build extension cli
         working_directory: cli-ext
         command: |
-          npm run build
-          make deploy
+          make build
           make ci-copy-assets
     - store_artifacts:
         path: /build/_cli_ext_output
@@ -410,7 +413,7 @@ jobs:
   # test and build cli
   test_and_build_cli:
     docker:
-    - image: hasura/graphql-engine-cli-builder:20210223
+    - image: hasura/graphql-engine-cli-builder:20210310
     - image: circleci/postgres:10-alpine
       environment:
         POSTGRES_USER: gql_test
@@ -538,6 +541,7 @@ jobs:
     docker:
     - image: hasura/graphql-engine-console-builder:20210224
       environment:
+        HASURA_GRAPHQL_DATABASE_URL: 'postgres://gql_test:@localhost:5432/gql_test'
         CYPRESS_KEY: 983be0db-0f19-40cc-bfc4-194fcacd85e1
         GHCRTS: -N1
     - image: circleci/postgres:10-alpine-postgis

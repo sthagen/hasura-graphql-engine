@@ -4,6 +4,7 @@ module Hasura.GraphQL.Context
   ( RoleContext(..)
   , GQLContext(..)
   , ParserFn
+  , SourceConfigWith(..)
   , RootField(..)
   , QueryDB(..)
   , MutationDB(..)
@@ -23,10 +24,10 @@ module Hasura.GraphQL.Context
 import           Hasura.Prelude
 
 import qualified Data.Aeson                    as J
+import qualified Data.Kind                     as T
 import qualified Language.GraphQL.Draft.Syntax as G
 
 import           Data.Aeson.TH
-import           Data.Typeable                 (Typeable)
 
 import qualified Hasura.RQL.IR.Delete          as IR
 import qualified Hasura.RQL.IR.Insert          as IR
@@ -36,6 +37,7 @@ import qualified Hasura.RQL.Types.Action       as RQL
 import qualified Hasura.RQL.Types.Backend      as RQL
 import qualified Hasura.RQL.Types.Common       as RQL
 import qualified Hasura.RQL.Types.RemoteSchema as RQL
+import qualified Hasura.SQL.AnyBackend         as AB
 
 import           Hasura.GraphQL.Parser
 import           Hasura.SQL.Backend
@@ -64,13 +66,13 @@ type ParserFn a
   =  G.SelectionSet G.NoFragments Variable
   -> Either (NESeq ParseError) (a, QueryReusability)
 
-data RootField db remote action raw where
+data SourceConfigWith (db :: BackendType -> T.Type) (b :: BackendType) =
+  SourceConfigWith (RQL.SourceConfig b) (db b)
+
+data RootField (db :: BackendType -> T.Type) remote action raw where
   RFDB
-    :: forall (b :: BackendType) db remote action raw
-     . (RQL.Backend b, Typeable db)
-    => RQL.SourceName
-    -> RQL.SourceConfig b
-    -> db b
+    :: RQL.SourceName
+    -> AB.AnyBackend (SourceConfigWith db)
     -> RootField db remote action raw
   RFRemote :: remote -> RootField db remote action raw
   RFAction :: action -> RootField db remote action raw
@@ -123,7 +125,7 @@ type SubscriptionRootField v = RootField (QueryDBRoot    v) Void Void Void
 
 traverseQueryDB
   :: forall f a b backend
-   . Applicative f
+   . (Applicative f, RQL.Backend backend)
   => (a -> f b)
   -> QueryDB backend a
   -> f (QueryDB backend b)
@@ -134,7 +136,7 @@ traverseQueryDB f = \case
   QDBConnection   s -> QDBConnection   <$> IR.traverseConnectionSelect   f s
 
 traverseActionQuery
-  :: Applicative f
+  :: (Applicative f, RQL.Backend backend)
   => (a -> f b)
   -> ActionQuery backend a
   -> f (ActionQuery backend b)

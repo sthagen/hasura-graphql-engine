@@ -300,15 +300,63 @@ msComparisonExps = P.memoize 'comparisonExps \columnType -> do
         <<> ". All fields are combined with logical 'AND'."
       textListParser = P.list textParser `P.bind` traverse P.openOpaque
       columnListParser = P.list typedParser `P.bind` traverse P.openOpaque
-  pure $ P.object name (Just desc) $ catMaybes <$> sequenceA
-    [ P.fieldOptional $$(G.litName "_is_null") Nothing (bool ANISNOTNULL ANISNULL <$> P.boolean)
-    , P.fieldOptional $$(G.litName "_eq")      Nothing (AEQ True . mkParameter <$> typedParser)
-    , P.fieldOptional $$(G.litName "_neq")     Nothing (ANE True . mkParameter <$> typedParser)
-    , P.fieldOptional $$(G.litName "_gt")      Nothing (AGT  . mkParameter <$> typedParser)
-    , P.fieldOptional $$(G.litName "_lt")      Nothing (ALT  . mkParameter <$> typedParser)
-    , P.fieldOptional $$(G.litName "_gte")     Nothing (AGTE . mkParameter <$> typedParser)
-    , P.fieldOptional $$(G.litName "_lte")     Nothing (ALTE . mkParameter <$> typedParser)
+  pure $ P.object name (Just desc) $ fmap catMaybes $ sequenceA $ concat
+    [
+    -- Common ops for all types
+      [ P.fieldOptional $$(G.litName "_is_null") Nothing (bool ANISNOTNULL ANISNULL <$> P.boolean)
+      , P.fieldOptional $$(G.litName "_eq")      Nothing (AEQ True . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_neq")     Nothing (ANE True . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_gt")      Nothing (AGT  . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_lt")      Nothing (ALT  . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_gte")     Nothing (AGTE . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_lte")     Nothing (ALTE . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_in")      Nothing (AIN . mkListLiteral <$> columnListParser)
+      , P.fieldOptional $$(G.litName "_nin")     Nothing (ANIN . mkListLiteral <$> columnListParser)
+      ]
+
+    -- Ops for String like types
+    , guard (isScalarColumnWhere (`elem` MSSQL.stringTypes) columnType) *>
+      [ P.fieldOptional $$(G.litName "_like")
+        (Just "does the column match the given pattern")
+        (ALIKE     . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_nlike")
+        (Just "does the column NOT match the given pattern")
+        (ANLIKE    . mkParameter <$> typedParser)
+      ]
+
+    -- Ops for Geometry/Geography types
+    , guard (isScalarColumnWhere (`elem` MSSQL.geoTypes) columnType) *>
+      [ P.fieldOptional $$(G.litName "_st_contains")
+        (Just "does the column contain the given value")
+        (ABackendSpecific . MSSQL.ASTContains   . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_st_equals")
+        (Just "is the column equal to given value (directionality is ignored)")
+        (ABackendSpecific . MSSQL.ASTEquals     . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_st_intersects")
+        (Just "does the column spatially intersect the given value")
+        (ABackendSpecific . MSSQL.ASTIntersects . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_st_overlaps")
+        (Just "does the column 'spatially overlap' (intersect but not completely contain) the given value")
+        (ABackendSpecific . MSSQL.ASTOverlaps   . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_st_within")
+        (Just "is the column contained in the given value")
+        (ABackendSpecific . MSSQL.ASTWithin     . mkParameter <$> typedParser)
+      ]
+
+    -- Ops for Geometry types
+    , guard (isScalarColumnWhere (MSSQL.GeometryType ==) columnType) *>
+      [ P.fieldOptional $$(G.litName "_st_crosses")
+        (Just "does the column cross the given geometry value")
+        (ABackendSpecific . MSSQL.ASTCrosses . mkParameter <$> typedParser)
+      , P.fieldOptional $$(G.litName "_st_touches")
+        (Just "does the column have at least one point in common with the given geometry value")
+        (ABackendSpecific . MSSQL.ASTTouches . mkParameter <$> typedParser)
+      ]
     ]
+  where
+    mkListLiteral :: [ColumnValue 'MSSQL] -> UnpreparedValue 'MSSQL
+    mkListLiteral =
+      P.UVLiteral . MSSQL.ListExpression . fmap (MSSQL.ValueExpression . cvValue)
 
 msOffsetParser :: MonadParse n => Parser 'Both n (SQLExpression 'MSSQL)
 msOffsetParser = MSSQL.ValueExpression . ODBC.IntValue . fromIntegral <$> P.int

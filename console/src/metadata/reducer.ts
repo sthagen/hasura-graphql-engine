@@ -1,11 +1,12 @@
 import { MetadataActions } from './actions';
-import {
-  QueryCollection,
-  HasuraMetadataV3,
-  RestEndpointEntry,
-  InheritedRole,
-} from './types';
-import { allowedQueriesCollection } from './utils';
+import { HasuraMetadataV3, CollectionName, InheritedRole } from './types';
+import { setAllowedQueries } from './utils';
+
+export type AllowedQueriesCollection = {
+  name: string;
+  query: string;
+  collection: CollectionName;
+};
 
 type MetadataState = {
   metadataObject: null | HasuraMetadataV3;
@@ -13,9 +14,8 @@ type MetadataState = {
   loading: boolean;
   inconsistentObjects: any[];
   ongoingRequest: boolean; // deprecate
-  allowedQueries: QueryCollection[];
+  allowedQueries: AllowedQueriesCollection[];
   inheritedRoles: InheritedRole[];
-  rest_endpoints?: RestEndpointEntry[];
 };
 
 const defaultState: MetadataState = {
@@ -37,10 +37,10 @@ export const metadataReducer = (
       return {
         ...state,
         metadataObject: action.data,
-        allowedQueries:
-          action.data?.query_collections?.find(
-            query => query.name === allowedQueriesCollection
-          )?.definition.queries || [],
+        allowedQueries: setAllowedQueries(
+          action.data?.query_collections,
+          action.data?.allowlist
+        ),
         inheritedRoles: action.data?.inherited_roles,
         loading: false,
         error: null,
@@ -144,17 +144,6 @@ export const metadataReducer = (
             ir.role_name === action.data.role_name ? action.data : ir
           ),
         ],
-      };
-
-    case 'Metadata/ADD_REST_ENDPOINT':
-      return {
-        ...state,
-        rest_endpoints: action.data,
-      };
-    case 'Metadata/DROP_REST_ENDPOINT':
-      return {
-        ...state,
-        rest_endpoints: action.data,
       };
     default:
       return state;

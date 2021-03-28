@@ -45,14 +45,14 @@ If the migrations were reset, then we will set up fresh migrations by pulling th
 
    ## create migration files - "this will only export public schema from postgres"
 
-   hasura migrate create "init" --from-server --database <database-name>
+   hasura migrate create "init" --from-server --database-name <database-name>
 
 .. code-block:: bash
 
    ## note down the version
    ## mark the migration as applied on this server
    
-   hasura migrate apply --version "<version>" --skip-execution --database <database-name>
+   hasura migrate apply --version "<version>" --skip-execution --database-name <database-name>
 
 .. code-block:: bash
 
@@ -71,10 +71,7 @@ Run the following command to verify the migration status:
 
 .. code-block:: bash
 
-   hasura migrate status  --database <database-name>
+   hasura migrate status  --database-name <database-name>
 
 You should see the new migrations!  
 
-.. admonition:: Additional Resources
-
-  Hasura Database Schema Migrations - `Watch Webinar <https://hasura.io/events/webinar/hasura-database-schema-migrations/?pg=docs&plcmt=body&cta=watch-webinar&tech=>`__.

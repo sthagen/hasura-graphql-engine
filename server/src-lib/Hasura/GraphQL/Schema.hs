@@ -6,44 +6,39 @@ module Hasura.GraphQL.Schema
 
 import           Hasura.Prelude
 
-import qualified Data.Aeson                                as J
-import qualified Data.HashMap.Strict                       as Map
-import qualified Data.HashMap.Strict.InsOrd                as OMap
-import qualified Data.HashSet                              as Set
-import qualified Language.GraphQL.Draft.Syntax             as G
+import qualified Data.Aeson                            as J
+import qualified Data.HashMap.Strict                   as Map
+import qualified Data.HashMap.Strict.InsOrd            as OMap
+import qualified Data.HashSet                          as Set
+import qualified Language.GraphQL.Draft.Syntax         as G
 
 import           Control.Arrow.Extended
 import           Control.Lens.Extended
 import           Control.Monad.Unique
 import           Data.Has
-import           Data.List.Extended                        (duplicates)
+import           Data.List.Extended                    (duplicates)
 
-import qualified Hasura.GraphQL.Parser                     as P
+import qualified Hasura.GraphQL.Parser                 as P
+import qualified Hasura.SQL.AnyBackend                 as AB
 
 import           Data.Text.Extended
 import           Hasura.GraphQL.Context
 import           Hasura.GraphQL.Execute.Types
-import           Hasura.GraphQL.Parser                     (Kind (..), Parser, Schema (..),
-                                                            UnpreparedValue (..))
+import           Hasura.GraphQL.Parser                 (Kind (..), Parser, Schema (..),
+                                                        UnpreparedValue (..))
 import           Hasura.GraphQL.Parser.Class
-import           Hasura.GraphQL.Parser.Internal.Parser     (FieldParser (..))
+import           Hasura.GraphQL.Parser.Internal.Parser (FieldParser (..))
 import           Hasura.GraphQL.Schema.Backend
 import           Hasura.GraphQL.Schema.Common
+import           Hasura.GraphQL.Schema.Instances       ()
 import           Hasura.GraphQL.Schema.Introspect
 import           Hasura.GraphQL.Schema.Postgres
-import           Hasura.GraphQL.Schema.Remote              (buildRemoteParser)
+import           Hasura.GraphQL.Schema.Remote          (buildRemoteParser)
 import           Hasura.GraphQL.Schema.Select
 import           Hasura.GraphQL.Schema.Table
 import           Hasura.RQL.DDL.Schema.Cache.Common
 import           Hasura.RQL.Types
 import           Hasura.Session
-
-
-----------------------------------------------------------------
--- Backends schema instances
-
-import           Hasura.Backends.MSSQL.Instances.Schema    ()
-import           Hasura.Backends.Postgres.Instances.Schema ()
 
 
 ----------------------------------------------------------------
@@ -173,9 +168,8 @@ buildRoleContext (SQLGenCtx stringifyNum, queryType, functionPermsCtx) sources
             <$> buildQueryFields sourceName sourceConfig validTables validFunctions
             <*> buildMutationFields Frontend sourceName sourceConfig validTables validFunctions
             <*> buildMutationFields Backend  sourceName sourceConfig validTables validFunctions
-      buildBackendSource = withBackendSchema buildSource
 
-  fieldsList <- traverse buildBackendSource $ toList sources
+  fieldsList <- traverse (buildBackendSource buildSource) $ toList sources
   let (queryFields, mutationFrontendFields, mutationBackendFields) = mconcat fieldsList
 
   -- It's okay to run the rest of this while assuming that the backend is 'Postgres:
@@ -240,9 +234,8 @@ buildRelayRoleContext (SQLGenCtx stringifyNum, queryType, functionPermsCtx) sour
           <$> buildRelayQueryFields sourceName sourceConfig validTables validFunctions
           <*> buildMutationFields Frontend sourceName sourceConfig validTables validFunctions
           <*> buildMutationFields Backend sourceName sourceConfig validTables validFunctions
-      buildBackendSource = withBackendSchema buildSource
 
-  fieldsList <- traverse buildBackendSource $ toList sources
+  fieldsList <- traverse (buildBackendSource buildSource) $ toList sources
 
   -- It's okay to run the rest of this while assuming that the backend is 'Postgres:
   -- the only remaining parsers are for actions, that are postgres specific, or for
@@ -298,9 +291,8 @@ buildFullestDBSchema queryContext sources allActionInfos nonObjectCustomTypes = 
           (,)
             <$> buildQueryFields sourceName sourceConfig validTables validFunctions
             <*> buildMutationFields Frontend sourceName sourceConfig validTables validFunctions
-      buildBackendSource = withBackendSchema buildSource
 
-  fieldsList <- traverse buildBackendSource $ toList sources
+  fieldsList <- traverse (buildBackendSource buildSource) $ toList sources
   let (queryFields, mutationFrontendFields) = mconcat fieldsList
 
   -- It's okay to run the rest of this while assuming that the backend is 'Postgres:
@@ -695,12 +687,13 @@ runMonadSchema
 runMonadSchema roleName queryContext pgSources extensions m =
   flip runReaderT (roleName, pgSources, queryContext, extensions) $ P.runSchemaT m
 
-withBackendSchema :: (forall b. BackendSchema b => SourceInfo b -> r) -> BackendSourceInfo -> r
-withBackendSchema f (BackendSourceInfo (bsi :: SourceInfo b)) = case backendTag @b of
-  PostgresTag -> f bsi
-  MSSQLTag    -> f bsi
-
 -- | Whether the request is sent with `x-hasura-use-backend-only-permissions` set to `true`.
 data Scenario = Backend | Frontend deriving (Enum, Show, Eq)
 
 type RemoteSchemaCache = HashMap RemoteSchemaName (RemoteSchemaCtx, MetadataObject)
+
+buildBackendSource
+  :: (forall b. BackendSchema b => SourceInfo b -> r)
+  -> AB.AnyBackend SourceInfo
+  -> r
+buildBackendSource f e = AB.dispatchAnyBackend @BackendSchema e f
