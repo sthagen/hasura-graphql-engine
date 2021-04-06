@@ -4,7 +4,14 @@
     {
       "name": "default",
       "kind": "postgres",
-      "tables": [],
+      "tables": [
+        {
+          "table": {
+            "schema": "public",
+            "name": "test"
+          }
+        }
+      ],
       "configuration": {
         "connection_info": {
           "database_url": "postgres://postgres:postgrespassword@postgres:5432/postgres",

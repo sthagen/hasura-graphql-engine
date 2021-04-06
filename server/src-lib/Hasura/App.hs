@@ -5,63 +5,65 @@ module Hasura.App where
 
 import           Hasura.Prelude
 
-import qualified Control.Concurrent.Async.Lifted.Safe      as LA
-import qualified Control.Concurrent.Extended               as C
-import qualified Control.Exception.Lifted                  as LE
-import qualified Data.Aeson                                as A
-import qualified Data.ByteString.Char8                     as BC
-import qualified Data.ByteString.Lazy.Char8                as BLC
-import qualified Data.Environment                          as Env
-import qualified Data.HashMap.Strict                       as HM
-import qualified Data.Set                                  as Set
-import qualified Data.Text                                 as T
-import qualified Data.Time.Clock                           as Clock
-import qualified Data.Yaml                                 as Y
-import qualified Database.PG.Query                         as Q
-import qualified Network.HTTP.Client                       as HTTP
-import qualified Network.HTTP.Client.TLS                   as HTTP
-import qualified Network.Wai.Handler.Warp                  as Warp
-import qualified System.Log.FastLogger                     as FL
-import qualified System.Metrics                            as EKG
-import qualified System.Metrics.Gauge                      as EKG.Gauge
-import qualified Text.Mustache.Compile                     as M
-import qualified Web.Spock.Core                            as Spock
+import qualified Control.Concurrent.Async.Lifted.Safe       as LA
+import qualified Control.Concurrent.Extended                as C
+import qualified Control.Concurrent.STM                     as STM
+import qualified Control.Exception.Lifted                   as LE
+import qualified Data.Aeson                                 as A
+import qualified Data.ByteString.Char8                      as BC
+import qualified Data.ByteString.Lazy.Char8                 as BLC
+import qualified Data.Environment                           as Env
+import qualified Data.HashMap.Strict                        as HM
+import qualified Data.Set                                   as Set
+import qualified Data.Text                                  as T
+import qualified Data.Time.Clock                            as Clock
+import qualified Data.Yaml                                  as Y
+import qualified Database.PG.Query                          as Q
+import qualified Network.HTTP.Client                        as HTTP
+import qualified Network.HTTP.Client.TLS                    as HTTP
+import qualified Network.Wai.Handler.Warp                   as Warp
+import qualified System.Log.FastLogger                      as FL
+import qualified System.Metrics                             as EKG
+import qualified System.Metrics.Gauge                       as EKG.Gauge
+import qualified Text.Mustache.Compile                      as M
+import qualified Web.Spock.Core                             as Spock
 
-import           Control.Concurrent.STM.TVar               (TVar, readTVarIO)
-import           Control.Exception                         (bracket_, throwIO)
-import           Control.Monad.Catch                       (Exception, MonadCatch, MonadMask,
-                                                            MonadThrow, onException)
-import           Control.Monad.Morph                       (hoist)
-import           Control.Monad.STM                         (atomically)
+import           Control.Concurrent.STM.TVar                (TVar, readTVarIO)
+import           Control.Exception                          (bracket_, throwIO)
+import           Control.Monad.Catch                        (Exception, MonadCatch, MonadMask,
+                                                             MonadThrow, onException)
+import           Control.Monad.Morph                        (hoist)
+import           Control.Monad.STM                          (atomically)
 import           Control.Monad.Stateless
-import           Control.Monad.Trans.Control               (MonadBaseControl (..))
-import           Control.Monad.Trans.Managed               (ManagedT (..), allocate)
+import           Control.Monad.Trans.Control                (MonadBaseControl (..))
+import           Control.Monad.Trans.Managed                (ManagedT (..), allocate)
 import           Control.Monad.Unique
-import           Data.FileEmbed                            (makeRelativeToProject)
-import           Data.Time.Clock                           (UTCTime)
+import           Data.FileEmbed                             (makeRelativeToProject)
+import           Data.Time.Clock                            (UTCTime)
 #ifndef PROFILING
 import           GHC.AssertNF
 #endif
 import           Network.HTTP.Client.Extended
 import           Options.Applicative
-import           System.Environment                        (getEnvironment)
+import           System.Environment                         (getEnvironment)
 
-import qualified Hasura.GraphQL.Execute.LiveQuery.Poll     as EL
-import qualified Hasura.GraphQL.Transport.WebSocket.Server as WS
-import qualified Hasura.Server.API.V2Query                 as V2Q
-import qualified Hasura.Tracing                            as Tracing
+import qualified Hasura.GraphQL.Execute.LiveQuery.Poll      as EL
+import qualified Hasura.GraphQL.Transport.WebSocket.Server  as WS
+import qualified Hasura.Server.API.V2Query                  as V2Q
+import qualified Hasura.Tracing                             as Tracing
 
 import           Hasura.Backends.Postgres.Connection
 import           Hasura.EncJSON
 import           Hasura.Eventing.Common
 import           Hasura.Eventing.EventTrigger
 import           Hasura.Eventing.ScheduledTrigger
-import           Hasura.GraphQL.Execute                    (MonadGQLExecutionCheck (..),
-                                                            checkQueryInAllowlist)
+import           Hasura.GraphQL.Execute                     (MonadGQLExecutionCheck (..),
+                                                             checkQueryInAllowlist)
 import           Hasura.GraphQL.Execute.Action
-import           Hasura.GraphQL.Logging                    (MonadQueryLog (..))
-import           Hasura.GraphQL.Transport.HTTP             (MonadExecuteQuery (..))
-import           Hasura.GraphQL.Transport.HTTP.Protocol    (toParsed)
+import           Hasura.GraphQL.Execute.Action.Subscription
+import           Hasura.GraphQL.Logging                     (MonadQueryLog (..))
+import           Hasura.GraphQL.Transport.HTTP              (MonadExecuteQuery (..))
+import           Hasura.GraphQL.Transport.HTTP.Protocol     (toParsed)
 import           Hasura.Logging
 import           Hasura.Metadata.Class
 import           Hasura.RQL.DDL.Schema.Cache
@@ -70,19 +72,18 @@ import           Hasura.RQL.DDL.Schema.Catalog
 import           Hasura.RQL.DDL.Schema.Source
 import           Hasura.RQL.Types
 import           Hasura.RQL.Types.Run
-import           Hasura.Server.API.Query                   (requiresAdmin, runQueryM)
+import           Hasura.Server.API.Query                    (requiresAdmin, runQueryM)
 import           Hasura.Server.App
 import           Hasura.Server.Auth
-import           Hasura.Server.CheckUpdates                (checkForUpdates)
+import           Hasura.Server.CheckUpdates                 (checkForUpdates)
 import           Hasura.Server.Init
 import           Hasura.Server.Logging
-import           Hasura.Server.Migrate                     (getMigratedFrom, migrateCatalog)
+import           Hasura.Server.Migrate                      (getMigratedFrom, migrateCatalog)
 import           Hasura.Server.SchemaUpdate
 import           Hasura.Server.Telemetry
 import           Hasura.Server.Types
 import           Hasura.Server.Version
 import           Hasura.Session
-
 
 data ExitCode
 -- these are used during server initialization:
@@ -222,7 +223,7 @@ data ServeCtx
   , _scShutdownLatch  :: !ShutdownLatch
   , _scSchemaCache    :: !RebuildableSchemaCache
   , _scSchemaCacheRef :: !SchemaCacheRef
-  , _scSchemaSyncCtx  :: !SchemaSyncCtx
+  , _scMetaVersionRef :: !(STM.TMVar MetadataResourceVersion)
   }
 
 -- | Collection of the LoggerCtx, the regular Logger and the PGLogger
@@ -282,27 +283,26 @@ initialiseServeCtx env GlobalCtx{..} so@ServeOptions{..} = do
         in PostgresConnConfiguration sourceConnInfo Nothing
       sqlGenCtx = SQLGenCtx soStringifyNum
 
-  -- Start a background thread for listening schema sync events from other server instances,
-  -- just before building @'RebuildableSchemaCache' (happens in @'migrateCatalogSchema' function).
-  -- See Note [Schema Cache Sync]
-  (schemaSyncListenerThread, schemaSyncEventRef) <- startSchemaSyncListenerThread metadataDbPool logger instanceId
-
   let serverConfigCtx =
         ServerConfigCtx soInferFunctionPermissions soEnableRemoteSchemaPermissions
                         sqlGenCtx soEnableMaintenanceMode soExperimentalFeatures
 
-  (rebuildableSchemaCache, cacheInitStartTime) <-
+  (rebuildableSchemaCache, _) <-
     lift . flip onException (flushLogger loggerCtx) $
     migrateCatalogSchema env logger metadataDbPool maybeDefaultSourceConfig _gcHttpManager
       serverConfigCtx (mkPgSourceResolver pgLogger)
 
-  let schemaSyncCtx = SchemaSyncCtx schemaSyncListenerThread schemaSyncEventRef cacheInitStartTime
+
+  -- Start a background thread for listening schema sync events from other server instances,
+  metaVersionRef <- liftIO $ STM.newEmptyTMVarIO
+  startSchemaSyncListenerThread logger metadataDbPool instanceId (fromMaybe 1000 soSchemaPollInterval) metaVersionRef soSchemaSyncDisable
+
   -- See Note [Temporarily disabling query plan caching]
   -- (planCache, schemaCacheRef) <- initialiseCache
   schemaCacheRef <- initialiseCache rebuildableSchemaCache
 
   pure $ ServeCtx _gcHttpManager instanceId loggers metadataDbPool latch
-                  rebuildableSchemaCache schemaCacheRef schemaSyncCtx
+                  rebuildableSchemaCache schemaCacheRef metaVersionRef
 
 mkLoggers
   :: (MonadIO m, MonadBaseControl IO m)
@@ -456,14 +456,14 @@ runHGEServer setupHook env ServeOptions{..} ServeCtx{..} initTime postPollHook s
 
   let sqlGenCtx = SQLGenCtx soStringifyNum
       Loggers loggerCtx logger _ = _scLoggers
-      SchemaSyncCtx{..} = _scSchemaSyncCtx
+      --SchemaSyncCtx{..} = _scSchemaSyncCtx
 
   authModeRes <- runExceptT $ setupAuthMode soAdminSecret soAuthHook soJwtSecret soUnAuthRole
                               _scHttpManager logger
 
   authMode <- onLeft authModeRes (printErrExit AuthConfigurationError . T.unpack)
 
-  HasuraApp app cacheRef stopWsServer <- lift $ flip onException (flushLogger loggerCtx) $
+  HasuraApp app cacheRef actionSubState stopWsServer <- lift $ flip onException (flushLogger loggerCtx) $
     mkWaiApp setupHook env
              logger
              sqlGenCtx
@@ -501,8 +501,8 @@ runHGEServer setupHook env ServeOptions{..} ServeCtx{..} initTime postPollHook s
   liftIO $ logInconsObjs logger inconsObjs
 
   -- Start a background thread for processing schema sync event present in the '_sscSyncEventRef'
-  _ <- startSchemaSyncProcessorThread logger _scHttpManager _sscSyncEventRef
-                               cacheRef _scInstanceId _sscCacheInitStartTime
+  _ <- startSchemaSyncProcessorThread logger _scHttpManager _scMetaVersionRef
+                               cacheRef _scInstanceId
                                serverConfigCtx
 
   let
@@ -529,8 +529,16 @@ runHGEServer setupHook env ServeOptions{..} ServeCtx{..} initTime postPollHook s
     _scHttpManager (getSCFromRef cacheRef) eventEngineCtx lockedEventsCtx serverMetrics
 
   -- start a backgroud thread to handle async actions
-  _asyncActionsThread <- C.forkManagedT "asyncActionsProcessor" logger $
-    asyncActionsProcessor env logger (_scrCache cacheRef) _scHttpManager
+  case soAsyncActionsFetchInterval of
+    AAFINoFetch -> pure () -- Don't start the poller thread
+    AAFIInterval sleepTime -> do
+      _asyncActionsThread <- C.forkManagedT "asyncActionsProcessor" logger $
+        asyncActionsProcessor env logger (_scrCache cacheRef) _scHttpManager sleepTime
+      pure ()
+
+  -- start a backgroud thread to handle async action live queries
+  _asyncActionsSubThread <- C.forkManagedT "asyncActionSubscriptionsProcessor" logger $
+    asyncActionSubscriptionsProcessor actionSubState
 
   -- start a background thread to create new cron events
   _cronEventsThread <- C.forkManagedT "runCronEventsGenerator" logger $
@@ -756,19 +764,16 @@ runInSeparateTx tx = do
   pool <- lift $ asks fst
   liftEitherM $ liftIO $ runExceptT $ Q.runTx pool (Q.RepeatableRead, Nothing) tx
 
--- | Using @pg_notify@ function to publish schema sync events to other server
--- instances via 'hasura_schema_update' channel.
--- See Note [Schema Cache Sync]
-notifySchemaCacheSyncTx :: InstanceId -> CacheInvalidations -> Q.TxE QErr ()
-notifySchemaCacheSyncTx instanceId invalidations = do
+notifySchemaCacheSyncTx :: MetadataResourceVersion -> InstanceId -> CacheInvalidations -> Q.TxE QErr ()
+notifySchemaCacheSyncTx (MetadataResourceVersion resourceVersion) instanceId invalidations = do
   Q.Discard () <- Q.withQE defaultTxErrorHandler [Q.sql|
-      SELECT pg_notify('hasura_schema_update', json_build_object(
-        'instance_id', $1,
-        'occurred_at', NOW(),
-        'invalidations', $2
-        )::text
-      )
-    |] (instanceId, Q.AltJ invalidations) True
+      INSERT INTO hdb_catalog.hdb_schema_notifications(id, notification, resource_version, instance_id)
+      VALUES (1, $1::json, $2, $3::uuid)
+      ON CONFLICT (id) DO UPDATE SET
+        notification = $1::json,
+        resource_version = $2,
+        instance_id = $3::uuid
+    |] (Q.AltJ invalidations, resourceVersion, instanceId) True
   pure ()
 
 getCatalogStateTx :: Q.TxE QErr CatalogState
@@ -800,12 +805,12 @@ setCatalogStateTx stateTy stateValue =
 --
 -- To learn more about why the instance is derived as following, see Note [Generic MetadataStorageT transformer]
 instance MonadMetadataStorage (MetadataStorageT PGMetadataStorageApp) where
-  fetchMetadata             = runInSeparateTx fetchMetadataAndResourceVersionFromCatalog
-  setMetadata r             = runInSeparateTx . setMetadataInCatalog (Just r)
-  notifySchemaCacheSync a b = runInSeparateTx $ notifySchemaCacheSyncTx a b
-  processSchemaSyncEventPayload instanceId payload = do
-    EventPayload{..} <- decodeValue payload
-    pure $ SchemaSyncEventProcessResult (instanceId /= _epInstanceId) _epInvalidations
+
+  fetchMetadataResourceVersion   = runInSeparateTx fetchMetadataResourceVersionFromCatalog
+  fetchMetadata                  = runInSeparateTx fetchMetadataAndResourceVersionFromCatalog
+  fetchMetadataNotifications a b = runInSeparateTx $ fetchMetadataNotificationsFromCatalog a b
+  setMetadata r                  = runInSeparateTx . setMetadataInCatalog (Just r)
+  notifySchemaCacheSync a b c    = runInSeparateTx $ notifySchemaCacheSyncTx a b c
   getCatalogState     = runInSeparateTx getCatalogStateTx
   setCatalogState a b = runInSeparateTx $ setCatalogStateTx a b
 

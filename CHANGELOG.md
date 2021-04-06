@@ -3,9 +3,46 @@
 ## Next release
 (Add entries here in the order of: server, console, cli, docs, others)
 
+## v2.0.0-alpha.7
+
+### Transactions for Postgres mutations
+
+With v2 came the introduction of heterogeneous execution: in one query or mutation, you can target different sources: it is possible, for instance, in one mutation, to both insert a row in a table in a table on Postgres and another row in another table on MSSQL:
+
+```
+mutation {
+  // goes to Postgres
+  insert_author_one(object: {name: "Simon Peyton Jones"}) {
+    name
+  }
+
+  // goes to MSSQL
+  insert_publication_one(object: {name: "Template meta-programming for Haskell"}) {
+    name
+  }
+}
+```
+
+However, heterogeneous execution has a cost: we can no longer run mutations as a transaction, given that each part may target a different database. This is a regression compared to v1.
+
+While we want to fix this by offering, in the future, an explicit API that allows our users to *choose* when a series of mutations are executed as a transaction, for now we are introducing the following optimisation: when all the fields in a mutation target the same Postgres source, we will run them as a transaction like we would have in v1.
+
+
+### Bug fixes and improvements
+
+- server: add `--async-actions-fetch-interval` command-line flag and `HASURA_GRAPHQL_ASYNC_ACTIONS_FETCH_INTERVAL` environment variable for configuring
+          async actions re-fetch interval from metadata storage (fix #6460)
+- server: add 'replace_configuration' option (default: false) in the add source API payload
 - server: add a comment field for actions (#231)
 - server: accept GeoJSON for MSSQL geometry and geography operators (#787)
+- server: update pg_dump clean output to disable function body validation in create function statements to avoid errors due to forward references
+- server: fix a bug preventing some MSSQL foreign key relationships from being tracked
 - console: add a comment field for actions (#231)
+- console: data sidebar bug fixes and improvements (#921)
+- cli: fix seeds incorrectly being applied to databases in config v3 (#6683)
+- cli: add `--all-databases` flag for `migrate apply`, this allows applying migrations on all connected databases in one go
+- cli-migrations: add config v3 image
+- docs: add Hasura v2 upgrade guide (#1030)
 
 ## v2.0.0-alpha.6
 
@@ -80,6 +117,7 @@ query {
 
 - server/mssql: support tracking and querying from views
 - server: inherited roles for PG queries and subscription
+- server: replaces postgres LISTEN/NOTIFY channel with lightweight polling for metadata syncing in order to resolve proxy issues
 - server: fix issue when a remote relationship's joining field had a custom GraphQL name defined (fix #6626)
 - server: fix handling of nullable object relationships (fix #6633)
 - console: add inherited roles support (#483)

@@ -1,8 +1,8 @@
-import { Nullable } from '../components/Common/utils/tsUtils';
-import { Table, Relationship, CheckConstraint, BaseTable } from './types';
 import { isEqual } from '../components/Common/utils/jsUtils';
+import { Nullable } from '../components/Common/utils/tsUtils';
 import { QualifiedTable } from '../metadata/types';
 import { FixMe } from '../types';
+import { BaseTable, CheckConstraint, Relationship, Table } from './types';
 
 export type Operations = 'insert' | 'select' | 'update' | 'delete';
 export const QUERY_TYPES: Operations[] = [
@@ -61,7 +61,9 @@ export const getTrackedTables = (tables: Table[]) => {
 };
 
 export const getUntrackedTables = (tables: Table[]) => {
-  return tables.filter(t => !t.is_table_tracked);
+  return tables
+    .filter(t => !t.is_table_tracked)
+    .sort((a, b) => (a.table_name > b.table_name ? 1 : -1));
 };
 
 export const getTableColumnNames = (table: Table) => {
@@ -326,7 +328,7 @@ export const findAllFromRel = (curTable: Table, rel: Relationship) => {
       if (fkc) {
         rTable = fkc.ref_table;
         rSchema = fkc.ref_table_table_schema;
-        rcol = [fkc.column_mapping[(lcol as any) as string]];
+        rcol = [fkc ? fkc.column_mapping[(lcol as any) as string] : ''];
       }
     }
 
@@ -342,7 +344,7 @@ export const findAllFromRel = (curTable: Table, rel: Relationship) => {
         rSchema = 'public';
       }
       const rfkc = findOppFKConstraint(curTable, rcol);
-      lcol = [rfkc!.column_mapping[(rcol as any) as string]];
+      lcol = [rfkc ? rfkc!.column_mapping[(rcol as any) as string] : ''];
     }
   }
   return {

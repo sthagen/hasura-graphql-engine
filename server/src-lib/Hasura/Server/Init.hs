@@ -177,6 +177,7 @@ mkServeOptions rso = do
 
   eventsHttpPoolSize <- withEnv (rsoEventsHttpPoolSize rso) (fst eventsHttpPoolSizeEnv)
   eventsFetchInterval <- withEnv (rsoEventsFetchInterval rso) (fst eventsFetchIntervalEnv)
+  maybeAsyncActionsFetchInterval <- withEnv (rsoAsyncActionsFetchInterval rso) (fst asyncActionsFetchIntervalEnv)
   logHeadersFromEnv <- withEnvBool (rsoLogHeadersFromEnv rso) (fst logHeadersFromEnvEnv)
   enableRemoteSchemaPerms <-
     bool RemoteSchemaPermsDisabled RemoteSchemaPermsEnabled <$>
@@ -191,6 +192,8 @@ mkServeOptions rso = do
                                 then WS.PermessageDeflateCompression WS.defaultPermessageDeflate
                                 else WS.NoCompression
                           }
+      asyncActionsFetchInterval =
+        fromMaybe defaultAsyncActionsFetchInterval maybeAsyncActionsFetchInterval
   webSocketKeepAlive <- KeepAliveDelay . fromIntegral . fromMaybe 5
       <$> withEnv (rsoWebSocketKeepAlive rso) (fst webSocketKeepAliveEnv)
 
@@ -203,19 +206,25 @@ mkServeOptions rso = do
     bool MaintenanceModeDisabled MaintenanceModeEnabled
     <$> withEnvBool (rsoEnableMaintenanceMode rso) (fst maintenanceModeEnv)
 
-  return $ ServeOptions port host connParams txIso adminScrt authHook jwtSecret
+  schemaPollInterval <- withEnv (rsoSchemaPollInterval rso) (fst schemaPollIntervalEnv)
+
+  disableSchemaSync <- withEnvBool (rsoSchemaSyncDisable rso) (fst schemaSyncDisableEnv)
+
+  pure $ ServeOptions port host connParams txIso adminScrt authHook jwtSecret
                         unAuthRole corsCfg enableConsole consoleAssetsDir
                         enableTelemetry strfyNum enabledAPIs lqOpts enableAL
                         enabledLogs serverLogLevel planCacheOptions
                         internalErrorsConfig eventsHttpPoolSize eventsFetchInterval
-                        logHeadersFromEnv enableRemoteSchemaPerms connectionOptions webSocketKeepAlive
-                        inferFunctionPerms maintenanceMode experimentalFeatures
+                        asyncActionsFetchInterval logHeadersFromEnv enableRemoteSchemaPerms
+                        connectionOptions webSocketKeepAlive inferFunctionPerms maintenanceMode
+                        schemaPollInterval experimentalFeatures disableSchemaSync
   where
 #ifdef DeveloperAPIs
     defaultAPIs = [METADATA,GRAPHQL,PGDUMP,CONFIG,DEVELOPER]
 #else
     defaultAPIs = [METADATA,GRAPHQL,PGDUMP,CONFIG]
 #endif
+    defaultAsyncActionsFetchInterval = AAFIInterval 1000 -- 1000 Milliseconds or 1 Second
     mkConnParams (RawConnParams s c i cl p pt) = do
       stripes <- fromMaybe 1 <$> withEnv s (fst pgStripesEnv)
       -- Note: by Little's Law we can expect e.g. (with 50 max connections) a
@@ -357,6 +366,7 @@ serveCmdFooter =
       , enableTelemetryEnv, wsReadCookieEnv, stringifyNumEnv, enabledAPIsEnv
       , enableAllowlistEnv, enabledLogsEnv, logLevelEnv, devModeEnv
       , adminInternalErrorsEnv, webSocketKeepAliveEnv
+      , asyncActionsFetchIntervalEnv
       ]
 
     eventEnvs = [ eventsHttpPoolSizeEnv, eventsFetchIntervalEnv ]
@@ -371,6 +381,14 @@ eventsFetchIntervalEnv :: (String, String)
 eventsFetchIntervalEnv =
   ( "HASURA_GRAPHQL_EVENTS_FETCH_INTERVAL"
   , "Interval in milliseconds to sleep before trying to fetch events again after a fetch returned no events from postgres."
+  )
+
+asyncActionsFetchIntervalEnv :: (String, String)
+asyncActionsFetchIntervalEnv =
+  ( "HASURA_GRAPHQL_ASYNC_ACTIONS_FETCH_INTERVAL"
+  , "Interval in milliseconds to sleep before trying to fetch new async actions. "
+    ++ "Value \"0\" implies completely disable fetching async actions from storage. "
+    ++ "Default 1000 milliseconds"
   )
 
 logHeadersFromEnvEnv :: (String, String)
@@ -577,6 +595,12 @@ maintenanceModeEnv :: (String, String)
 maintenanceModeEnv =
   ( "HASURA_GRAPHQL_ENABLE_MAINTENANCE_MODE"
   , "Flag to enable maintenance mode in the graphql-engine"
+  )
+
+schemaPollIntervalEnv :: (String, String)
+schemaPollIntervalEnv =
+  ( "HASURA_GRAPHQL_SCHEMA_POLL_INTERVAL"
+  , "Interval to poll metadata storage for updates in milliseconds - Default 1000 (1s)"
   )
 
 adminInternalErrorsEnv :: (String, String)
@@ -907,6 +931,14 @@ parseGraphqlEventsFetchInterval = optional $
     help (snd eventsFetchIntervalEnv)
   )
 
+parseGraphqlAsyncActionsFetchInterval :: Parser (Maybe AsyncActionsFetchInterval)
+parseGraphqlAsyncActionsFetchInterval = optional $
+  option (eitherReader readAsyncActionFetchInterval)
+  ( long "async-actions-fetch-interval" <>
+    metavar (fst asyncActionsFetchIntervalEnv) <>
+    help (snd eventsFetchIntervalEnv)
+  )
+
 parseLogHeadersFromEnv :: Parser Bool
 parseLogHeadersFromEnv =
   switch ( long "log-headers-from-env" <>
@@ -931,6 +963,15 @@ parseEnableMaintenanceMode =
            help (snd maintenanceModeEnv)
          )
 
+parseSchemaPollInterval :: Parser (Maybe Milliseconds)
+parseSchemaPollInterval = optional $
+  option (eitherReader readEither)
+  ( long "schema-poll-interval" <>
+    metavar (fst schemaPollIntervalEnv)  <>
+    help (snd schemaPollIntervalEnv)
+  )
+
+
 mxRefetchDelayEnv :: (String, String)
 mxRefetchDelayEnv =
   ( "HASURA_GRAPHQL_LIVE_QUERIES_MULTIPLEXED_REFETCH_INTERVAL"
@@ -949,6 +990,12 @@ enableAllowlistEnv :: (String, String)
 enableAllowlistEnv =
   ( "HASURA_GRAPHQL_ENABLE_ALLOWLIST"
   , "Only accept allowed GraphQL queries"
+  )
+
+schemaSyncDisableEnv :: (String, String)
+schemaSyncDisableEnv =
+  ( "HASURA_SCHEMA_SYNC_DISABLE"
+  , "Disable Schema Sync Listener"
   )
 
 -- NOTES re. default:
@@ -987,6 +1034,12 @@ parseLogLevel = optional $
   option (eitherReader readLogLevel)
          ( long "log-level" <>
            help (snd logLevelEnv)
+         )
+
+parseSchemaSyncDisable :: Parser Bool
+parseSchemaSyncDisable =
+  switch ( long "schema-sync-disable" <>
+           help (snd schemaSyncDisableEnv)
          )
 
 -- Init logging related
@@ -1090,13 +1143,16 @@ serveOptionsParser =
   <*> parseGraphqlAdminInternalErrors
   <*> parseGraphqlEventsHttpPoolSize
   <*> parseGraphqlEventsFetchInterval
+  <*> parseGraphqlAsyncActionsFetchInterval
   <*> parseLogHeadersFromEnv
   <*> parseEnableRemoteSchemaPerms
   <*> parseWebSocketCompression
   <*> parseWebSocketKeepAlive
   <*> parseInferFunctionPerms
   <*> parseEnableMaintenanceMode
+  <*> parseSchemaPollInterval
   <*> parseExperimentalFeatures
+  <*> parseSchemaSyncDisable
 
 -- | This implements the mapping between application versions
 -- and catalog schema versions.
