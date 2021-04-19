@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 module Hasura.RQL.Types.Column
   ( ColumnType(..)
   , _ColumnScalar
@@ -179,6 +178,7 @@ data ColumnInfo (b :: BackendType)
   , pgiDescription :: !(Maybe G.Description)
   } deriving (Generic)
 deriving instance Backend b => Eq (ColumnInfo b)
+deriving instance Backend b => Show (ColumnInfo b)
 instance Backend b => Cacheable (ColumnInfo b)
 instance Backend b => NFData (ColumnInfo b)
 instance Backend b => Hashable (ColumnInfo b)

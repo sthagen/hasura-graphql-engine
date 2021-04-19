@@ -30,6 +30,7 @@ import           Hasura.Tracing
 
 instance BackendTransport 'MSSQL  where
   runDBQuery = runQuery
+  runDBQueryExplain = runQueryExplain
   runDBMutation = runMutation
   runDBSubscription = runSubscription
 
@@ -54,6 +55,14 @@ runQuery reqId query fieldName _userInfo logger _sourceConfig tx genSql =  do
   withElapsedTime
     $ trace ("MSSQL Query for root field " <>> fieldName)
     $ run tx
+
+runQueryExplain
+  :: ( MonadIO m
+     , MonadError QErr m
+     )
+  => DBStepInfo 'MSSQL
+  -> m EncJSON
+runQueryExplain (DBStepInfo _ _ _ action) = run action
 
 runMutation
   :: ( MonadIO m
@@ -111,6 +120,6 @@ mkQueryLog
   -> RequestId
   -> QueryLog
 mkQueryLog gqlQuery fieldName preparedSql requestId =
-  QueryLog gqlQuery ((fieldName,) <$> generatedQuery) requestId
+  QueryLog gqlQuery ((fieldName,) <$> generatedQuery) requestId Database
   where
     generatedQuery = preparedSql <&> \qs -> GeneratedQuery qs J.Null

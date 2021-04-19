@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Convert the simple T-SQL AST to an SQL query, ready to be passed
@@ -6,6 +5,7 @@
 
 module Hasura.Backends.MSSQL.ToQuery
   ( fromSelect
+  , withExplain
   , fromReselect
   , toQueryFlat
   , toQueryPretty
@@ -175,6 +175,15 @@ fromSelect Select {..} = case selectFor of
       , fromWhere selectWhere
       , fromOrderBys selectTop selectOffset selectOrderBy
       , fromFor selectFor
+      ]
+
+withExplain :: Printer -> Printer
+withExplain p =
+  SepByPrinter
+    NewlinePrinter
+      [ "SET SHOWPLAN_TEXT ON"
+      , p
+      , "SET SHOWPLAN_TEXT OFF"
       ]
 
 fromJoinSource :: JoinSource -> Printer

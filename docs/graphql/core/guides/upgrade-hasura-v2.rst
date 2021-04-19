@@ -44,6 +44,32 @@ The following are the most significant conceptual changes introduced in Hasura v
   A detailed changelog with all the new features introduced in Hasura v2 is available on the
   `releases page <https://github.com/hasura/graphql-engine/releases>`__.
 
+Breaking behaviour changes
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- **Semantics of explicit "null" values in "where" filters have changed**
+
+  According to the discussion in `issue 704 <https://github.com/hasura/graphql-engine/issues/704#issuecomment-635571407>`_, an explicit ``null``
+  value in a comparison input object will be treated as an error rather than resulting in the expression being evaluated to ``True``.
+
+  For example: ``delete_users(where: {id: {_eq: $userId}}) { name }`` will yield an error if ``$userId`` is ``null`` instead of deleting
+  all users.
+
+  The older behaviour can be preserved by setting the ``HASURA_GRAPHQL_V1_BOOLEAN_NULL_COLLAPSE`` env var to ``true``.
+
+- **Semantics of "null" join values in remote schema relationships have changed**
+
+  In a remote schema relationship query, the remote schema will be queried when
+  all of the joining arguments are not ``null`` values. When there are ``null`` value(s), the remote schema won't be queried and the response of
+  the remote relationship field will be ``null``. Earlier, the remote schema was queried with the ``null`` value arguments and the response
+  depended upon how the remote schema handled the ``null`` arguments but as per user feedback, this behaviour was clearly not expected.
+
+- **Incompatibility with older Hasura version remote schemas**
+
+  With v2.0, some of the auto-generated schema types have been extended. For example, ``String_comparison_exp`` has an additional ``regex`` input
+  object field. This means if you have a Hasura API with an older Hasura version added as a remote schema then it will have a type conflict. You
+  should upgrade all Hasura remote schemas to avoid such type conflicts.
+
 Hasura configuration
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -60,21 +86,20 @@ Hasura configuration
   with a Postgres database to start a Hasura v2 instance as Hasura always needs a Postgres database to store
   its metadata.
 
-- ``HASURA_GRAPHQL_DATABASE_URL`` env var works in a backwards compatible way. The database set using this env var is
-  connected automatically with the name ``default`` in Hasura v2 while upgrading an existing instance or while starting a fresh
-  instance.
+- The database set using the ``HASURA_GRAPHQL_DATABASE_URL`` env var is connected automatically with the name
+  ``default`` in Hasura v2 while upgrading an existing instance or while starting a fresh instance.
 
-  Setting this env var post startup/upgrade will have no effect as the Hasura metadata would already have been initalized and the
-  env var will be treated as any other custom env var.
+  Setting this env var post initial setup/upgrade will have no effect as the Hasura metadata for data sources would already
+  have been initialized and the env var will be treated as any other custom env var.
 
   It is now not mandatory to set this env var if a dedicated ``HASURA_GRAPHQL_METADATA_DATABASE_URL`` is set.
 
 - The values of the env vars ``HASURA_GRAPHQL_PG_CONNECTIONS``, ``HASURA_GRAPHQL_PG_TIMEOUT`` and ``HASURA_GRAPHQL_NO_OF_RETRIES``
-  are used to define the connection parameters of the ``default`` database while upgrading an existing instance or while starting a fresh
-  instance.
+  are used to define the connection parameters of the ``default`` database while upgrading an existing instance
+  or while starting a fresh instance.
 
-  Changing or setting values of these env vars post startup/upgrade will have no impact as their initial values would have been moved to
-  the Hasura metadata already and the values there are now used to define the connection parameters.
+  Post initial setup/upgrade, these env vars can be considered as Deprecated. Changing or setting values of these env vars
+  will have no impact as the values in the Hasura metadata are now used to define the connection parameters.
 
 - Custom env vars can now be used to connect databases dynamically at runtime.
 
@@ -85,8 +110,8 @@ Hasura Cloud projects' metadata is now stored in metadata DBs managed by Hasura 
 the ``HASURA_GRAPHQL_METADATA_DATABASE_URL`` env var is not configurable on Hasura Cloud and is managed
 by Hasura Cloud itself.
 
-By default Hasura Cloud projects are created without any databases connected to them. See :ref:`connecting databases <connect_database>` to add a database
-to a Hasura Cloud v2 project.
+By default Hasura Cloud projects are created without any databases connected to them. See :ref:`connecting databases <connect_database>`
+to add a database to a Hasura Cloud v2 project.
 
 See the below section on :ref:`hasura_v1_v2_compatibility` to use a Hasura v2 Cloud project like a Hasura v1
 Cloud project.
@@ -117,13 +142,17 @@ Migrate Hasura v1 instance to Hasura v2
 Hasura v2 is backwards compatible with Hasura v1. Hence simply updating the Hasura docker image version number
 and restarting your Hasura instance should work seamlessly. The database connected using the ``HASURA_GRAPHQL_DATABASE_URL``
 env var will be added as a database with the name ``default`` automatically and all existing metadata and migrations will be
-run against it.
+assumed to belong to it.
 
 Upgrade CLI project to enable multiple database support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Update your Hasura CLI project to ``config v3`` using the steps mentioned in :ref:`this guide <migrations_upgrade_v3>`
 to take full advantages of the features introduced in Hasura v2.
+
+Post upgrading to ``config v3``, the database connection parameters would have been moved to the metadata. Hence it is important
+to ensure that the same env vars are used for storing database connection strings across all environments and the metadata
+being applied also uses the appropriate env vars.
 
 .. note::
 
@@ -134,12 +163,25 @@ to take full advantages of the features introduced in Hasura v2.
 Updates to CI/CD after upgrading to Hasura v2
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- Ensure the same env vars are used to store the database urls across different environments.
-
-- If using Hasura CLI project in ``config v3``:
-
-  Run ``hasura metadata apply`` first and then ``hasura migrate apply``.
+The following commands need to be executed in the specified order to apply metadata and migrations in CI/CD workflows
 
 - If using Hasura CLI project in ``config v2``:
 
-  No changes needed. Run ``hasura migrate apply`` first and then ``hasura metadata apply``.
+  - No changes needed.
+
+  - Run:
+
+    - ``hasura migrate apply`` - *(apply migrations to the database named "default")*
+    - ``hasura metadata apply`` - *(apply metadata to the database named "default")*
+
+
+- If using Hasura CLI project in ``config v3``:
+
+  - Ensure that the same env vars are used for storing database connection strings across all environments and the metadata
+    being applied also uses the appropriate env vars.
+
+  - Run:
+
+    - ``hasura metadata apply`` - *(connect Hasura to the databases configured in the metadata)*
+    - ``hasura migrate apply --all-databases`` - *(apply the migrations to the connected databases)*
+    - ``hasura metadata reload`` - *(make Hasura aware of any newly created database objects in the previous step)*
