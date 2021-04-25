@@ -249,6 +249,11 @@ if [ "$MODE" = "graphql-engine" ]; then
   export HASURA_GRAPHQL_DATABASE_URL=${HASURA_GRAPHQL_DATABASE_URL-$PG_DB_URL}
   export HASURA_GRAPHQL_SERVER_PORT=${HASURA_GRAPHQL_SERVER_PORT-8181}
 
+  export HASURA_BIGQUERY_SERVICE_ACCOUNT="<<<SERVICE_ACCOUNT_FILE_CONTENTS>>>" # `cat ../SERVICE_ACCOUNT_FILE.json`
+  export HASURA_BIGQUERY_PROJECT_ID="<<<PROJECT_ID>>>"
+  export HASURA_BIGQUERY_DATASETS="<<<CSV_DATASETS>>>"
+
+
   echo_pretty "We will connect to postgres at '$HASURA_GRAPHQL_DATABASE_URL'"
   echo_pretty "If you haven't overridden HASURA_GRAPHQL_DATABASE_URL, you can"
   echo_pretty "launch a fresh postgres container for us to connect to, in a"
@@ -413,10 +418,17 @@ elif [ "$MODE" = "test" ]; then
     echo_pretty "Starting graphql-engine, logging to $GRAPHQL_ENGINE_TEST_LOG"
     export HASURA_GRAPHQL_SERVER_PORT=8088
 
+    # Extra sources for multi-source tests. Uses the default postgres DB if no extra sources
+    # are defined.
+    export HASURA_GRAPHQL_PG_SOURCE_URL_1=${HASURA_GRAPHQL_PG_SOURCE_URL_1-$PG_DB_URL}
+    export HASURA_GRAPHQL_PG_SOURCE_URL_2=${HASURA_GRAPHQL_PG_SOURCE_URL_2-$PG_DB_URL}
+
     # Using --metadata-database-url flag to test multiple backends
     cabal new-run --project-file=cabal.project.dev-sh -- exe:graphql-engine \
-      --metadata-database-url="$PG_DB_URL" serve --stringify-numeric-types \
-      --enable-console --console-assets-dir ../console/static/dist \
+      --metadata-database-url="$PG_DB_URL" serve \
+      --stringify-numeric-types \
+      --enable-console \
+      --console-assets-dir ../console/static/dist \
       &> "$GRAPHQL_ENGINE_TEST_LOG" & GRAPHQL_ENGINE_PID=$!
 
     echo -n "Waiting for graphql-engine"
