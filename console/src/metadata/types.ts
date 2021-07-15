@@ -5,11 +5,7 @@ export type DataSource = {
   name: string;
   url: string | { from_env: string };
   driver: Driver;
-  connection_pool_settings?: {
-    max_connections?: number;
-    idle_timeout?: number;
-    retries?: number;
-  };
+  connection_pool_settings?: ConnectionPoolSettings;
   read_replicas?: Omit<SourceConnectionInfo, 'connection_string'>[];
 };
 
@@ -882,16 +878,46 @@ export interface RestEndpointEntry {
  * Docs for type: https://hasura.io/docs/latest/graphql/core/api-reference/syntax-defs.html#pgsourceconnectioninfo
  */
 
+export type SSLModeOptions = 'verify-ca' | 'verify-full' | 'disable';
+
+export type IsolationLevelOptions =
+  | 'read-committed'
+  | 'repeatable-read'
+  | 'serializable';
+
+export interface SSLConfigOptions {
+  sslmode?: SSLModeOptions;
+  sslrootcert?: {
+    from_env: string;
+  };
+  sslcert?: {
+    from_env: string;
+  };
+  sslkey?: {
+    from_env: string;
+  };
+  sslpassword?: {
+    from_env: string;
+  };
+}
+
+export interface ConnectionPoolSettings {
+  max_connections?: number;
+  idle_timeout?: number;
+  retries?: number;
+  pool_timeout?: number;
+  connection_lifetime?: number;
+}
+
 export interface SourceConnectionInfo {
   // used for SQL Server
-  connection_string: string;
+  connection_string?: string | { from_env: string };
   // used for Postgres
-  database_url: string | { from_env: string };
-  pool_settings: {
-    max_connections: number;
-    idle_timeout: number;
-    retries: number;
-  };
+  database_url?: string | { from_env: string };
+  use_prepared_statements?: boolean;
+  isolation_level?: IsolationLevelOptions;
+  pool_settings?: ConnectionPoolSettings;
+  ssl_configuration?: SSLConfigOptions;
 }
 
 /**
@@ -915,7 +941,7 @@ export interface HasuraMetadataV2 {
 
 export interface MetadataDataSource {
   name: string;
-  kind?: 'postgres' | 'mysql' | 'mssql' | 'bigquery';
+  kind?: 'postgres' | 'mysql' | 'mssql' | 'bigquery' | 'citus';
   configuration?: {
     connection_info?: SourceConnectionInfo;
     // pro-only feature
@@ -942,6 +968,16 @@ export interface InheritedRole {
   role_set: string[];
 }
 
+export interface APILimits {
+  per_role?: Record<string, number>;
+  global?: number;
+}
+
+type APILimit<T> = {
+  global: T;
+  per_role?: Record<string, T>;
+};
+
 export interface HasuraMetadataV3 {
   version: 3;
   sources: MetadataDataSource[];
@@ -953,4 +989,16 @@ export interface HasuraMetadataV3 {
   allowlist?: AllowList[];
   inherited_roles: InheritedRole[];
   rest_endpoints?: RestEndpointEntry[];
+  api_limits?: {
+    disabled?: boolean;
+    depth_limit?: APILimit<number>;
+    node_limit?: APILimit<number>;
+    rate_limit?: APILimit<{
+      unique_params: 'IP' | string[];
+      max_reqs_per_min: number;
+    }>;
+  };
+  graphql_schema_introspection?: {
+    disabled_for_roles: string[];
+  };
 }

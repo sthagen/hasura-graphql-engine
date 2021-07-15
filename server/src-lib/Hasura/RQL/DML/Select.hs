@@ -19,6 +19,7 @@ import qualified Hasura.Tracing                            as Tracing
 
 import           Hasura.Backends.Postgres.SQL.Types        hiding (TableName)
 import           Hasura.Backends.Postgres.Translate.Select
+import           Hasura.Base.Error
 import           Hasura.EncJSON
 import           Hasura.RQL.DML.Internal
 import           Hasura.RQL.DML.Types
@@ -203,7 +204,7 @@ convSelectQ
   -> SelectQExt ('Postgres 'Vanilla)     -- Given Select Query
   -> SessVarBldr ('Postgres 'Vanilla) m
   -> ValueParser ('Postgres 'Vanilla) m S.SQLExp
-  -> m (AnnSimpleSel ('Postgres 'Vanilla))
+  -> m (AnnSimpleSelect ('Postgres 'Vanilla))
 convSelectQ table fieldInfoMap selPermInfo selQ sessVarBldr prepValBldr = do
   -- Convert where clause
   wClause <- forM (sqWhere selQ) $ \boolExp ->
@@ -239,8 +240,7 @@ convSelectQ table fieldInfoMap selPermInfo selQ sessVarBldr prepValBldr = do
 
   let tabFrom = FromTable table
       tabPerm = TablePerm resolvedSelFltr mPermLimit
-      tabArgs = SelectArgs wClause annOrdByM mQueryLimit
-                (S.intToSQLExp <$> mQueryOffset) Nothing
+      tabArgs = SelectArgs wClause annOrdByM mQueryLimit (fromIntegral <$> mQueryOffset) Nothing
 
   strfyNum <- stringifyNum . _sccSQLGenCtx <$> askServerConfigCtx
   return $ AnnSelectG annFlds tabFrom tabPerm tabArgs strfyNum
@@ -315,7 +315,7 @@ convSelectQuery
   -> ValueParser ('Postgres 'Vanilla) m S.SQLExp
   -- -> (ColumnType ('Postgres 'Vanilla) -> Value -> m S.SQLExp)
   -> SelectQuery
-  -> m (AnnSimpleSel  ('Postgres 'Vanilla))
+  -> m (AnnSimpleSelect ('Postgres 'Vanilla))
 convSelectQuery sessVarBldr prepArgBuilder (DMLQuery _ qt selQ) = do
   tabInfo     <- withPathK "table" $ askTabInfoSource qt
   selPermInfo <- askSelPermInfo tabInfo
@@ -324,7 +324,7 @@ convSelectQuery sessVarBldr prepArgBuilder (DMLQuery _ qt selQ) = do
   validateHeaders $ spiRequiredHeaders selPermInfo
   convSelectQ qt fieldInfo selPermInfo extSelQ sessVarBldr prepArgBuilder
 
-selectP2 :: JsonAggSelect -> (AnnSimpleSel ('Postgres 'Vanilla), DS.Seq Q.PrepArg) -> Q.TxE QErr EncJSON
+selectP2 :: JsonAggSelect -> (AnnSimpleSelect ('Postgres 'Vanilla), DS.Seq Q.PrepArg) -> Q.TxE QErr EncJSON
 selectP2 jsonAggSelect (sel, p) =
   encJFromBS . runIdentity . Q.getRow
   <$> Q.rawQE dmlTxErrorHandler (Q.fromBuilder selectSQL) (toList p) True
@@ -333,14 +333,14 @@ selectP2 jsonAggSelect (sel, p) =
 
 phaseOne
   :: (QErrM m, UserInfoM m, CacheRM m, HasServerConfigCtx m)
-  => SelectQuery -> m (AnnSimpleSel  ('Postgres 'Vanilla), DS.Seq Q.PrepArg)
+  => SelectQuery -> m (AnnSimpleSelect ('Postgres 'Vanilla), DS.Seq Q.PrepArg)
 phaseOne query = do
   let sourceName = getSourceDMLQuery query
   tableCache :: TableCache ('Postgres 'Vanilla) <- askTableCache sourceName
   flip runTableCacheRT (sourceName, tableCache) $ runDMLP1T $
     convSelectQuery sessVarFromCurrentSetting (valueParserWithCollectableType binRHSBuilder) query
 
-phaseTwo :: (MonadTx m) => (AnnSimpleSel ('Postgres 'Vanilla), DS.Seq Q.PrepArg) -> m EncJSON
+phaseTwo :: (MonadTx m) => (AnnSimpleSelect ('Postgres 'Vanilla), DS.Seq Q.PrepArg) -> m EncJSON
 phaseTwo =
   liftTx . selectP2 JASMultipleRows
 

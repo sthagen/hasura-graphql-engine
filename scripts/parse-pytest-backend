@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+PARAMS=""
+BACKEND="${BACKEND:-postgres}"
+
+die_backends() {
+cat <<EOL
+Invalid --backend argument. Available backends:
+  postgres (default)
+  bigquery
+  citus
+  mssql
+
+EOL
+exit 1
+}
+
+while (( "$#" )); do
+  case "$1" in
+    --backend)
+      if [ -n "$2" ] && [ "${2:0:1}" != "-" ]; then
+        BACKEND=$2
+        shift 2
+      fi
+      ;;
+    *) # preserve positional arguments
+      PARAMS="$PARAMS $1"
+      shift
+      ;;
+  esac
+done
+
+# validate backend argument
+case "$BACKEND" in
+  postgres)
+  ;;
+  bigquery)
+    # check that required bigquery environment variables are present
+    if [[ -z "${HASURA_BIGQUERY_SERVICE_ACCOUNT_FILE:-}" || -z "${HASURA_BIGQUERY_PROJECT_ID:-}"  ]]; then
+      echo "HASURA_BIGQUERY_SERVICE_ACCOUNT_FILE and HASURA_BIGQUERY_PROJECT_ID environment variables are needed to run these tests."
+      echo "See https://github.com/hasura/graphql-engine/blob/master/server/CONTRIBUTING.md#running-the-python-test-suite-on-bigquery for more information."
+      exit 0
+    fi
+
+    export HASURA_BIGQUERY_SERVICE_ACCOUNT=$(cat "$HASURA_BIGQUERY_SERVICE_ACCOUNT_FILE")
+  ;;
+  citus)
+  ;;
+  mssql)
+  ;;
+  *)
+    die_backends
+  ;;
+esac
+
+# set positional arguments in their proper place
+eval set -- "$PARAMS"
+export BACKEND

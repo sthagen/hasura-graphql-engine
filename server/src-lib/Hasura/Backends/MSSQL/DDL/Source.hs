@@ -9,11 +9,10 @@ import           Hasura.Prelude
 
 import           Hasura.Backends.MSSQL.Connection
 import           Hasura.Backends.MSSQL.Meta
+import           Hasura.Base.Error
 import           Hasura.RQL.Types.Common
-import           Hasura.RQL.Types.Error
 import           Hasura.RQL.Types.Source
 import           Hasura.SQL.Backend
-import           Hasura.Server.Types              (MaintenanceMode)
 
 resolveSourceConfig
   :: (MonadIO m)
@@ -27,9 +26,8 @@ resolveSourceConfig _name (MSSQLConnConfiguration connInfo) = runExceptT do
 resolveDatabaseMetadata
   :: (MonadIO m)
   => MSSQLSourceConfig
-  -> MaintenanceMode
   -> m (Either QErr (ResolvedSource 'MSSQL))
-resolveDatabaseMetadata config _maintenanceMode = runExceptT do
+resolveDatabaseMetadata config = runExceptT do
   dbTablesMetadata <- loadDBMetadata pool
   pure $ ResolvedSource config dbTablesMetadata mempty mempty
   where

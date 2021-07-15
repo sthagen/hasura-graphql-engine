@@ -2,17 +2,16 @@ module Hasura.Backends.MSSQL.DDL.BoolExp where
 
 import           Hasura.Prelude
 
-import qualified Data.Aeson                            as J
-import qualified Data.HashMap.Strict                   as Map
-import qualified Data.Text                             as T
+import qualified Data.Aeson                   as J
+import qualified Data.HashMap.Strict          as Map
+import qualified Data.Text                    as T
 
-import           Data.Text.Extended                    (dquote, (<<>))
+import           Data.Text.Extended           (dquote, (<<>))
 
-import           Hasura.Backends.MSSQL.Instances.Types ()
-import           Hasura.Backends.MSSQL.Types           hiding (ColumnType)
+import           Hasura.Backends.MSSQL.Types  hiding (ColumnType)
+import           Hasura.Base.Error
 import           Hasura.RQL.IR.BoolExp
 import           Hasura.RQL.Types.Column
-import           Hasura.RQL.Types.Error
 import           Hasura.RQL.Types.SchemaCache
 import           Hasura.SQL.Backend
 import           Hasura.SQL.Types

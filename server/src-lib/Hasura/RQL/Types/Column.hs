@@ -37,11 +37,10 @@ import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.Text.Extended
 
+import           Hasura.Base.Error
 import           Hasura.Incremental            (Cacheable)
-import           Hasura.RQL.Instances          ()
 import           Hasura.RQL.Types.Backend
 import           Hasura.RQL.Types.Common
-import           Hasura.RQL.Types.Error
 import           Hasura.SQL.Backend
 import           Hasura.SQL.Types
 
@@ -139,8 +138,8 @@ parseScalarValueColumnType columnType value = case columnType of
 parseScalarValuesColumnType
   :: (MonadError QErr m, Backend b)
   => ColumnType b -> [Value] -> m [ScalarValue b]
-parseScalarValuesColumnType columnType values =
-  indexedMapM (parseScalarValueColumnType columnType) values
+parseScalarValuesColumnType columnType =
+  indexedMapM (parseScalarValueColumnType columnType)
 
 -- | “Raw” column info, as stored in the catalog (but not in the schema cache). Instead of
 -- containing a 'PGColumnType', it only contains a 'PGScalarType', which is combined with the

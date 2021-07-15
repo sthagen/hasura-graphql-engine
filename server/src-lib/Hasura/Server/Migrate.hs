@@ -40,6 +40,7 @@ import           System.Directory                    (doesFileExist)
 import qualified Hasura.SQL.AnyBackend               as AB
 
 import           Hasura.Backends.Postgres.SQL.Types
+import           Hasura.Base.Error
 import           Hasura.Logging                      (Hasura, LogLevel (..), ToEngineLog (..))
 import           Hasura.RQL.DDL.Schema
 import           Hasura.RQL.DDL.Schema.LegacyCatalog
@@ -223,13 +224,6 @@ downgradeCatalog defaultSourceConfig opts time = do
             | x == upper = Right [y]
             | otherwise = (y:) <$> dropOlderDowngrades xs
 
-setCatalogVersion :: MonadTx m => Text -> UTCTime -> m ()
-setCatalogVersion ver time = liftTx $ Q.unitQE defaultTxErrorHandler [Q.sql|
-    INSERT INTO hdb_catalog.hdb_version (version, upgraded_on) VALUES ($1, $2)
-    ON CONFLICT ((version IS NOT NULL))
-    DO UPDATE SET version = $1, upgraded_on = $2
-  |] (ver, time) False
-
 migrations
   :: forall m. (MonadIO m, MonadTx m)
   => Maybe (SourceConnConfiguration ('Postgres 'Vanilla)) -> Bool -> MaintenanceMode -> [(Text, MigrationPair m)]
@@ -287,7 +281,7 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
                     SourceMetadata defaultSource _mnsTables _mnsFunctions defaultSourceConfig
               in Metadata (OMap.singleton defaultSource defaultSourceMetadata)
                    _mnsRemoteSchemas _mnsQueryCollections _mnsAllowlist _mnsCustomTypes _mnsActions _mnsCronTriggers mempty
-                   emptyApiLimit emptyMetricsConfig mempty
+                   emptyApiLimit emptyMetricsConfig mempty mempty
         liftTx $ insertMetadataInCatalog metadataV3
 
     from43To42 = do

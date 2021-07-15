@@ -22,6 +22,8 @@ module Hasura.RQL.Types.EventTrigger
 
   , defaultRetryConf
   , defaultTimeoutSeconds
+
+  , RecreateEventTriggers (..)
   ) where
 
 import           Hasura.Prelude
@@ -85,7 +87,10 @@ instance ToJSON SubscribeColumns where
 data SubscribeOpSpec
   = SubscribeOpSpec
   { sosColumns :: !SubscribeColumns
+  -- ^ Columns of the table that user can subscribe to listen for changes.
   , sosPayload :: !(Maybe SubscribeColumns)
+  -- ^ Columns that the event trigger payload should consists. If set, only those columns will be
+  -- visible in the payload. By default, the payload consists of all the columns of the table.
   } deriving (Show, Eq, Generic)
 instance NFData SubscribeOpSpec
 instance Cacheable SubscribeOpSpec
@@ -286,3 +291,9 @@ instance Backend b => FromJSON (InvokeEventTriggerQuery b) where
 
 instance Backend b => ToJSON (InvokeEventTriggerQuery b) where
   toJSON = genericToJSON hasuraJSON{omitNothingFields=True}
+
+data RecreateEventTriggers
+  = RETRecreate
+  | RETDoNothing
+  deriving (Show, Eq, Generic)
+instance Cacheable RecreateEventTriggers

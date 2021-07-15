@@ -49,6 +49,7 @@ func TestSourceConfig_Export(t *testing.T) {
     connection_info:
       database_url:
         from_env: HASURA_GRAPHQL_DATABASE_URL
+      isolation_level: read-committed
       pool_settings:
         idle_timeout: 180
         max_connections: 50
@@ -187,6 +188,7 @@ func TestSourceConfig_Build(t *testing.T) {
     connection_info:
       database_url:
         from_env: HASURA_GRAPHQL_DATABASE_URL
+      isolation_level: read-committed
       pool_settings:
         idle_timeout: 180
         max_connections: 50
@@ -212,6 +214,7 @@ func TestSourceConfig_Build(t *testing.T) {
     connection_info:
       database_url:
         from_env: HASURA_GRAPHQL_DATABASE_URL
+      isolation_level: read-committed
       pool_settings:
         idle_timeout: 180
         max_connections: 50
@@ -226,6 +229,84 @@ func TestSourceConfig_Build(t *testing.T) {
       schema: public
   kind: postgres
   name: s2
+  tables:
+  - table:
+      name: t1
+      schema: public
+  - table:
+      name: t2
+      schema: public
+- configuration:
+    connection_info:
+      database_url:
+        from_env: HASURA_GRAPHQL_DATABASE_URL
+      isolation_level: read-committed
+      pool_settings:
+        idle_timeout: 180
+        max_connections: 50
+        retries: 1
+      use_prepared_statements: true
+  functions:
+  - function:
+      name: get_t1
+      schema: public
+  - function:
+      name: get_t2
+      schema: public
+  kind: postgres
+  name: s 3
+  tables:
+  - table:
+      name: t1
+      schema: public
+  - table:
+      name: t2
+      schema: public
+- configuration:
+    connection_info:
+      database_url:
+        from_env: HASURA_GRAPHQL_DATABASE_URL
+      isolation_level: read-committed
+      pool_settings:
+        idle_timeout: 180
+        max_connections: 50
+        retries: 1
+      use_prepared_statements: true
+  functions:
+  - function:
+      name: get_t1
+      schema: public
+  - function:
+      name: get_t2
+      schema: public
+  kind: postgres
+  name: s 4
+  tables:
+  - table:
+      name: t1
+      schema: public
+  - table:
+      name: t2
+      schema: public
+- configuration:
+    connection_info:
+      database_url:
+        from_env: HASURA_GRAPHQL_DATABASE_URL
+      isolation_level: read-committed
+      pool_settings:
+        idle_timeout: 180
+        max_connections: 50
+        retries: 1
+      use_prepared_statements: true
+  functions:
+  - function:
+      name: get_t1
+      schema: public
+  - function:
+      name: get_t2
+      schema: public
+  kind: postgres
+  name: s 5
   tables:
   - table:
       name: t1

@@ -28,6 +28,7 @@ import qualified Hasura.SQL.AnyBackend                  as AB
 import           Hasura.Backends.Postgres.DDL.Table
 import           Hasura.Backends.Postgres.Execute.Types
 import           Hasura.Backends.Postgres.SQL.Types
+import           Hasura.Base.Error
 import           Hasura.EncJSON
 import           Hasura.RQL.Types
 import           Hasura.Session
@@ -193,7 +194,7 @@ runInvokeEventTrigger (InvokeEventTriggerQuery name source payload) = do
   ti  <- askTabInfoFromTrigger source name
   sourceConfig <- askSourceConfig @('Postgres pgKind) source
   eid <- liftEitherM $ liftIO $ runPgSourceWriteTx sourceConfig $
-         insertManualEvent (_tciName $ _tiCoreInfo ti) name payload
+         insertManualEvent (tableInfoName ti) name payload
   return $ encJFromJValue $ object ["event_id" .= eid]
   where
     assertManual (TriggerOpsDef _ _ _ man) = case man of

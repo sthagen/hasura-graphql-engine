@@ -27,10 +27,12 @@ module Hasura.RQL.DDL.Schema.Table
 
 import           Hasura.Prelude
 
+import qualified Data.Aeson.Ordered                 as JO
 import qualified Data.HashMap.Strict.Extended       as Map
 import qualified Data.HashMap.Strict.InsOrd         as OMap
 import qualified Data.HashSet                       as S
 import qualified Language.GraphQL.Draft.Syntax      as G
+
 
 import           Control.Arrow.Extended
 import           Control.Lens.Extended              hiding ((.=))
@@ -43,6 +45,7 @@ import qualified Hasura.Incremental                 as Inc
 import qualified Hasura.SQL.AnyBackend              as AB
 
 import           Hasura.Backends.Postgres.SQL.Types (QualifiedTable)
+import           Hasura.Base.Error
 import           Hasura.EncJSON
 import           Hasura.GraphQL.Context
 import           Hasura.GraphQL.Schema.Common       (textToName)
@@ -50,6 +53,7 @@ import           Hasura.RQL.DDL.Deps
 import           Hasura.RQL.DDL.Schema.Cache.Common
 import           Hasura.RQL.DDL.Schema.Common
 import           Hasura.RQL.DDL.Schema.Enum         (resolveEnumReferences)
+import           Hasura.RQL.IR
 import           Hasura.RQL.Types                   hiding (fmFunction)
 import           Hasura.Server.Utils
 
@@ -163,14 +167,15 @@ checkConflictingNode sc tnGQL = do
     Left _ -> pure ()
     Right (results, _reusability) -> do
       case OMap.lookup $$(G.litName "__schema") results of
-        Just (RFRaw (Object schema)) -> do
+        Just (RFRaw (JO.Object schema)) -> do
           let names = do
-                Object queryType <- Map.lookup "queryType" schema
-                Array fields <- Map.lookup "fields" queryType
-                traverse (\case Object field -> do
-                                  String name <- Map.lookup "name" field
-                                  pure name
-                                _ -> Nothing) fields
+                JO.Object queryType <- JO.lookup "queryType" schema
+                JO.Array fields <- JO.lookup "fields" queryType
+                for fields \case
+                  JO.Object field -> do
+                    JO.String name <- JO.lookup "name" field
+                    pure name
+                  _ -> Nothing
           case names of
             Nothing -> pure ()
             Just ns ->
@@ -246,15 +251,17 @@ runSetExistingTableIsEnumQ (SetTableIsEnum source tableName isEnum) = do
     $ tableMetadataSetter @('Postgres 'Vanilla) source tableName.tmIsEnum .~ isEnum
   return successMsg
 
-data SetTableCustomization
+data SetTableCustomization b
   = SetTableCustomization
   { _stcSource        :: !SourceName
-  , _stcTable         :: !QualifiedTable
-  , _stcConfiguration :: !(TableConfig ('Postgres 'Vanilla))
-  } deriving (Show, Eq)
-$(deriveToJSON hasuraJSON ''SetTableCustomization)
+  , _stcTable         :: !(TableName b)
+  , _stcConfiguration :: !(TableConfig b)
+  } deriving (Show, Eq, Generic)
 
-instance FromJSON SetTableCustomization where
+instance (Backend b) => ToJSON (SetTableCustomization b) where
+  toJSON = genericToJSON hasuraJSON
+
+instance (Backend b) => FromJSON (SetTableCustomization b) where
   parseJSON = withObject "Object" $ \o ->
     SetTableCustomization
       <$> o .:? "source" .!= defaultSource
@@ -290,11 +297,14 @@ runSetTableCustomFieldsQV2 (SetTableCustomFields source tableName rootFields col
   return successMsg
 
 runSetTableCustomization
-  :: (QErrM m, CacheRWM m, MetadataM m) => SetTableCustomization -> m EncJSON
+  :: forall b m
+  . (QErrM m, CacheRWM m, MetadataM m, Backend b, BackendMetadata b)
+  => SetTableCustomization b
+  -> m EncJSON
 runSetTableCustomization (SetTableCustomization source table config) = do
-  void $ askTabInfo @('Postgres 'Vanilla) source table
+  void $ askTabInfo @b source table
   buildSchemaCacheFor
-    (MOSourceObjId source $ AB.mkAnyBackend $ SMOTable @('Postgres 'Vanilla) table)
+    (MOSourceObjId source $ AB.mkAnyBackend $ SMOTable @b table)
     $ MetadataModifier
     $ tableMetadataSetter source table.tmConfiguration .~ config
   return successMsg
@@ -456,6 +466,7 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
         , _tciEnumValues = enumValues
         , _tciCustomConfig = config
         , _tciDescription = _ptmiDescription metadataTable
+        , _tciExtraTableMetadata = _ptmiExtraTableMetadata metadataTable
         }
 
     -- Step 2: Process the raw table cache to replace Postgres column types with logical column

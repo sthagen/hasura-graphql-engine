@@ -9,9 +9,8 @@ import           Data.Kind                     (Type)
 import           Data.Text.Extended
 import           Data.Typeable                 (Typeable)
 
+import           Hasura.Base.Error
 import           Hasura.Incremental            (Cacheable)
-import           Hasura.RQL.DDL.Headers        ()
-import           Hasura.RQL.Types.Error
 import           Hasura.SQL.Backend
 import           Hasura.SQL.Tag
 import           Hasura.SQL.Types
@@ -56,11 +55,10 @@ class
   , Representable (SQLOperator b)
   , Representable (SessionVarType b)
   , Representable (SourceConnConfiguration b)
+  , Representable (ExtraTableMetadata b)
   , Representable (XRelay b)
   , Representable (XNodesAgg b)
-  , Representable (XRemoteField b)
   , Representable (XComputedField b)
-  , Representable (XDistinct b)
   , Generic (Column b)
   , Ord (TableName b)
   , Ord (FunctionName b)
@@ -71,7 +69,6 @@ class
   , Data (ScalarType b)
   , Traversable (BooleanOperators b)
   , Data (SQLExpression b)
-  , ToSQL (SQLExpression b)
   , FromJSON (BasicOrderType b)
   , FromJSON (Column b)
   , FromJSON (ConstraintName b)
@@ -80,6 +77,7 @@ class
   , FromJSON (ScalarType b)
   , FromJSON (TableName b)
   , FromJSON (SourceConnConfiguration b)
+  , FromJSON (ExtraTableMetadata b)
   , FromJSONKey (Column b)
   , ToJSON (BasicOrderType b)
   , ToJSON (Column b)
@@ -92,6 +90,8 @@ class
   , ToJSON (SourceConfig b)
   , ToJSON (TableName b)
   , ToJSON (SourceConnConfiguration b)
+  , ToJSON (ExtraTableMetadata b)
+  , ToJSON (SQLExpression b)
   , ToJSONKey (Column b)
   , ToJSONKey (FunctionName b)
   , ToJSONKey (ScalarType b)
@@ -101,10 +101,6 @@ class
   , ToTxt (ScalarType b)
   , ToTxt (TableName b)
   , ToTxt (ConstraintName b)
-  , Arbitrary (Column b)
-  , Arbitrary (TableName b)
-  , Arbitrary (FunctionName b)
-  , Arbitrary (SourceConnConfiguration b)
   , Cacheable (SourceConfig b)
   , Typeable b
   , HasTag b
@@ -113,7 +109,6 @@ class
   type SourceConfig            b :: Type
   type SourceConnConfiguration b :: Type
   type Identifier              b :: Type
-  type Alias                   b :: Type
   type TableName               b :: Type
   type FunctionName            b :: Type
   type FunctionArgType         b :: Type
@@ -128,12 +123,12 @@ class
   type SQLExpression           b :: Type
   type SQLOperator             b :: Type
 
+  type ExtraTableMetadata      b :: Type
+
   -- extension types
   type XComputedField          b :: Type
-  type XRemoteField            b :: Type
   type XRelay                  b :: Type
   type XNodesAgg               b :: Type
-  type XDistinct               b :: Type
 
   -- functions on types
   functionArgScalarType :: FunctionArgType b -> ScalarType b
@@ -148,6 +143,10 @@ class
   -- functions on names
   tableGraphQLName    :: TableName b    -> Either QErr G.Name
   functionGraphQLName :: FunctionName b -> Either QErr G.Name
+
+  -- | This function is used in the validation of a remote relationship where
+  -- we check whether the columns that are mapped to arguments of a remote
+  -- field are compatible
   scalarTypeGraphQLName :: ScalarType b -> Either QErr G.Name
 
   -- TODO: metadata related functions

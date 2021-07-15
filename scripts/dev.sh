@@ -108,6 +108,7 @@ case "${1-}" in
       RUN_INTEGRATION_TESTS=true
       RUN_UNIT_TESTS=false
       RUN_HLINT=false
+      source scripts/parse-pytest-backend
       ;;
       --hlint)
       RUN_INTEGRATION_TESTS=false
@@ -118,6 +119,7 @@ case "${1-}" in
       RUN_INTEGRATION_TESTS=true
       RUN_UNIT_TESTS=true
       RUN_HLINT=true
+      BACKEND="postgres"
       ;;
       *)
       die_usage
@@ -159,6 +161,7 @@ fi
 source scripts/containers/postgres
 source scripts/containers/mssql
 source scripts/containers/citus
+source scripts/data-sources-util.sh
 
 PG_RUNNING=0
 MSSQL_RUNNING=0
@@ -197,6 +200,22 @@ function citus_start() {
   citus_launch_container
   CITUS_RUNNING=1
   citus_wait
+}
+
+function start_dbs() {
+  # always launch the postgres container
+  pg_start
+
+  case "$BACKEND" in
+    citus)
+      citus_start
+    ;;
+    mssql)
+      mssql_start
+    ;;
+    # bigquery deliberately omitted as its test setup is atypical. See:
+    # https://github.com/hasura/graphql-engine/blob/master/server/CONTRIBUTING.md#running-the-python-test-suite-on-bigquery
+  esac
 }
 
 
@@ -248,11 +267,6 @@ if [ "$MODE" = "graphql-engine" ]; then
 
   export HASURA_GRAPHQL_DATABASE_URL=${HASURA_GRAPHQL_DATABASE_URL-$PG_DB_URL}
   export HASURA_GRAPHQL_SERVER_PORT=${HASURA_GRAPHQL_SERVER_PORT-8181}
-
-  export HASURA_BIGQUERY_SERVICE_ACCOUNT="<<<SERVICE_ACCOUNT_FILE_CONTENTS>>>" # `cat ../SERVICE_ACCOUNT_FILE.json`
-  export HASURA_BIGQUERY_PROJECT_ID="<<<PROJECT_ID>>>"
-  export HASURA_BIGQUERY_DATASETS="<<<CSV_DATASETS>>>"
-
 
   echo_pretty "We will connect to postgres at '$HASURA_GRAPHQL_DATABASE_URL'"
   echo_pretty "If you haven't overridden HASURA_GRAPHQL_DATABASE_URL, you can"
@@ -396,24 +410,33 @@ elif [ "$MODE" = "test" ]; then
   # It's better UX to build first (possibly failing) before trying to launch
   # PG, but make sure that new-run uses the exact same build plan, else we risk
   # rebuilding twice... ugh
-  cabal new-build --project-file=cabal.project.dev-sh exe:graphql-engine test:graphql-engine-tests
-  pg_start
+  # Formerly this was a `cabal build` but mixing cabal build and cabal run
+  # seems to conflict now, causing re-linking, haddock runs, etc. Instead do a
+  # `graphql-engine version` to trigger build
+  cabal new-run --project-file=cabal.project.dev-sh -- exe:graphql-engine \
+      --metadata-database-url="$PG_DB_URL" version
 
-  # These also depend on a running DB:
+  if [ "$RUN_INTEGRATION_TESTS" = true ]; then
+    start_dbs
+  else
+    # unit tests just need access to a postgres instance:
+    pg_start
+  fi
+
   if [ "$RUN_UNIT_TESTS" = true ]; then
     echo_pretty "Running Haskell test suite"
     HASURA_GRAPHQL_DATABASE_URL="$PG_DB_URL" cabal new-run --project-file=cabal.project.dev-sh -- test:graphql-engine-tests
   fi
 
   if [ "$RUN_HLINT" = true ]; then
-    cd "$PROJECT_ROOT/server"
-    hlint src-*
+    if command -v hlint >/dev/null; then
+      (cd "$PROJECT_ROOT/server" && hlint src-*)
+    else
+      echo_warn "hlint is not installed: skipping"
+    fi
   fi
 
   if [ "$RUN_INTEGRATION_TESTS" = true ]; then
-    mssql_start
-    citus_start
-
     GRAPHQL_ENGINE_TEST_LOG=/tmp/hasura-dev-test-engine.log
     echo_pretty "Starting graphql-engine, logging to $GRAPHQL_ENGINE_TEST_LOG"
     export HASURA_GRAPHQL_SERVER_PORT=8088
@@ -424,6 +447,7 @@ elif [ "$MODE" = "test" ]; then
     export HASURA_GRAPHQL_PG_SOURCE_URL_2=${HASURA_GRAPHQL_PG_SOURCE_URL_2-$PG_DB_URL}
 
     # Using --metadata-database-url flag to test multiple backends
+    #       HASURA_GRAPHQL_PG_SOURCE_URL_* For a couple multi-source pytests:
     cabal new-run --project-file=cabal.project.dev-sh -- exe:graphql-engine \
       --metadata-database-url="$PG_DB_URL" serve \
       --stringify-numeric-types \
@@ -444,21 +468,7 @@ elif [ "$MODE" = "test" ]; then
     echo ""
     echo " Ok"
 
-    METADATA_URL=http://127.0.0.1:$HASURA_GRAPHQL_SERVER_PORT/v1/metadata
-
-    echo ""
-    echo "Adding Postgres source"
-    curl "$METADATA_URL" \
-    --data-raw '{"type":"pg_add_source","args":{"name":"default","configuration":{"connection_info":{"database_url":"'"$PG_DB_URL"'","pool_settings":{}}}}}'
-
-    echo ""
-    echo "Adding SQL Server source"
-    curl "$METADATA_URL" \
-    --data-raw '{"type":"mssql_add_source","args":{"name":"mssql","configuration":{"connection_info":{"connection_string":"'"$MSSQL_DB_URL"'","pool_settings":{}}}}}'
-
-    echo ""
-    echo "Sources added:"
-    curl "$METADATA_URL" --data-raw '{"type":"export_metadata","args":{}}'
+    add_sources $HASURA_GRAPHQL_SERVER_PORT
 
     cd "$PROJECT_ROOT/server/tests-py"
 
@@ -506,7 +516,7 @@ elif [ "$MODE" = "test" ]; then
     fi
 
     # TODO MAYBE: fix deprecation warnings, make them an error
-    if ! pytest -W ignore::DeprecationWarning --hge-urls http://127.0.0.1:$HASURA_GRAPHQL_SERVER_PORT --pg-urls "$PG_DB_URL" "${PYTEST_ARGS[@]}"; then
+    if ! pytest -W ignore::DeprecationWarning --hge-urls http://127.0.0.1:$HASURA_GRAPHQL_SERVER_PORT --pg-urls "$PG_DB_URL" --durations=20 "${PYTEST_ARGS[@]}"; then
       echo_error "^^^ graphql-engine logs from failed test run can be inspected at: $GRAPHQL_ENGINE_TEST_LOG"
     fi
     deactivate  # python venv

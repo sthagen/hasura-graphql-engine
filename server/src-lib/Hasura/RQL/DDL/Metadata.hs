@@ -20,13 +20,13 @@ module Hasura.RQL.DDL.Metadata
 import           Hasura.Prelude
 
 import qualified Data.Aeson.Ordered                 as AO
-import qualified Data.HashMap.Strict                as HM
 import qualified Data.HashMap.Strict.InsOrd         as OMap
 import qualified Data.HashSet                       as HS
 import qualified Data.List                          as L
 
 import           Control.Lens                       ((.~), (^?))
 import           Data.Aeson
+import           Data.Text.Extended                 ((<<>))
 
 import qualified Hasura.SQL.AnyBackend              as AB
 
@@ -45,6 +45,7 @@ import           Hasura.RQL.DDL.RemoteSchema
 import           Hasura.RQL.DDL.ScheduledTrigger
 import           Hasura.RQL.DDL.Schema
 
+import           Hasura.Base.Error
 import           Hasura.EncJSON
 import           Hasura.RQL.DDL.Metadata.Types
 import           Hasura.RQL.Types
@@ -52,7 +53,12 @@ import           Hasura.Server.Types                (ExperimentalFeature (..))
 
 
 runClearMetadata
-  :: (MonadIO m, CacheRWM m, MetadataM m, MonadError QErr m, HasServerConfigCtx m)
+  :: ( MonadIO m
+     , CacheRWM m
+     , MetadataM m
+     , HasServerConfigCtx m
+     , MonadMetadataStorageQueryAPI m
+     )
   => ClearMetadata -> m EncJSON
 runClearMetadata _ = do
   metadata <- getMetadata
@@ -87,10 +93,10 @@ explicitly in @'runReplaceMetadata' function.
 -}
 
 runReplaceMetadata
-  :: ( QErrM m
-     , CacheRWM m
+  :: ( CacheRWM m
      , MetadataM m
      , MonadIO m
+     , MonadMetadataStorageQueryAPI m
      , HasServerConfigCtx m
      )
   => ReplaceMetadata -> m EncJSON
@@ -103,6 +109,7 @@ runReplaceMetadataV1
      , CacheRWM m
      , MetadataM m
      , MonadIO m
+     , MonadMetadataStorageQueryAPI m
      , HasServerConfigCtx m
      )
   => ReplaceMetadataV1 -> m EncJSON
@@ -116,19 +123,47 @@ runReplaceMetadataV2
      , MetadataM m
      , MonadIO m
      , HasServerConfigCtx m
+     , MonadMetadataStorageQueryAPI m
      )
   => ReplaceMetadataV2 -> m EncJSON
 runReplaceMetadataV2 ReplaceMetadataV2{..} = do
+  -- we drop all the future cron trigger events before inserting the new metadata
+  -- and re-populating future cron events below
   experimentalFeatures <- _sccExperimentalFeatures <$> askServerConfigCtx
   let inheritedRoles =
         case _rmv2Metadata of
           RMWithSources (Metadata { _metaInheritedRoles }) -> _metaInheritedRoles
           RMWithoutSources _                               -> mempty
+      introspectionDisabledRoles =
+        case _rmv2Metadata of
+          RMWithSources m    -> _metaSetGraphqlIntrospectionOptions m
+          RMWithoutSources _ -> mempty
   when (inheritedRoles /= mempty && (EFInheritedRoles `notElem` experimentalFeatures)) $
     throw400 ConstraintViolation $ "inherited_roles can only be added when it's enabled in the experimental features"
+
   oldMetadata <- getMetadata
+  let (oldCronTriggersIncludedInMetadata, oldCronTriggersNotIncludedInMetadata) =
+        ((OMap.filter ctIncludeInMetadata (_metaCronTriggers  oldMetadata))
+        ,(OMap.filter (not . ctIncludeInMetadata) (_metaCronTriggers  oldMetadata)))
+      newCronTriggers =
+        case _rmv2Metadata of
+          RMWithoutSources m -> _mnsCronTriggers m
+          RMWithSources m    -> _metaCronTriggers m
+  dropFutureCronEvents $ MetadataCronTriggers $ OMap.keys oldCronTriggersIncludedInMetadata
+  cronTriggers <- do
+    -- traverse over the new cron triggers and check if any of them
+    -- already exists as a cron trigger with "included_in_metadata: false"
+    for_ newCronTriggers $ \ct ->
+      when (ctName ct `OMap.member` oldCronTriggersNotIncludedInMetadata) $
+        throw400 AlreadyExists $
+        "cron trigger with name "
+        <> ctName ct
+        <<> " already exists as a cron trigger with \"included_in_metadata\" as false"
+    -- we add the old cron triggers with included_in_metadata set to false with the
+    -- newly added cron triggers
+    pure $ newCronTriggers <> oldCronTriggersNotIncludedInMetadata
   metadata <- case _rmv2Metadata of
-    RMWithSources m -> pure m
+    RMWithSources m -> pure $ m { _metaCronTriggers = cronTriggers }
     RMWithoutSources MetadataNoSources{..} -> do
       let maybeDefaultSourceMetadata = oldMetadata ^? metaSources.ix defaultSource.toSourceMetadata
       defaultSourceMetadata <- onNothing maybeDefaultSourceMetadata $
@@ -139,8 +174,8 @@ runReplaceMetadataV2 ReplaceMetadataV2{..} = do
                                      }
       pure $ Metadata (OMap.singleton defaultSource newDefaultSourceMetadata)
                         _mnsRemoteSchemas _mnsQueryCollections _mnsAllowlist
-                        _mnsCustomTypes _mnsActions _mnsCronTriggers (_metaRestEndpoints oldMetadata)
-                        emptyApiLimit emptyMetricsConfig mempty
+                        _mnsCustomTypes _mnsActions cronTriggers (_metaRestEndpoints oldMetadata)
+                        emptyApiLimit emptyMetricsConfig mempty introspectionDisabledRoles
   putMetadata metadata
 
   case _rmv2AllowInconsistentMetadata of
@@ -148,6 +183,10 @@ runReplaceMetadataV2 ReplaceMetadataV2{..} = do
       buildSchemaCache noMetadataModify
     NoAllowInconsistentMetadata ->
       buildSchemaCacheStrict
+
+  -- populate future cron events for all the new cron triggers that are imported
+  for_ newCronTriggers $ \(CronTriggerMetadata {..}) ->
+    populateInitialCronTriggerEvents ctSchedule ctName
 
   -- See Note [Clear postgres schema for dropped triggers]
   dropPostgresTriggers (getOnlyPGSources oldMetadata) (getOnlyPGSources metadata)
@@ -168,9 +207,20 @@ runReplaceMetadataV2 ReplaceMetadataV2{..} = do
           let oldTriggersMap = getPGTriggersMap oldSourceCache
               newTriggersMap = getPGTriggersMap newSourceCache
               droppedTriggers = OMap.keys $ oldTriggersMap `OMap.difference` newTriggersMap
-          sourceConfig <- askSourceConfig @('Postgres 'Vanilla) source
-          for_ droppedTriggers $
-            \name -> liftIO $ runPgSourceWriteTx sourceConfig $ delTriggerQ name >> archiveEvents name
+              catcher e@QErr{ qeCode }
+                | qeCode == Unexpected = pure () -- NOTE: This information should be returned by the inconsistent_metadata response, so doesn't need additional logging.
+                | otherwise = throwError e -- rethrow other errors
+
+          -- This will swallow Unexpected exceptions for sources if allow_inconsistent_metadata is enabled
+          -- This should be ok since if the sources are already missing from the cache then they should
+          -- not need to be removed.
+          --
+          -- TODO: Determine if any errors should be thrown from askSourceConfig at all if the errors are just being discarded
+          flip catchError catcher do
+            sourceConfig <- askSourceConfig @('Postgres 'Vanilla) source
+            for_ droppedTriggers $
+              \name -> do
+                  liftIO $ runPgSourceWriteTx sourceConfig $ delTriggerQ name >> archiveEvents name
       where
         getPGTriggersMap = OMap.unions . map _tmEventTriggers . OMap.elems . _smTables
 
@@ -181,11 +231,21 @@ processExperimentalFeatures metadata = do
   -- export inherited roles only when inherited_roles is set in the experimental features
   pure $ bool (metadata { _metaInheritedRoles = mempty }) metadata isInheritedRolesSet
 
+-- | Only includes the cron triggers with `included_in_metadata` set to `True`
+processCronTriggersMetadata :: Metadata -> Metadata
+processCronTriggersMetadata metadata =
+  let cronTriggersIncludedInMetadata = OMap.filter ctIncludeInMetadata $ _metaCronTriggers metadata
+  in metadata { _metaCronTriggers = cronTriggersIncludedInMetadata }
+
+processMetadata :: HasServerConfigCtx m => Metadata -> m Metadata
+processMetadata metadata =
+  processCronTriggersMetadata <$> processExperimentalFeatures metadata
+
 runExportMetadata
   :: forall m . ( QErrM m, MetadataM m, HasServerConfigCtx m)
   => ExportMetadata -> m EncJSON
 runExportMetadata ExportMetadata{} = do
-  AO.toEncJSON . metadataToOrdJSON <$> (getMetadata >>= processExperimentalFeatures)
+  AO.toEncJSON . metadataToOrdJSON <$> (getMetadata >>= processMetadata)
 
 runExportMetadataV2
   :: forall m . ( QErrM m, MetadataM m, HasServerConfigCtx m)
@@ -199,19 +259,31 @@ runExportMetadataV2 currentResourceVersion ExportMetadata{} = do
 
 runReloadMetadata :: (QErrM m, CacheRWM m, MetadataM m) => ReloadMetadata -> m EncJSON
 runReloadMetadata (ReloadMetadata reloadRemoteSchemas reloadSources) = do
-  sc <- askSchemaCache
-  let remoteSchemaInvalidations = case reloadRemoteSchemas of
-        RSReloadAll    -> HS.fromList $ getAllRemoteSchemas sc
-        RSReloadList l -> l
-      pgSourcesInvalidations = case reloadSources of
-        RSReloadAll    -> HS.fromList $ HM.keys $ scSources sc
-        RSReloadList l -> l
-      cacheInvalidations = CacheInvalidations
+  metadata <- getMetadata
+  let allSources = HS.fromList $ OMap.keys $ _metaSources metadata
+      allRemoteSchemas = HS.fromList $ OMap.keys $ _metaRemoteSchemas metadata
+      checkRemoteSchema name =
+        unless (HS.member name allRemoteSchemas)
+        $ throw400 NotExists
+        $ "Remote schema with name " <> name <<> " not found in metadata"
+      checkSource name =
+        unless (HS.member name allSources)
+        $ throw400 NotExists
+        $ "Source with name " <> name <<> " not found in metadata"
+
+  remoteSchemaInvalidations <- case reloadRemoteSchemas of
+    RSReloadAll    -> pure allRemoteSchemas
+    RSReloadList l -> mapM_ checkRemoteSchema l *> pure l
+  pgSourcesInvalidations <- case reloadSources of
+    RSReloadAll    -> pure allSources
+    RSReloadList l -> mapM_ checkSource l *> pure l
+
+  let cacheInvalidations = CacheInvalidations
                            { ciMetadata = True
                            , ciRemoteSchemas = remoteSchemaInvalidations
                            , ciSources = pgSourcesInvalidations
                            }
-  metadata <- getMetadata
+
   buildSchemaCacheWithOptions CatalogUpdate cacheInvalidations metadata
   pure successMsg
 

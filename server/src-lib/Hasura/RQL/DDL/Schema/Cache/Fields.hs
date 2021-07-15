@@ -19,8 +19,10 @@ import           Data.Text.Extended
 import qualified Hasura.Incremental                 as Inc
 import qualified Hasura.SQL.AnyBackend              as AB
 
+import           Hasura.Base.Error
 import           Hasura.RQL.DDL.ComputedField
 import           Hasura.RQL.DDL.Relationship
+import           Hasura.RQL.DDL.RemoteRelationship
 import           Hasura.RQL.DDL.Schema.Cache.Common
 import           Hasura.RQL.DDL.Schema.Function
 import           Hasura.RQL.Types
@@ -67,12 +69,18 @@ addNonColumnFields = proc ( source
          buildComputedField
     -< (HS.fromList $ M.keys rawTableInfo, map (source, pgFunctions, _nctiTable,) _nctiComputedFields)
 
+  let columnsAndComputedFields =
+        let columnFields = columns <&> FIColumn
+            computedFields = M.fromList $ flip map (M.toList computedFieldInfos) $
+              \(cfName, (cfInfo, _)) -> (fromComputedField cfName, FIComputedField cfInfo)
+        in M.union columnFields computedFields
+
   rawRemoteRelationshipInfos
     <- buildInfoMapPreservingMetadata
          (_rrmName . (^. _3))
          (mkRemoteRelationshipMetadataObject @b)
          buildRemoteRelationship
-    -< ((M.elems columns, remoteSchemaMap), map (source, _nctiTable,) _nctiRemoteRelationships)
+    -< ((columnsAndComputedFields, remoteSchemaMap), map (source, _nctiTable,) _nctiRemoteRelationships)
 
   let relationshipFields = mapKeys fromRel relationshipInfos
       computedFieldFields = mapKeys fromComputedField computedFieldInfos
@@ -249,7 +257,7 @@ buildRemoteRelationship
   :: forall b arr m
    . ( ArrowChoice arr, ArrowWriter (Seq CollectedInfo) arr
      , ArrowKleisli m arr, MonadError QErr m, BackendMetadata b)
-  => ( ([ColumnInfo b], RemoteSchemaMap)
+  => ( (FieldInfoMap (FieldInfo b), RemoteSchemaMap)
      , (SourceName, TableName b, RemoteRelationshipMetadata)
      ) `arr` Maybe (RemoteFieldInfo b)
 buildRemoteRelationship = proc ( (pgColumns, remoteSchemaMap)
@@ -262,7 +270,7 @@ buildRemoteRelationship = proc ( (pgColumns, remoteSchemaMap)
                     $ TORemoteRel _rrmName
       addRemoteRelationshipContext e = "in remote relationship" <> _rrmName <<> ": " <> e
       RemoteRelationshipDef{..} = _rrmDefinition
-      remoteRelationship = RemoteRelationship _rrmName source table _rrdHasuraFields
+      remoteRelationship = RemoteRelationship @b _rrmName source table _rrdHasuraFields
                            _rrdRemoteSchema _rrdRemoteField
   (| withRecordInconsistency (
        (| modifyErrA (do

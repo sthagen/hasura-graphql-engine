@@ -1,16 +1,160 @@
 # Hasura GraphQL Engine Changelog
 
 ## Next release
+(Add entries below in the order of server, console, cli, docs, others)
 
+
+## v2.0.2
+
+- server: only if `query-log` is enabled the graphql query string is printed in `http-log` and `websocket-log`
+- server: fix reloading inconsistent sources or remote schemas via `reload_metadata` API
+- server: support scalar computed fields in remote joins (close #7101)
+- server: Support computed fields in query filter (`where` argument) (close #7100)
+- server: add a `$.detail.operation.request_mode` field to `http-log` which takes the values `"single"` or `"batched"` to log whether a GraphQL request was executed on its own or as part of a batch
+- server: add `query` field to `http-log` and `websocket-log` in non-error cases
+- server: Add global limit to BigQuery via the `global_select_limit`
+  field in the connection configuration
+- server: include action and event names in log output
+- server: log all HTTP errors in remote schema calls as `remote-schema-error` with details
+- server: For BigQuery, make `global_select_limit` configuration optional with a default value of
+`1000`
+- console: add `reload all databases` checkbox to the metadata settings page
+- console: add schema sharing
+- console: fix issue with changing table's column name and graphQL field name simultaneously
+- cli: add linux and darwin arm64 support
+
+## v2.0.1
+
+- server: fix resetting metadata catalog version to 43 while initializing postgres source with v1.0 catalog
+
+## v2.0.0
+
+NOTE: This only includes the diff between v2.0.0 and v2.0.0-beta.2
+
+- server: make improvements in the `livequery-poller-log`
+- server: Backends Citus, MSSQL, and BigQuery now all support the `set_table_customization` operation.
+- server: Adds caching support for queries using remote schema permissions
+- server: All Postgres boolean operators now support the null-collapsing behaviour described in [#704](https://github.com/hasura/graphql-engine/issues/704) and enabled via the `HASURA_GRAPHQL_V1_BOOLEAN_NULL_COLLAPSE` environment variable.
+- server: add `update_remote_schema` metadata query
+- console: add citus support
+- console: add support for `update_remote_schema` API while modifying remote schemas
+- console: hide postgres system schemas by default
+- cli: `metadata diff` will now only show the differences in metadata. old behaviour is avialble behind a flag (`--type unified-common`) (#5487)
+- cli: add citus support
+- cli: allow `--skip-execution` to be used with `up` and `down` flags in `migrate apply`
+- cli: allow deleting migration state from server using `--server` flag in `migrate delete` command
+
+## v2.0.0-beta.2
 
 ### Bug fixes and improvements
 
-(Add entries below in the order of: server, console, cli, docs, others)
+- server: nodes aggregates and inherited roles support for SQL Server
+- server: remote relationships (database to remote schema joins) are now supported on SQL Server and BigQuery
+- server: BigQuery: switches to a single query generation from a dataloader approach. This should result in
+  faster query responses.
+- server: BigQuery: various bug fixes related to aggregations
+- server: fix add source API wiping out source's metadata when replace_configuration is true
+- console: add foreign key CRUD functionality to ms sql server tables
+- console: allow tracking of custom SQL functions having composite type (rowtype) input arguments
+- console: allow input object presets in remote schema permissions
+- console: add modify functionality on columns, primary keys & unique keys to MS SQL Server tables
+- cli: add interactive prompt to get input when `--database-name` flag is missing
+- cli: fix metadata export to avoid unnecessary empty lines in actions.graphql (#5338)
+- cli: generate migrations for mssql databases in hasura console mode  (#7011)
 
+## v2.0.0-beta.1
+
+### Bug fixes and improvements
+
+- server: fix regression with MSSQL execution (#6976)
+- server: fix asymptotic performance of fetching from the event_log table
+- console: add `pool_timeout`, `connection_lifetime` and `isolation_level` connection params to connect database form
+- console: add check constraints and comments to MS SQL Server tables' read-only modify page
+- console: add create table functionality for MS SQL Server
+- console: update connect database form with SSL certificates
+- console: add drop table functionality to MS SQL Server tables
+- console: allow renaming data sources
+- console: show error notification for table and cloumn names exceeding 63 characters and trim migration names exceeding 255 characters
+- cli: fix version command using stderr as output stream (#6998)
+
+## v2.0.0-alpha.11
+
+### Breaking Changes
+
+- In this release, the name of the computed field argument has changed from `<function_name>_args` to
+  `<computed_field_name>_<table_name>_args` as the function name is internal detail for a computed field.
+  This change also enables adding a root-level tracked function as a computed field which previously would have thrown input type conflict error.
+
+### Bug fixes and improvements
+
+- server: detect and apply metadata changes by `mssql_run_sql` API if required
+- server: fix bug with creation of new cron events when cron trigger is imported via metadata
+- server: log warning for deprecated environment variables.
+- server: initialise `hdb_catalog` tables only when required, and only run the event loop for sources where it is required
+- server: fix a bug where remote schema permissions would fail when used in conjunction with query variables (fix #6656)
+- server: add `rename_source` metadata API (fix #6681)
+- server: fix subscriptions with session argument in user-defined function (fix #6657)
+- server: MSSQL: Support ORDER BY for text/ntext types.
+- server: MSSQL: Support _lt, _eq, etc. for text/ntext types.
+- server: MSSQL: Fix offset when there's no order by.
+- server: MSSQL: Support booleans better.
+- server: Include permission filter in the exists clause (fix #6931)
+- server: add support for adding multi-column foreign key relationships
+- server: fix a bug where `@skip` and `@include` were not allowed on the same field
+- server: properly reject queries containing unknown or misplaced directives
+- server: fix bigint overflow, incorrect geojson format in event trigger payload (fix #3697) (fix #2368)
+- server: fix introspection output not being consistently ordered
+- server: forward the x-request-id header when generated by graphql-engine (instead of being user-provided) (fix #6654)
+- server: fix erroneous schema type for action output fields (fix #6631)
+- server: introduce `--graceful-shutdown-timeout` server config which will wait for the in-flight scheduled and event trigger events and async actions to complete before shutting down
+- server: fix a regression from V1 and allow string values for most Postgres column types
+- server: sanitise event trigger and scheduled trigger logs to omit possibly sensitive request body and headers
+- server: fix parsing of values for Postgres char columns (fix #6814)
+- server: fix query execution of custom function containing a composite argument type
+- server: fix a bug in query validation that would cause some queries using default variable values to be rejected (fix #6867)
+- server: REST endpoint bugfix for UUID url params
+- server: custom URI schemes are now supported in CORS config (fix #5818) (#5940)
+- server: explaining/analyzing a query now works for mssql sources
+- server: fix MSSQL multiplexed subscriptions (fix #6887)
+- server: fix bug preventing tables with the same name in different sources
+- server: include more detail in inconsistent metadata error messages (fix #6684)
+- server: return useful error messages for missing env vars in metadata when `allow_inconsistent_metadata` is enabled (fix #6913)
+- console: add union types to remote schema permissions
+- console: read-only modify page for mssql
+- console: filter out partitions from track table list and display partition info
+- console: fixes an issue where no schemas are listed on an MSSQL source
+- console: allow editing sources configuration
+- console: show db version and source details in manage db page
+- console: add one-to-one relationships support
+- console: rearrange connect database form and add prepared statements
+- cli: add `-o`/`--output` flag for `hasura metadata` `apply` & `export` subcommands
+```
+# export metadata and write to stdout
+$ hasura metadata export -o json
+```
+- cli: add support for `graphql_schema_introspection` metadata object
+- cli: fix applying migrations in a different environment after config v3 update (#6861)
+- cli: fix bug caused by usage of space character in database name (#6852)
+- cli: fix issues with generated filepaths in windows (#6813)
+- cli: add warning for incompatible pro plugin version
+- cli: add new sub command `delete` to `hasura migrate`
+- cli: fix bug in migrate squash due to empty down file (#3897)
+- cli: fix bug with metadata apply on some CI environments (#6987)
+
+## v2.0.0-alpha.10
+
+### Bug fixes and improvements
+
+- server: fix MSSQL table metadata SQL, return empty array for empty rows (fix #1226)
+- server: aggregation fields are now supported on mssql
+- server: accept a new server config flag `--events-fetch-batch-size` to configure the number of rows being fetched from the events log table in a single batch
+- server: restore proper batching behavior in event trigger processing so that at most 2x batch events are checked out at a time
 - server: fix regression: `on_conflict` was missing in the schema for inserts in tables where the current user has no columns listed in their update permissions (fix #6804)
+- server: fix one-to-one relationship bug which prevented adding one-to-one relationships which didn't have the same column name for target and source
 - console: fix Postgres table creation when table has a non-lowercase name and a comment (#6760)
 - cli: fix regression - `metadata apply —dry-run` was overwriting local metadata files with metadata on server when it should just display the differences.
-- cli: add support for `api_limits` metadata object
+- server: decrease polling interval for scheduled triggers from 60 to 10 seconds
+- server: Change `HASURA_GRAPHQL_SCHEMA_POLL_INTERVAL` env var to `HASURA_GRAPHQL_SCHEMA_SYNC_POLL_INTERVAL` and `schema-poll-interval` option to `--schema-sync-poll-interval`.
 
 ## v2.0.0-alpha.9
 
@@ -25,6 +169,7 @@ only when there are enough present in the items inventory.
 
 ### Bug fixes and improvements
 
+- server: make the ``HASURA_GRAPHQL_PG_CONN_LIFETIME``, ``HASURA_GRAPHQL_POOL_TIMEOUT`` and ``HASURA_GRAPHQL_TX_ISOLATION`` configs source specific
 - server: fix bug with catalog upgrade from alpha.7 (fix #6802)
 - server: fix a bug in remote schema permissions that could result in an invalid GraphQL schema (fix #6029, #6703)
 - server: support query multiplexing in MSSQL subscriptions
@@ -76,7 +221,7 @@ In the future, we will probably offer a way to explicitly choose which behaviour
 - server: re-enable a default HASURA_GRAPHQL_PG_CONN_LIFETIME of 10min
 - server: support for bigquery datasets
 - server: format the values of `injectEventContext` as hexadecimal string instead of integer (fix #6465)
-- server: add "kind" field to query-log items. Kind can be "database", "action", "remote-schema", "graphql", "cached", or "subscription".
+- server: add "kind" field to query-log items. Kind can be "database", "action", "remote-schema", "cached" or "introspection".
 - console: add custom_column_names to track_table request with replaced invalid characters (#992)
 - console: add details button to the success notification to see inserted row
 - console: add request preview for REST endpoints

@@ -10,5 +10,7 @@
   "viewportHeight": 720,
   "chromeWebSecurity": false,
   "video": false,
-  "projectId": "5yiuic"
+  "projectId": "5yiuic",
+  "retries": 1,
+  "numTestsKeptInMemory": 10
 }

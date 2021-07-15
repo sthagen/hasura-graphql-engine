@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveAnyClass               #-}
 {-# LANGUAGE NoGeneralisedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -8,25 +8,23 @@ module Hasura.Backends.BigQuery.Source where
 import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import qualified Crypto.PubKey.RSA.Types as Cry
-import qualified Data.Aeson as J
-import qualified Data.Aeson.Casing as J
-import qualified Data.Aeson.TH as J
-import qualified Data.ByteString.Lazy as BL
-import           Data.Hashable (hashWithSalt)
-import qualified Data.HashMap.Strict as HM
-import           Data.Text (pack)
-import qualified Data.Text.Encoding as TE
-import qualified Data.X509 as X509
-import qualified Data.X509.Memory as X509
-import           Hasura.Incremental (Cacheable (..))
+import qualified Data.Aeson              as J
+import qualified Data.Aeson.Casing       as J
+import qualified Data.Aeson.TH           as J
+import qualified Data.ByteString.Lazy    as BL
+import qualified Data.HashMap.Strict     as HM
+import           Data.Hashable           (hashWithSalt)
+import qualified Data.Text               as T
+import qualified Data.Text.Encoding      as TE
+import qualified Data.X509               as X509
+import qualified Data.X509.Memory        as X509
+import           Hasura.Incremental      (Cacheable (..))
 import           Hasura.Prelude
-import qualified System.Environment as SE (getEnv)
-import           System.FilePath (isRelative)
-import           System.IO.Unsafe (unsafePerformIO)
+import           System.IO.Unsafe        (unsafePerformIO)
 
 
 data PKey = PKey
-  { unPKey :: Cry.PrivateKey
+  { unPKey     :: Cry.PrivateKey
   , originalBS :: Text
   }
   deriving (Show, Eq, Data, Generic, NFData, Hashable)
@@ -79,7 +77,7 @@ data ServiceAccount
   = ServiceAccount
   { _saClientEmail :: !Text
   , _saPrivateKey  :: !PKey
-  , _saProjectId :: !Text
+  , _saProjectId   :: !Text
   } deriving (Eq, Show, Data, NFData, Generic, Hashable)
 $(J.deriveJSON (J.aesonDrop 3 J.snakeCase){J.omitNothingFields=False} ''ServiceAccount)
 instance Arbitrary ServiceAccount where
@@ -97,12 +95,12 @@ instance J.FromJSON a => J.FromJSON (ConfigurationJSON a) where
   parseJSON = \case
     J.Object o | Just (J.String text) <- HM.lookup "from_env" o -> pure (FromEnvJSON text)
     J.String s -> case J.eitherDecode . BL.fromStrict . TE.encodeUtf8 $ s of
-      Left {} -> fail "error parsing configuration json"
+      Left {}  -> fail "error parsing configuration json"
       Right sa -> pure sa
     j -> fmap FromYamlJSON (J.parseJSON j)
 instance J.ToJSON a => J.ToJSON (ConfigurationJSON a) where
   toJSON = \case
-    FromEnvJSON i -> J.object ["from_env" J..= i]
+    FromEnvJSON i  -> J.object ["from_env" J..= i]
     FromYamlJSON j -> J.toJSON j
 
 
@@ -118,12 +116,12 @@ instance Arbitrary ConfigurationInputs where
 instance J.ToJSON ConfigurationInputs where
   toJSON = \case
     FromYamls i -> J.toJSON i
-    FromEnvs i -> J.object ["from_env" J..= i]
+    FromEnvs i  -> J.object ["from_env" J..= i]
 instance J.FromJSON ConfigurationInputs where
   parseJSON = \case
-    J.Object o -> FromEnvs <$> o J..: "from_env"
+    J.Object o    -> FromEnvs <$> o J..: "from_env"
     s@(J.Array _) -> FromYamls <$> J.parseJSON s
-    _ -> fail "one of array or object must be provided"
+    _             -> fail "one of array or object must be provided"
 
 
 -- | Configuration input when the YAML value as well as the Env var have
@@ -138,19 +136,21 @@ instance Arbitrary ConfigurationInput where
 instance J.ToJSON ConfigurationInput where
   toJSON = \case
     FromYaml i -> J.toJSON i
-    FromEnv i -> J.object ["from_env" J..= i]
+    FromEnv i  -> J.object ["from_env" J..= i]
 instance J.FromJSON ConfigurationInput where
   parseJSON = \case
-    J.Object o -> FromEnv <$> o J..: "from_env"
+    J.Object o     -> FromEnv <$> o J..: "from_env"
     s@(J.String _) -> FromYaml <$> J.parseJSON s
-    _ -> fail "one of string or object must be provided"
+    (J.Number n)   -> FromYaml <$> J.parseJSON (J.String (T.pack (show n)))
+    _              -> fail "one of string or number or object must be provided"
 
 
 data BigQueryConnSourceConfig
   = BigQueryConnSourceConfig
-  { _cscServiceAccount :: !(ConfigurationJSON ServiceAccount)
-  , _cscDatasets :: !ConfigurationInputs
-  , _cscProjectId :: !ConfigurationInput -- this is part of service-account.json, but we put it here on purpose
+  { _cscServiceAccount    :: !(ConfigurationJSON ServiceAccount)
+  , _cscDatasets          :: !ConfigurationInputs
+  , _cscProjectId         :: !ConfigurationInput -- this is part of service-account.json, but we put it here on purpose
+  , _cscGlobalSelectLimit :: !ConfigurationInput
   } deriving (Eq, Generic, NFData)
 $(J.deriveJSON (J.aesonDrop 4 J.snakeCase){J.omitNothingFields=True} ''BigQueryConnSourceConfig)
 deriving instance Show BigQueryConnSourceConfig
@@ -163,10 +163,11 @@ instance Cacheable BigQueryConnSourceConfig where
 
 data BigQuerySourceConfig
   = BigQuerySourceConfig
-  { _scServiceAccount :: !ServiceAccount
-  , _scDatasets :: ![Text]
-  , _scProjectId :: !Text -- this is part of service-account.json, but we put it here on purpose
-  , _scAccessTokenMVar :: !(MVar (Maybe TokenResp))
+  { _scServiceAccount    :: !ServiceAccount
+  , _scDatasets          :: ![Text]
+  , _scProjectId         :: !Text -- this is part of service-account.json, but we put it here on purpose
+  , _scAccessTokenMVar   :: !(MVar (Maybe TokenResp))
+  , _scGlobalSelectLimit :: !(Maybe Int)
   } deriving (Eq, Generic, NFData)
 $(J.deriveJSON (J.aesonDrop 3 J.snakeCase){J.omitNothingFields=True} ''BigQuerySourceConfig)
 deriving instance Show BigQuerySourceConfig
@@ -187,20 +188,3 @@ instance Hashable (MVar (Maybe TokenResp)) where
   hashWithSalt i r = hashWithSalt i (unsafePerformIO $ readMVar r)
 instance Arbitrary (MVar (Maybe TokenResp)) where
   arbitrary = genericArbitrary @(Maybe TokenResp) <&> (unsafePerformIO . newMVar)
-
-
--- | for testing
-getBigQuerySourceConfigEnv :: IO BigQuerySourceConfig
-getBigQuerySourceConfigEnv = do
-  _scServiceAccountFilePath <- getEnvUnline _safpEnvKey
-  if isRelative _scServiceAccountFilePath
-    then error $ _safpEnvKey <> " needs to be an absolute file-path"
-    else do
-      _scDatasets <- pure . pack <$> getEnvUnline "HASURA_BIGQUERY_DATASET"
-      _scProjectId <- pack <$> getEnvUnline "HASURA_BIGQUERY_PROJECT_ID"
-      _scServiceAccount :: ServiceAccount <- either error id . J.eitherDecode' <$> BL.readFile _scServiceAccountFilePath
-      _scAccessTokenMVar <- newMVar Nothing
-      pure BigQuerySourceConfig {..}
-  where
-    _safpEnvKey = "HASURA_BIGQUERY_SERVICE_ACCOUNT_FILE_PATH"
-    getEnvUnline key = fmap (concat . take 1 . lines) (SE.getEnv key)

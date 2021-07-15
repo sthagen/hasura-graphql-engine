@@ -1,5 +1,4 @@
-{-# LANGUAGE DisambiguateRecordFields #-}
-{-# LANGUAGE DuplicateRecordFields    #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 module Hasura.Backends.BigQuery.DDL.Source
   ( resolveSource
@@ -8,26 +7,28 @@ module Hasura.Backends.BigQuery.DDL.Source
   )
 where
 
+import           Hasura.Prelude
 
-import           Control.Concurrent.MVar                  (newMVar)
-import qualified Data.Environment                         as Env
-import qualified Data.HashMap.Strict                      as HM
-import qualified Data.Text                                as T
+import qualified Data.Aeson                          as J
+import qualified Data.ByteString.Lazy                as L
+import qualified Data.Environment                    as Env
+import qualified Data.HashMap.Strict                 as HM
+import qualified Data.Text                           as T
+import qualified Data.Text.Encoding                  as T
+
+import           Control.Concurrent.MVar             (newMVar)
 import           Data.Time.Clock.System
 
 import           Hasura.Backends.BigQuery.Connection
-import           Hasura.Backends.BigQuery.Instances.Types ()
 import           Hasura.Backends.BigQuery.Meta
 import           Hasura.Backends.BigQuery.Source
 import           Hasura.Backends.BigQuery.Types
-import           Hasura.Prelude
+import           Hasura.Base.Error
 import           Hasura.RQL.Types.Column
 import           Hasura.RQL.Types.Common
-import           Hasura.RQL.Types.Error
 import           Hasura.RQL.Types.Source
 import           Hasura.RQL.Types.Table
 import           Hasura.SQL.Backend
-import           Hasura.Server.Types                      (MaintenanceMode)
 
 
 resolveSourceConfig ::
@@ -43,6 +44,14 @@ resolveSourceConfig _name BigQueryConnSourceConfig{..} = runExceptT $ do
     Right _scServiceAccount -> do
       _scDatasets <- resolveConfigurationInputs env _cscDatasets
       _scProjectId <- resolveConfigurationInput env _cscProjectId
+      _scGlobalSelectLimit <- do
+        str <- resolveConfigurationInput env _cscGlobalSelectLimit
+        -- This works around the inconsistency between JSON and
+        -- environment variables. The config handling module should be
+        -- reworked to handle non-text values better.
+        case readMaybe (T.unpack str) <|> J.decode (L.fromStrict (T.encodeUtf8 str)) of
+          Nothing -> throw400 Unexpected $ "Need integer global select limit"
+          Just i  -> pure i
       trMVar <- liftIO $ newMVar Nothing -- `runBigQuery` initializes the token
       pure BigQuerySourceConfig
              { _scAccessTokenMVar = trMVar
@@ -53,9 +62,8 @@ resolveSourceConfig _name BigQueryConnSourceConfig{..} = runExceptT $ do
 resolveSource
   :: (MonadIO m)
   => BigQuerySourceConfig
-  -> MaintenanceMode
   -> m (Either QErr (ResolvedSource 'BigQuery))
-resolveSource sourceConfig _maintenanceMode =
+resolveSource sourceConfig =
   runExceptT $ do
     result <- getTables sourceConfig
     case result of
@@ -91,6 +99,7 @@ resolveSource sourceConfig _maintenanceMode =
                          , _ptmiForeignKeys = mempty
                          , _ptmiViewInfo = Just $ ViewInfo False False False
                          , _ptmiDescription = Nothing
+                         , _ptmiExtraTableMetadata = ()
                          })
                    | (index, RestTable {tableReference, schema}) <-
                        zip [0 ..] restTables

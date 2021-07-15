@@ -19,15 +19,14 @@ module Hasura.RQL.IR.BoolExp
   , STIntersectsNbandGeommin(..)
   , STIntersectsGeomminNband(..)
 
+  , SessionArgumentPresence(..)
+  , ComputedFieldBoolExp(..)
+  , AnnComputedFieldBoolExp(..)
   , AnnBoolExpFld(..)
   , AnnBoolExp
   , AnnColumnCaseBoolExpPartialSQL
   , AnnColumnCaseBoolExp
   , AnnColumnCaseBoolExpField(..)
-  , traverseAnnBoolExp
-  , fmapAnnBoolExp
-  , traverseAnnColumnCaseBoolExp
-  , fmapAnnColumnCaseBoolExp
   , annBoolExpTrue
   , andAnnBoolExps
 
@@ -44,7 +43,7 @@ module Hasura.RQL.IR.BoolExp
 
 import           Hasura.Prelude
 
-import qualified Data.HashMap.Strict           as M
+import qualified Data.HashMap.Strict            as M
 
 import           Control.Lens.Plated
 import           Control.Lens.TH
@@ -53,15 +52,15 @@ import           Data.Aeson.Internal
 import           Data.Aeson.TH
 import           Data.Monoid
 import           Data.Text.Extended
-import           Data.Typeable
+import           Data.Typeable                  (Typeable)
 
-import           Hasura.Incremental            (Cacheable)
+import           Hasura.Incremental             (Cacheable)
 import           Hasura.RQL.Types.Backend
 import           Hasura.RQL.Types.Column
 import           Hasura.RQL.Types.Common
+import           Hasura.RQL.Types.ComputedField
 import           Hasura.RQL.Types.Relationship
 import           Hasura.SQL.Backend
-import           Hasura.SQL.Types
 import           Hasura.Session
 
 
@@ -199,7 +198,7 @@ instance (Backend b, Hashable  (BooleanOperators b (PartialSQLExp b))) => Cachea
 instance Backend b => ToJSON (PartialSQLExp b) where
   toJSON = \case
     PSESessVar colTy sessVar -> toJSON (colTy, sessVar)
-    PSESQLExp e              -> toJSON $ toSQLTxt e
+    PSESQLExp e              -> toJSON e
 
 isStaticValue :: PartialSQLExp backend -> Bool
 isStaticValue = \case
@@ -299,6 +298,55 @@ opExpDepCol = \case
   CLTE c -> Just c
   _      -> Nothing
 
+-- | The presence of session argument in the SQL function of a computed field.
+-- Since we only support maximum of 2 arguments in boolean expression, the position
+-- (if present) is either first or second. The other mandatory argument is table row input.
+data SessionArgumentPresence a
+  = SAPNotPresent
+  | SAPFirst a
+  | SAPSecond a
+  deriving (Show, Eq, Functor, Foldable, Traversable, Generic)
+instance (NFData a) => NFData (SessionArgumentPresence a)
+instance (Cacheable a) => Cacheable (SessionArgumentPresence a)
+instance (Hashable a) => Hashable (SessionArgumentPresence a)
+
+-- | This type is used to represent the kinds of boolean expression used for compouted fields
+-- based on the return type of the SQL function
+data ComputedFieldBoolExp (b :: BackendType) a
+  = CFBEScalar ![OpExpG b a] -- SQL function returning a scalar
+  | CFBETable !(TableName b) !(AnnBoolExp b a) -- SQL function returning SET OF table
+  deriving (Functor, Foldable, Traversable, Generic)
+deriving instance (Backend b, Eq (BooleanOperators b a), Eq a) => Eq (ComputedFieldBoolExp b a)
+instance (Backend b, NFData    (BooleanOperators b a), NFData    a) => NFData    (ComputedFieldBoolExp b a)
+instance (Backend b, Cacheable (BooleanOperators b a), Cacheable a) => Cacheable (ComputedFieldBoolExp b a)
+instance (Backend b, Hashable  (BooleanOperators b a), Hashable  a) => Hashable  (ComputedFieldBoolExp b a)
+
+-- | Using a computed field in boolean expression.
+-- Example: A computed field "full_name" ("first_name" || "last_name") is defined to the "user"
+-- table. Boolean expression to filter whose "full_name" is LIKE "%bob%"
+-- query {
+--   user(where: {full_name: {_like: "%bob%"}}){
+--       id
+--       first_name
+--       last_name
+--       full_name
+--   }
+-- }
+-- Limitation: Computed field whose function with no input arguments are allowed in boolean
+-- expression. It is complex to generate schema for `where` clause with functions having
+-- input arguments.
+data AnnComputedFieldBoolExp (b :: BackendType) a
+  = AnnComputedFieldBoolExp
+  { _acfbXFieldInfo              :: !(XComputedField b)
+  , _acfbName                    :: !(ComputedFieldName)
+  , _acfbFunction                :: !(FunctionName b)
+  , _acfbSessionArgumentPresence :: !(SessionArgumentPresence a)
+  , _acfbBoolExp                 :: !(ComputedFieldBoolExp b a)
+  } deriving (Functor, Foldable, Traversable, Generic)
+deriving instance (Backend b, Eq (BooleanOperators b a), Eq a) => Eq (AnnComputedFieldBoolExp b a)
+instance (Backend b, NFData    (BooleanOperators b a), NFData    a) => NFData    (AnnComputedFieldBoolExp b a)
+instance (Backend b, Cacheable (BooleanOperators b a), Cacheable a) => Cacheable (AnnComputedFieldBoolExp b a)
+instance (Backend b, Hashable  (BooleanOperators b a), Hashable  a) => Hashable  (AnnComputedFieldBoolExp b a)
 
 -- | This type is used for boolean terms in GBoolExp in the schema; there are two kinds boolean
 -- terms:
@@ -307,8 +355,9 @@ opExpDepCol = \case
 --
 -- This type is parametric over the type of leaf values, the values on which we operate.
 data AnnBoolExpFld (b :: BackendType) a
-  = AVCol !(ColumnInfo b) ![OpExpG b a]
-  | AVRel !(RelInfo b) !(AnnBoolExp b a)
+  = AVColumn !(ColumnInfo b) ![OpExpG b a]
+  | AVRelationship !(RelInfo b) !(AnnBoolExp b a)
+  | AVComputedField !(AnnComputedFieldBoolExp b a)
   deriving (Functor, Foldable, Traversable, Generic)
 deriving instance (Backend b, Eq (BooleanOperators b a), Eq a) => Eq (AnnBoolExpFld b a)
 instance (Backend b, NFData    (BooleanOperators b a), NFData    a) => NFData    (AnnBoolExpFld b a)
@@ -317,13 +366,20 @@ instance (Backend b, Hashable  (BooleanOperators b a), Hashable  a) => Hashable 
 
 instance (Backend b, ToJSONKeyValue (BooleanOperators b a), ToJSON a) => ToJSONKeyValue (AnnBoolExpFld b a) where
   toJSONKeyValue = \case
-    AVCol pci opExps ->
+    AVColumn pci opExps ->
       ( toTxt $ pgiColumn pci
       , toJSON (pci, object . pure . toJSONKeyValue <$> opExps)
       )
-    AVRel ri relBoolExp ->
+    AVRelationship ri relBoolExp ->
       ( relNameToTxt $ riName ri
       , toJSON (ri, toJSON relBoolExp)
+      )
+    AVComputedField cfBoolExp ->
+      ( toTxt $ _acfbName cfBoolExp
+      , let function = _acfbFunction cfBoolExp
+        in case _acfbBoolExp cfBoolExp of
+          CFBEScalar opExps   -> toJSON (function, object . pure . toJSONKeyValue <$> opExps)
+          CFBETable _ boolExp -> toJSON (function, toJSON boolExp)
       )
 
 -- | A simple alias for the kind of boolean expressions used in the schema, that ties together
@@ -341,36 +397,7 @@ annBoolExpTrue :: AnnBoolExp backend a
 annBoolExpTrue = gBoolExpTrue
 
 andAnnBoolExps :: AnnBoolExp backend a -> AnnBoolExp backend a -> AnnBoolExp backend a
-andAnnBoolExps l r =
-  BoolAnd [l, r]
-
-
--- Traversal functions
-fmapAnnBoolExp
-  :: Backend backend
-  => (a -> b)
-  -> AnnBoolExp backend a
-  -> AnnBoolExp backend b
-fmapAnnBoolExp f =
-  runIdentity . traverseAnnBoolExp (pure . f)
-
-traverseAnnBoolExpFld
-  :: (Applicative f, Backend backend)
-  => (a -> f b)
-  -> AnnBoolExpFld backend a
-  -> f (AnnBoolExpFld backend b)
-traverseAnnBoolExpFld f = \case
-  AVCol pgColInfo opExps ->
-    AVCol pgColInfo <$> traverse (traverse f) opExps
-  AVRel relInfo annBoolExp ->
-    AVRel relInfo <$> traverseAnnBoolExp f annBoolExp
-
-traverseAnnBoolExp
-  :: (Applicative f, Backend backend)
-  => (a -> f b)
-  -> AnnBoolExp backend a
-  -> f (AnnBoolExp backend b)
-traverseAnnBoolExp f = traverse (traverseAnnBoolExpFld f)
+andAnnBoolExps l r = BoolAnd [l, r]
 
 
 
@@ -434,8 +461,9 @@ $(deriveJSON hasuraJSON ''STIntersectsGeomminNband)
 -- this, and why it exists. It might be a relic of a needed differentiation, now lost?
 -- TODO: can this be removed?
 newtype AnnColumnCaseBoolExpField (b :: BackendType) a
-  = AnnColumnCaseBoolExpField { _accColCaseBoolExpField :: (AnnBoolExpFld b a)}
+  = AnnColumnCaseBoolExpField { _accColCaseBoolExpField :: AnnBoolExpFld b a }
   deriving (Functor, Foldable, Traversable, Generic)
+
 deriving instance (Backend b, Eq (BooleanOperators b a), Eq a) => Eq (AnnColumnCaseBoolExpField b a)
 instance (Backend b, NFData    (BooleanOperators b a), NFData    a) => NFData    (AnnColumnCaseBoolExpField b a)
 instance (Backend b, Cacheable (BooleanOperators b a), Cacheable a) => Cacheable (AnnColumnCaseBoolExpField b a)
@@ -448,26 +476,6 @@ instance (Backend b, ToJSONKeyValue (BooleanOperators b a), ToJSON a) => ToJSONK
 -- | Similar to AnnBoolExp, this type alias ties together
 -- 'GBoolExp', 'OpExpG', and 'AnnColumnCaseBoolExpFld'.
 type AnnColumnCaseBoolExp b a = GBoolExp b (AnnColumnCaseBoolExpField b a)
-
-
--- traversal functions
-fmapAnnColumnCaseBoolExp
-  :: Backend backend
-  => (a -> b)
-  -> AnnColumnCaseBoolExp backend a
-  -> AnnColumnCaseBoolExp backend b
-fmapAnnColumnCaseBoolExp f =
-  runIdentity . traverseAnnColumnCaseBoolExp (pure . f)
-
-traverseAnnColumnCaseBoolExp
-  :: (Applicative f, Backend backend)
-  => (a -> f b)
-  -> AnnColumnCaseBoolExp backend a
-  -> f (AnnColumnCaseBoolExp backend b)
-traverseAnnColumnCaseBoolExp f = traverse traverseColCaseBoolExp
-  where
-    traverseColCaseBoolExp (AnnColumnCaseBoolExpField annBoolExpField) =
-      AnnColumnCaseBoolExpField <$> traverseAnnBoolExpFld f annBoolExpField
 
 
 -- misc type aliases

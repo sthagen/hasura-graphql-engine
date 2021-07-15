@@ -79,8 +79,10 @@ arch='unknown'
 archstr=`uname -m`
 if [[ "$archstr" == 'x86_64' ]]; then
     arch='amd64'
+elif [[ "$archstr" == 'arm64' ]] || [[ "$archstr" == 'aarch64' ]]; then
+    arch='arm64'
 else
-    arch='386'
+    die "prebuilt binaries for $(arch) architecture not avialable, please try building from source https://github.com/hasura/graphql-engine/blob/master/cli/README.md"
 fi
 
 # some variables
