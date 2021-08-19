@@ -32,4 +32,10 @@ Supported databases
 
   postgres/index
   ms-sql-server/index
+  citus-hyperscale-postgres/index
+  bigquery/index
   Connecting databases <connect-db>
+
+.. admonition:: Additional Resources
+
+  Get Started with Hasura today - `Watch video guide <https://hasura.io/events/webinar/get-started-with-hasura/?pg=docs&plcmt=body&cta=getting-started&tech=>`__.

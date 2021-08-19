@@ -167,7 +167,7 @@ runSessVarPred = filterSessionVariables . unSessVarPred
 -- | Filter out only those session variables used by the query AST provided
 filterVariablesFromQuery
   :: Backend backend
-  => [RootField (QueryDBRoot UnpreparedValue UnpreparedValue) RemoteField (ActionQuery backend UnpreparedValue (UnpreparedValue backend)) d]
+  => [RootField (QueryDBRoot (RemoteSelect UnpreparedValue) UnpreparedValue) RemoteField (ActionQuery backend (RemoteSelect UnpreparedValue) (UnpreparedValue backend)) d]
   -> SessVarPred
 filterVariablesFromQuery query = fold $ rootToSessVarPreds =<< query
   where
@@ -208,6 +208,7 @@ runGQ
      , MonadTrace m
      , MonadExecuteQuery m
      , MonadMetadataStorage (MetadataStorageT m)
+     , EB.MonadQueryTags m
      )
   => Env.Environment
   -> L.Logger L.Hasura
@@ -219,27 +220,26 @@ runGQ
   -> GQLReqUnparsed
   -> m (ParameterizedQueryHash, HttpResponse (Maybe GQResponse, EncJSON))
 runGQ env logger reqId userInfo ipAddress reqHeaders queryType reqUnparsed = do
-  (telemTimeTot_DT, (telemCacheHit, (telemQueryType, telemTimeIO_DT, telemLocality, resp, parameterizedQueryHash))) <- withElapsedTime $ do
-    E.ExecutionCtx _ sqlGenCtx {- planCache -} sc scVer httpManager enableAL <- ask
+  (telemTimeTot_DT, (telemQueryType, telemTimeIO_DT, telemLocality, resp, parameterizedQueryHash)) <- withElapsedTime $ do
+    E.ExecutionCtx _ sqlGenCtx sc scVer httpManager enableAL <- ask
 
     -- run system authorization on the GraphQL API
     reqParsed <- E.checkGQLExecution userInfo (reqHeaders, ipAddress) enableAL sc reqUnparsed
                  >>= flip onLeft throwError
 
-    (telemCacheHit, (parameterizedQueryHash, execPlan)) <-
+    (parameterizedQueryHash, execPlan) <-
       E.getResolvedExecPlan
-        env logger {- planCache -}
+        env logger
         userInfo sqlGenCtx sc scVer queryType
-        httpManager reqHeaders (reqUnparsed, reqParsed)
+        httpManager reqHeaders (reqUnparsed, reqParsed) reqId
 
-    (telemCacheHit,) <$> case execPlan of
+    case execPlan of
       E.QueryExecutionPlan queryPlans asts dirMap -> trace "Query" $ do
         let filteredSessionVars = runSessVarPred (filterVariablesFromQuery asts) (_uiSession userInfo)
             cacheKey = QueryCacheKey reqParsed (_uiRole userInfo) filteredSessionVars
             remoteSchemas = OMap.elems queryPlans >>= \case
               E.ExecStepDB _headers _dbAST remoteJoins -> do
-                concatMap (map RJ._rjRemoteSchema . toList . snd) $
-                  maybe [] toList remoteJoins
+                maybe [] (map RJ._rsjRemoteSchema . RJ.getRemoteSchemaJoins) remoteJoins
               _ -> []
             actionsInfo = foldl getExecStepActionWithActionInfo [] $ OMap.elems $ OMap.filter (\case
               E.ExecStepAction _ _ _remoteJoins -> True
@@ -269,24 +269,18 @@ runGQ env logger reqId userInfo ipAddress reqHeaders queryType reqUnparsed = do
                           tx
                           genSql
                 finalResponse <-
-                  maybe
-                  (pure resp)
-                  (RJ.processRemoteJoins env httpManager reqHeaders userInfo $ encJToLBS resp)
-                  remoteJoins
-                return $ ResultsFragment telemTimeIO_DT Telem.Local finalResponse []
-              E.ExecStepRemote rsi gqlReq -> do
+                  RJ.processRemoteJoins reqId logger env httpManager reqHeaders userInfo resp remoteJoins
+                pure $ ResultsFragment telemTimeIO_DT Telem.Local finalResponse []
+              E.ExecStepRemote rsi resultCustomizer gqlReq -> do
                 logQueryLog logger $ QueryLog reqUnparsed Nothing reqId QueryLogKindRemoteSchema
-                runRemoteGQ httpManager fieldName rsi gqlReq
+                runRemoteGQ httpManager fieldName rsi resultCustomizer gqlReq
               E.ExecStepAction aep _ remoteJoins -> do
                 logQueryLog logger $ QueryLog reqUnparsed Nothing reqId QueryLogKindAction
 
                 (time, (resp, _)) <- doQErr $ do
-                  (time, (resp, hdrs)) <- EA.runActionExecution aep
+                  (time, (resp, hdrs)) <- EA.runActionExecution userInfo aep
                   finalResponse <-
-                    maybe
-                    (pure resp)
-                    (RJ.processRemoteJoins env httpManager reqHeaders userInfo $ encJToLBS resp)
-                    remoteJoins
+                    RJ.processRemoteJoins reqId logger env httpManager reqHeaders userInfo resp remoteJoins
                   pure (time, (finalResponse, hdrs))
                 pure $ ResultsFragment time Telem.Empty resp []
               E.ExecStepRaw json -> do
@@ -340,23 +334,17 @@ runGQ env logger reqId userInfo ipAddress reqHeaders queryType reqUnparsed = do
                           genSql
 
                 finalResponse <-
-                  maybe
-                  (pure resp)
-                  (RJ.processRemoteJoins env httpManager reqHeaders userInfo $ encJToLBS resp)
-                  remoteJoins
-                return $ ResultsFragment telemTimeIO_DT Telem.Local finalResponse responseHeaders
-              E.ExecStepRemote rsi gqlReq -> do
+                    RJ.processRemoteJoins reqId logger env httpManager reqHeaders userInfo resp remoteJoins
+                pure $ ResultsFragment telemTimeIO_DT Telem.Local finalResponse responseHeaders
+              E.ExecStepRemote rsi resultCustomizer gqlReq -> do
                 logQueryLog logger $ QueryLog reqUnparsed Nothing reqId QueryLogKindRemoteSchema
-                runRemoteGQ httpManager fieldName rsi gqlReq
+                runRemoteGQ httpManager fieldName rsi resultCustomizer gqlReq
               E.ExecStepAction aep _ remoteJoins -> do
                 logQueryLog logger $ QueryLog reqUnparsed Nothing reqId QueryLogKindAction
                 (time, (resp, hdrs)) <- doQErr $ do
-                  (time, (resp, hdrs)) <- EA.runActionExecution aep
+                  (time, (resp, hdrs)) <- EA.runActionExecution userInfo aep
                   finalResponse <-
-                    maybe
-                    (pure resp)
-                    (RJ.processRemoteJoins env httpManager reqHeaders userInfo $ encJToLBS resp)
-                    remoteJoins
+                    RJ.processRemoteJoins reqId logger env httpManager reqHeaders userInfo resp remoteJoins
                   pure (time, (finalResponse, hdrs))
                 pure $ ResultsFragment time Telem.Empty resp $ fromMaybe [] hdrs
               E.ExecStepRaw json -> do
@@ -381,12 +369,12 @@ runGQ env logger reqId userInfo ipAddress reqHeaders queryType reqUnparsed = do
 
     forWithKey = flip OMap.traverseWithKey
 
-    runRemoteGQ httpManager fieldName rsi gqlReq = do
+    runRemoteGQ httpManager fieldName rsi resultCustomizer gqlReq = do
       (telemTimeIO_DT, remoteResponseHeaders, resp) <-
-        doQErr $ E.execRemoteGQ env httpManager userInfo reqHeaders rsi gqlReq
-      value <- extractFieldFromResponse (G.unName fieldName) resp
+        doQErr $ E.execRemoteGQ env httpManager userInfo reqHeaders (rsDef rsi) gqlReq
+      value <- extractFieldFromResponse fieldName rsi resultCustomizer resp
       let filteredHeaders = filter ((== "Set-Cookie") . fst) remoteResponseHeaders
-      pure $ ResultsFragment telemTimeIO_DT Telem.Remote (JO.toEncJSON value) filteredHeaders
+      pure $ ResultsFragment telemTimeIO_DT Telem.Remote (encJFromOrderedValue value) filteredHeaders
 
     buildResultFromFragments
        :: Telem.QueryType
@@ -465,26 +453,41 @@ coalescePostgresMutations plan = do
   Just (oneSourceConfig, mutations)
 
 extractFieldFromResponse
-  :: Monad m => Text -> LBS.ByteString -> ExceptT (Either GQExecError QErr) m JO.Value
-extractFieldFromResponse fieldName bs = do
-  val <- onLeft (JO.eitherDecode bs) $ do400 . T.pack
+  :: forall m. Monad m
+  => G.Name
+  -> RemoteSchemaInfo
+  -> RemoteResultCustomizer
+  -> LBS.ByteString
+  -> ExceptT (Either GQExecError QErr) m JO.Value
+extractFieldFromResponse fieldName rsi resultCustomizer resp = do
+  let namespace = fmap G.unName $ _rscNamespaceFieldName $ rsCustomizer rsi
+      fieldName' = G.unName fieldName
+  val <- onLeft (JO.eitherDecode resp) $ do400 . T.pack
   valObj <- onLeft (JO.asObject val) do400
-  dataVal <- case JO.toList valObj of
+  dataVal <- applyRemoteResultCustomizer resultCustomizer <$> case JO.toList valObj of
     [("data", v)] -> pure v
     _ -> case JO.lookup "errors" valObj of
       Just (JO.Array err) -> doGQExecError $ toList $ fmap JO.fromOrdered err
       _                   -> do400 "Received invalid JSON value from remote"
-  dataObj <- onLeft (JO.asObject dataVal) do400
-  fieldVal <- onNothing (JO.lookup fieldName dataObj) $
-    do400 $ "expecting key " <> fieldName
-  return fieldVal
+  case namespace of
+    Just _ ->
+      -- If using a custom namespace field then the response from the remote server
+      -- will already be unwrapped so just return it.
+      return dataVal
+    _ ->  do
+      -- No custom namespace so we need to look up the field name in the data
+      -- object.
+      dataObj <- onLeft (JO.asObject dataVal) do400
+      fieldVal <- onNothing (JO.lookup fieldName' dataObj) $
+        do400 $ "expecting key " <> fieldName'
+      return fieldVal
   where
     do400 = withExceptT Right . throw400 RemoteSchemaError
     doGQExecError = withExceptT Left . throwError . GQExecError
 
 buildRaw :: Applicative m => JO.Value -> m ResultsFragment
 buildRaw json = do
-  let obj = JO.toEncJSON json
+  let obj = encJFromOrderedValue json
       telemTimeIO_DT = 0
   pure $ ResultsFragment telemTimeIO_DT Telem.Local obj []
 
@@ -502,6 +505,7 @@ runGQBatched
      , MonadExecuteQuery m
      , HttpLog m
      , MonadMetadataStorage (MetadataStorageT m)
+     , EB.MonadQueryTags m
      )
   => Env.Environment
   -> L.Logger L.Hasura
@@ -518,7 +522,7 @@ runGQBatched env logger reqId responseErrorsConfig userInfo ipAddress reqHdrs qu
   case query of
     GQLSingleRequest req -> do
       (parameterizedQueryHash, httpResp) <- runGQ env logger reqId userInfo ipAddress reqHdrs queryType req
-      let httpLoggingMetadata = buildHttpLogMetadata @m [parameterizedQueryHash] $ Just L.RequestSingle
+      let httpLoggingMetadata = buildHttpLogMetadata @m (PQHSetSingleton parameterizedQueryHash) L.RequestModeSingle
       pure (httpLoggingMetadata, snd <$> httpResp)
     GQLBatchedReqs reqs -> do
       -- It's unclear what we should do if we receive multiple
@@ -530,7 +534,7 @@ runGQBatched env logger reqId responseErrorsConfig userInfo ipAddress reqHdrs qu
             . encJFromList
             . map (either (encJFromJValue . encodeGQErr includeInternal) _hrBody)
       responses <- traverse (try . (fmap . fmap . fmap) snd . runGQ env logger reqId userInfo ipAddress reqHdrs queryType) reqs
-      let httpLoggingMetadata = buildHttpLogMetadata @m (rights $ map (fmap fst) responses) $ Just L.RequestBatched
+      let httpLoggingMetadata = buildHttpLogMetadata @m (PQHSetBatched $ rights $ map (fmap fst) responses) L.RequestModeBatched
       pure (httpLoggingMetadata, removeHeaders (map (fmap snd) responses))
   where
     try = flip catchError (pure . Left) . fmap Right

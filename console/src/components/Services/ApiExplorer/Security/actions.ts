@@ -1,8 +1,10 @@
+import { Nullable } from './../../../Common/utils/tsUtils';
 import { exportMetadata, MetadataActions } from '../../../../metadata/actions';
 import {
   APILimitInputType,
   removeAPILimitsQuery,
   updateAPILimitsQuery,
+  updateIntrospectionOptionsQuery,
 } from '../../../../metadata/utils';
 import { Thunk } from '../../../../types';
 import { makeMigrationCall } from '../../Data/DataActions';
@@ -13,7 +15,7 @@ export type updateSecurityFeaturesActionType = {
     depth_limit?: APILimitInputType<number>;
     node_limit?: APILimitInputType<number>;
     rate_limit?: APILimitInputType<{
-      unique_params: 'IP' | string[];
+      unique_params: Nullable<'IP' | string[]>;
       max_reqs_per_min: number;
     }>;
   };
@@ -82,6 +84,55 @@ export const removeAPILimits = ({
     const requestMsg = 'Removing API limits...';
     const successMsg = 'Removing API limits';
     const errorMsg = 'Removing API limits failed';
+
+    const onSuccess = () => {
+      dispatch(exportMetadata());
+      if (callback) {
+        callback();
+      }
+    };
+
+    const onError = () => {};
+
+    makeMigrationCall(
+      dispatch,
+      getState,
+      [upQuery],
+      undefined,
+      migrationName,
+      onSuccess,
+      onError,
+      requestMsg,
+      successMsg,
+      errorMsg
+    );
+  };
+};
+
+export type updateIntrospectionOptionsActionType = {
+  introspectionIsDisabled: boolean;
+  roleName: string;
+  callback?: () => void;
+};
+export const updateIntrospectionOptions = ({
+  introspectionIsDisabled,
+  roleName,
+  callback,
+}: updateIntrospectionOptionsActionType): Thunk<void, MetadataActions> => {
+  return (dispatch, getState) => {
+    const existingOptions =
+      getState().metadata?.metadataObject?.graphql_schema_introspection
+        ?.disabled_for_roles ?? [];
+
+    const upQuery = updateIntrospectionOptionsQuery({
+      existingOptions,
+      introspectionIsDisabled,
+      roleName,
+    });
+    const migrationName = `set_graphql_introspection_options`;
+    const requestMsg = 'Updating Introspection options...';
+    const successMsg = 'Updated Introspection!';
+    const errorMsg = 'Updating Introspection options failed';
 
     const onSuccess = () => {
       dispatch(exportMetadata());

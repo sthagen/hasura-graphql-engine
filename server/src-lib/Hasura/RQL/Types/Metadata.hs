@@ -37,6 +37,7 @@ import           Hasura.RQL.Types.Metadata.Backend
 import           Hasura.RQL.Types.Metadata.Instances         ()
 import           Hasura.RQL.Types.Permission
 import           Hasura.RQL.Types.QueryCollection
+import           Hasura.RQL.Types.QueryTags
 import           Hasura.RQL.Types.Relationship
 import           Hasura.RQL.Types.RemoteRelationship
 import           Hasura.RQL.Types.RemoteSchema
@@ -60,6 +61,18 @@ parseListAsMap t mapFn listP = do
     <> tshow duplicates
   pure $ oMapFromL mapFn list
 
+-- | Versioning the @'Metadata' JSON structure to track backwards incompatible changes.
+-- This value is included in the metadata JSON object at top level 'version' key.
+-- Always metadata is emitted in the latest version via export metadata API (@'runExportMetadata' handler).
+-- Adding a new value constructor to @'MetadataVersion' type bumps the metadata version.
+--
+-- NOTE: When metadata version is bumped:
+-- 1. The Hasura CLI and Console actively use export metadata API to read metadata.
+--    Hence, it is necessary to update CLI and Console to read latest metadata.
+--    All changes SHOULD be released hand in hand (preferebly in one pull request)
+-- 2. There might be other third party services (developed by Hasura users) which use
+--    the export metadata API. Apart from changelog, we need to establish the metadata
+--    version update by bumping up the minor version of the GraphQL Engine.
 data MetadataVersion
   = MVVersion1
   | MVVersion2
@@ -214,7 +227,7 @@ data FunctionMetadata b
   = FunctionMetadata
   { _fmFunction      :: !(FunctionName b)
   , _fmConfiguration :: !FunctionConfig
-  , _fmPermissions   :: ![FunctionPermissionMetadata]
+  , _fmPermissions   :: ![FunctionPermissionInfo]
   } deriving (Generic)
 deriving instance (Backend b) => Show (FunctionMetadata b)
 deriving instance (Backend b) => Eq (FunctionMetadata b)
@@ -291,6 +304,7 @@ parseNonSourcesMetadata
      , MetricsConfig
      , InheritedRoles
      , SetGraphqlIntrospectionOptions
+     , QueryTagsConfig
      )
 parseNonSourcesMetadata o = do
   remoteSchemas <- parseListAsMap "remote schemas" _rsmName $
@@ -308,9 +322,10 @@ parseNonSourcesMetadata o = do
   inheritedRoles <- parseListAsMap "inherited roles" _rRoleName $
                   o .:? "inherited_roles" .!= []
   introspectionDisabledForRoles <- o .:? "graphql_schema_introspection" .!= mempty
+  queryTagsConfig <- o .:? "query_tags" .!= emptyQueryTagsConfig
   pure ( remoteSchemas, queryCollections, allowlist, customTypes
        , actions, cronTriggers, apiLimits, metricsConfig, inheritedRoles
-       , introspectionDisabledForRoles
+       , introspectionDisabledForRoles, queryTagsConfig
        )
 
 -- | A complete GraphQL Engine metadata representation to be stored,
@@ -329,6 +344,7 @@ data Metadata
   , _metaMetricsConfig                  :: !MetricsConfig
   , _metaInheritedRoles                 :: !InheritedRoles
   , _metaSetGraphqlIntrospectionOptions :: !SetGraphqlIntrospectionOptions
+  , _metaQueryTagsConfig                :: !QueryTagsConfig
   } deriving (Show, Eq, Generic)
 $(makeLenses ''Metadata)
 
@@ -342,9 +358,10 @@ instance FromJSON Metadata where
     endpoints <- oMapFromL _ceName <$> o .:? "rest_endpoints" .!= []
     (remoteSchemas, queryCollections, allowlist, customTypes,
      actions, cronTriggers, apiLimits, metricsConfig, inheritedRoles,
-     disabledSchemaIntrospectionRoles) <- parseNonSourcesMetadata o
+     disabledSchemaIntrospectionRoles, queryTagsConfig) <- parseNonSourcesMetadata o
     pure $ Metadata sources remoteSchemas queryCollections allowlist
            customTypes actions cronTriggers endpoints apiLimits metricsConfig inheritedRoles disabledSchemaIntrospectionRoles
+           queryTagsConfig
     where
       parseSourceMetadata :: Value -> Parser (AB.AnyBackend SourceMetadata)
       parseSourceMetadata = withObject "SourceMetadata" \o -> do
@@ -355,7 +372,7 @@ instance FromJSON Metadata where
 emptyMetadata :: Metadata
 emptyMetadata =
   Metadata mempty mempty mempty mempty emptyCustomTypes mempty mempty mempty
-    emptyApiLimit emptyMetricsConfig mempty mempty
+    emptyApiLimit emptyMetricsConfig mempty mempty emptyQueryTagsConfig
 
 tableMetadataSetter
   :: (BackendMetadata b)
@@ -393,7 +410,7 @@ instance FromJSON MetadataNoSources where
           pure (tables, functions)
         MVVersion3 -> fail "unexpected version for metadata without sources: 3"
     (remoteSchemas, queryCollections, allowlist, customTypes,
-     actions, cronTriggers, _, _, _, _) <- parseNonSourcesMetadata o
+     actions, cronTriggers, _, _, _, _, _) <- parseNonSourcesMetadata o
     pure $ MetadataNoSources tables functions remoteSchemas queryCollections
                              allowlist customTypes actions cronTriggers
 
@@ -409,10 +426,10 @@ instance Monoid MetadataModifier where
 noMetadataModify :: MetadataModifier
 noMetadataModify = mempty
 
--- | Encode 'Metadata' to JSON with deterministic ordering. Ordering of object keys and array
--- elements should  remain consistent across versions of graphql-engine if possible!
--- Rakesh says the consistency is really what's important here, rather than any particular
--- ordering (e.g. "version" being at the top).
+-- | Encode 'Metadata' to JSON with deterministic ordering (e.g. "version" being at the top).
+-- The CLI system stores metadata in files and has option to show changes in git diff style.
+-- The diff shouldn't appear different for no metadata changes. So, the ordering of object keys and
+-- array elements should  remain consistent across versions of graphql-engine if possible.
 --
 -- Note: While modifying any part of the code below, make sure the encoded JSON of each type is
 -- parsable via its 'FromJSON' instance.
@@ -436,6 +453,7 @@ metadataToOrdJSON ( Metadata
                     metricsConfig
                     inheritedRoles
                     introspectionDisabledRoles
+                    queryTagsConfig
                   ) = AO.object $ [ versionPair , sourcesPair] <>
                       catMaybes [ remoteSchemasPair
                                 , queryCollectionsPair
@@ -448,6 +466,7 @@ metadataToOrdJSON ( Metadata
                                 , metricsConfigPair
                                 , inheritedRolesPair
                                 , introspectionDisabledRolesPair
+                                , queryTagsConfigPair
                                 ]
   where
     versionPair          = ("version", AO.toOrdered currentMetadataVersion)
@@ -474,6 +493,9 @@ metadataToOrdJSON ( Metadata
         (Just ("graphql_schema_introspection", AO.toOrdered introspectionDisabledRoles))
         Nothing
         (introspectionDisabledRoles == mempty)
+
+    queryTagsConfigPair = if queryTagsConfig == emptyQueryTagsConfig then Nothing
+                          else Just ("query_tags", AO.toOrdered queryTagsConfig)
 
     sourceMetaToOrdJSON :: BackendSourceMetadata -> AO.Value
     sourceMetaToOrdJSON exists =
@@ -641,10 +663,11 @@ metadataToOrdJSON ( Metadata
                       ] <> catMaybes [maybeCommentToMaybeOrdPair permComment]
 
         remoteSchemaDefToOrdJSON :: RemoteSchemaDef -> AO.Value
-        remoteSchemaDefToOrdJSON (RemoteSchemaDef url urlFromEnv headers frwrdClientHdrs timeout) =
+        remoteSchemaDefToOrdJSON (RemoteSchemaDef url urlFromEnv headers frwrdClientHdrs timeout customization) =
           AO.object $ catMaybes [ maybeToPair "url" url
                                 , maybeToPair "url_from_env" urlFromEnv
                                 , maybeToPair "timeout_seconds" timeout
+                                , maybeToPair "customization" customization
                                 , headers >>= listToMaybeOrdPair "headers" AO.toOrdered
                                 ] <> [("forward_client_headers", AO.toOrdered frwrdClientHdrs) | frwrdClientHdrs]
           where

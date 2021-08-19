@@ -28,6 +28,7 @@ module Hasura.RQL.Types
   , askComputedFieldInfo
   , askRemoteRel
   , findTable
+  , throwTableDoesNotExist
   , module R
   ) where
 
@@ -60,6 +61,7 @@ import           Hasura.RQL.Types.Metadata.Backend           as R
 import           Hasura.RQL.Types.Metadata.Object            as R
 import           Hasura.RQL.Types.Permission                 as R
 import           Hasura.RQL.Types.QueryCollection            as R
+import           Hasura.RQL.Types.QueryTags                  as R
 import           Hasura.RQL.Types.Relationship               as R
 import           Hasura.RQL.Types.RemoteRelationship         as R
 import           Hasura.RQL.Types.RemoteSchema               as R

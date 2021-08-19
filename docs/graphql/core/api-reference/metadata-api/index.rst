@@ -4,8 +4,8 @@
 
 .. _metadata_apis:
 
-Metadata API Reference (v2.0 and above)
-=======================================
+Metadata API Reference
+======================
 
 .. contents:: Table of contents
   :backlinks: none
@@ -246,6 +246,21 @@ The various types of queries are listed in the following table:
      - :ref:`pg_invoke_event_trigger_args <pg_invoke_event_trigger_syntax>`
      - 1
      - Invoke a trigger with custom payload on a Postgres table
+
+   * - :ref:`bigquery_track_table <bigquery_track_table>`
+     - :ref:`bigquery_track_table_args <bigquery_track_table_syntax>`
+     - 1
+     - Add a BigQuery table/view with configuration
+
+   * - :ref:`bigquery_untrack_table <bigquery_untrack_table>`
+     - :ref:`bigquery_untrack_table_args <bigquery_untrack_table_syntax>`
+     - 1
+     - Remove a BigQuery table/view
+
+   * - :ref:`bigquery_set_table_customization <bigquery_set_table_customization>`
+     - :ref:`bigquery_set_table_customization_args <bigquery_set_table_customization_syntax>`
+     - 1
+     - Set table customization of an already tracked BigQuery table
 
    * - :ref:`mssql_add_source <mssql_add_source>`
      - :ref:`mssql_add_source_args <mssql_add_source_syntax>`

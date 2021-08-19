@@ -1,3 +1,4 @@
+import { Nullable } from './../components/Common/utils/tsUtils';
 import {
   inconsistentObjectsQuery,
   getReloadMetadataQuery,
@@ -179,7 +180,7 @@ export const updateAPILimitsQuery = ({
     depth_limit?: APILimitInputType<number>;
     node_limit?: APILimitInputType<number>;
     rate_limit?: APILimitInputType<{
-      unique_params: 'IP' | string[];
+      unique_params: Nullable<'IP' | string[]>;
       max_reqs_per_min: number;
     }>;
   };
@@ -275,6 +276,32 @@ export const removeAPILimitsQuery = ({
   return {
     type: 'set_api_limits',
     args: existingAPILimits,
+  };
+};
+
+export const updateIntrospectionOptionsQuery = ({
+  existingOptions,
+  roleName,
+  introspectionIsDisabled,
+}: {
+  existingOptions: string[];
+  roleName: string;
+  introspectionIsDisabled: boolean;
+}) => {
+  const updatedRoleList = existingOptions;
+  if (introspectionIsDisabled && !updatedRoleList.includes(roleName)) {
+    updatedRoleList.push(roleName);
+  }
+
+  if (!introspectionIsDisabled && updatedRoleList.includes(roleName)) {
+    updatedRoleList.splice(updatedRoleList.indexOf(roleName), 1);
+  }
+
+  return {
+    type: 'set_graphql_schema_introspection_options',
+    args: {
+      disabled_for_roles: updatedRoleList,
+    },
   };
 };
 

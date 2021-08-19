@@ -63,6 +63,7 @@ const LimitsTable: React.FC<Props> = ({
                 <input
                   type="radio"
                   id="enable"
+                  className="legacy-input-fix"
                   checked={!apiLimitsDisabled}
                   disabled={loading}
                   onChange={() => updateGlobalAPISetting(false)}
@@ -73,6 +74,7 @@ const LimitsTable: React.FC<Props> = ({
                 <input
                   type="radio"
                   id="disable"
+                  className="legacy-input-fix"
                   disabled={loading}
                   checked={apiLimitsDisabled}
                   onChange={() => updateGlobalAPISetting(true)}
@@ -82,7 +84,7 @@ const LimitsTable: React.FC<Props> = ({
             </div>
           </div>
         </div>
-        <div className={styles.max_width_80}>
+        <div className={styles.max_width_90}>
           <Table columnCount={keys.length} rowCount={roles.length + 3}>
             <TableHeader headers={headers} keys={keys} />
             <TableSideBar
@@ -113,7 +115,7 @@ const LimitsTable: React.FC<Props> = ({
                   typeof global !== 'number' ? global?.unique_params : null;
                 return (
                   <div>
-                    <span className={styles.margin_right}>
+                    <span>
                       {state === RoleState.enabled ? (
                         <Legends.Enabled />
                       ) : (
@@ -152,7 +154,7 @@ const LimitsTable: React.FC<Props> = ({
                       : null;
                   return (
                     <div>
-                      <span className={styles.margin_right}>
+                      <span>
                         {state === RoleState.global ? (
                           <Legends.Global />
                         ) : state === RoleState.enabled ? (

@@ -16,7 +16,9 @@ import           Control.Monad.Trans.Control               (MonadBaseControl)
 import           Control.Monad.Unique
 import           Data.Aeson
 import           Data.Aeson.Casing
+import           Data.Has                                  (Has)
 
+import qualified Hasura.Logging                            as L
 import qualified Hasura.Tracing                            as Tracing
 
 import           Hasura.Base.Error
@@ -94,8 +96,8 @@ data RQLMetadataV1
   | RMUntrackFunction !(AnyBackend UnTrackFunction)
 
   -- Functions permissions
-  | RMCreateFunctionPermission !(AnyBackend CreateFunctionPermission)
-  | RMDropFunctionPermission   !(AnyBackend DropFunctionPermission)
+  | RMCreateFunctionPermission !(AnyBackend FunctionPermissionArgument)
+  | RMDropFunctionPermission   !(AnyBackend FunctionPermissionArgument)
 
   -- Computed fields (PG-specific)
   | RMAddComputedField  !(AddComputedField  ('Postgres 'Vanilla))
@@ -115,7 +117,7 @@ data RQLMetadataV1
   | RMIntrospectRemoteSchema !RemoteSchemaNameQuery
 
   -- Remote schemas permissions
-  | RMAddRemoteSchemaPermissions  !AddRemoteSchemaPermissions
+  | RMAddRemoteSchemaPermissions  !AddRemoteSchemaPermission
   | RMDropRemoteSchemaPermissions !DropRemoteSchemaPermissions
 
   -- Scheduled triggers
@@ -178,7 +180,6 @@ data RQLMetadataV1
 
   -- Bulk metadata queries
   | RMBulk [RQLMetadataRequest]
-  deriving (Eq)
 
 instance FromJSON RQLMetadataV1 where
   parseJSON =  withObject "RQLMetadataV1" \o -> do
@@ -265,7 +266,7 @@ instance FromJSON RQLMetadataV1 where
 data RQLMetadataV2
   = RMV2ReplaceMetadata !ReplaceMetadataV2
   | RMV2ExportMetadata  !ExportMetadata
-  deriving (Eq, Generic)
+  deriving (Generic)
 
 instance FromJSON RQLMetadataV2 where
   parseJSON = genericParseJSON $
@@ -277,7 +278,6 @@ instance FromJSON RQLMetadataV2 where
 data RQLMetadataRequest
   = RMV1 !RQLMetadataV1
   | RMV2 !RQLMetadataV2
-  deriving (Eq)
 
 instance FromJSON RQLMetadataRequest where
   parseJSON = withObject "RQLMetadataRequest" $ \o -> do
@@ -292,7 +292,7 @@ data RQLMetadata
   = RQLMetadata
   { _rqlMetadataResourceVersion :: !(Maybe MetadataResourceVersion)
   , _rqlMetadata                :: !RQLMetadataRequest
-  } deriving (Eq)
+  }
 
 instance FromJSON RQLMetadata where
   parseJSON = withObject "RQLMetadata" $ \o -> do
@@ -310,6 +310,7 @@ runMetadataQuery
      , MonadResolveSource m
      )
   => Env.Environment
+  -> L.Logger L.Hasura
   -> InstanceId
   -> UserInfo
   -> HTTP.Manager
@@ -317,10 +318,11 @@ runMetadataQuery
   -> RebuildableSchemaCache
   -> RQLMetadata
   -> m (EncJSON, RebuildableSchemaCache)
-runMetadataQuery env instanceId userInfo httpManager serverConfigCtx schemaCache RQLMetadata{..} = do
+runMetadataQuery env logger instanceId userInfo httpManager serverConfigCtx schemaCache RQLMetadata{..} = do
   (metadata, currentResourceVersion) <- fetchMetadata
   ((r, modMetadata), modSchemaCache, cacheInvalidations) <-
     runMetadataQueryM env currentResourceVersion _rqlMetadata
+    & flip runReaderT logger
     & runMetadataT metadata
     & runCacheRWT schemaCache
     & peelRun (RunCtx userInfo httpManager serverConfigCtx)
@@ -381,6 +383,8 @@ runMetadataQueryM
      , MetadataM m
      , MonadMetadataStorageQueryAPI m
      , HasServerConfigCtx m
+     , MonadReader r m
+     , Has (L.Logger L.Hasura) r
      )
   => Env.Environment
   -> MetadataResourceVersion
@@ -391,7 +395,7 @@ runMetadataQueryM env currentResourceVersion = withPathK "args" . \case
   RMV2 q -> runMetadataQueryV2M currentResourceVersion q
 
 runMetadataQueryV1M
-  :: forall m
+  :: forall m r
    . ( HasVersion
      , MonadIO m
      , MonadBaseControl IO m
@@ -403,6 +407,8 @@ runMetadataQueryV1M
      , MetadataM m
      , MonadMetadataStorageQueryAPI m
      , HasServerConfigCtx m
+     , MonadReader r m
+     , Has (L.Logger L.Hasura) r
      )
   => Env.Environment
   -> MetadataResourceVersion

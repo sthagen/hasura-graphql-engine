@@ -5,6 +5,9 @@
 .max_width_80 {
   max-width: 80%;
 }
+.max_width_90 {
+  max-width: 90%;
+}
 
 .top {
   display: flex;
@@ -31,6 +34,7 @@
 .form_group {
   margin-bottom: 20px;
   .form_container {
+    width: 95%;
     display: flex;
     justify-content: space-between;
     align-items: baseline;
@@ -87,6 +91,7 @@
   gap: 10px;
   margin: 0;
   padding: 8px;
+  padding-left: 0px;
 }
 
 .special_input {
@@ -116,4 +121,25 @@
 
 .form_footer {
   display: flex;
+}
+
+.justify_center {
+  justify-content: center;
+}
+
+.form_justify {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.checkbox_group {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 10px;
+  align-items: center;
+
+  input[type='checkbox'] {
+    margin: 0;
+  }
 }
