@@ -229,8 +229,8 @@ For the ``serve`` sub-command these are the available flags and environment vari
 
    * - ``--enabled-apis <APIS>``
      - ``HASURA_GRAPHQL_ENABLED_APIS``
-     - Comma separated list of APIs (options: ``metadata``, ``graphql``, ``pgdump``) to be enabled.
-       (default: ``metadata,graphql,pgdump``)
+     - Comma separated list of APIs (options: ``metadata``, ``graphql``, ``pgdump``, ``config``) to be enabled.
+       (default: ``metadata,graphql,pgdump,config``)
 
    * - ``--live-queries-multiplexed-refetch-interval``
      - ``HASURA_GRAPHQL_LIVE_QUERIES_MULTIPLEXED_REFETCH_INTERVAL``
@@ -317,6 +317,28 @@ For the ``serve`` sub-command these are the available flags and environment vari
      - Disable updating of metadata on the server (default: ``false``)
 
        *(Available for versions > v2.0.0)*
+
+   * - ``--websocket-compression``
+     - ``HASURA_GRAPHQL_CONNECTION_COMPRESSION``
+     - Enable WebSocket permessage-deflate compression (default: false)
+
+       *(Available for versions > v2.0.0)*
+
+   * - ``--websocket-keepalive <SECONDS>``
+     - ``HASURA_GRAPHQL_WEBSOCKET_KEEPALIVE``
+     - Used to set the ``Keep Alive`` delay for client that use the ``subscription-transport-ws`` (Apollo) protocol.
+       For ``graphql-ws`` clients the graphql-engine sends ``PING`` messages instead.
+
+       (default: ``5``)
+
+       *(Available for versions > v2.0.0)*
+    
+   * - ``--websocket-connection-init-timeout <SECONDS>``
+     - ``HASURA_GRAPHQL_WEBSOCKET_CONNECTION_INIT_TIMEOUT``
+     - Used to set the connection initialisation timeout for ``graphql-ws`` clients. This is ignored
+       for ``subscription-transport-ws`` (Apollo) clients.
+
+       (default: ``3``)
 
 .. note::
 

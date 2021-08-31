@@ -40,9 +40,11 @@ import           Control.Monad.Trans.Managed                (ManagedT (..))
 import           Control.Monad.Unique
 import           Data.FileEmbed                             (makeRelativeToProject)
 import           Data.Time.Clock                            (UTCTime)
+
 #ifndef PROFILING
 import           GHC.AssertNF
 #endif
+
 import           Network.HTTP.Client.Extended
 import           Options.Applicative
 import           System.Environment                         (getEnvironment)
@@ -52,6 +54,7 @@ import qualified Hasura.GraphQL.Execute.LiveQuery.Poll      as EL
 import qualified Hasura.GraphQL.Transport.WebSocket.Server  as WS
 import qualified Hasura.Tracing                             as Tracing
 
+import           Data.IORef                                 (readIORef)
 import           Hasura.Backends.Postgres.Connection
 import           Hasura.Base.Error
 import           Hasura.EncJSON
@@ -64,7 +67,8 @@ import           Hasura.GraphQL.Execute                     (ExecutionStep (..),
 import           Hasura.GraphQL.Execute.Action
 import           Hasura.GraphQL.Execute.Action.Subscription
 import           Hasura.GraphQL.Logging                     (MonadQueryLog (..))
-import           Hasura.GraphQL.Transport.HTTP              (MonadExecuteQuery (..))
+import           Hasura.GraphQL.Transport.HTTP              (CacheStoreSuccess (CacheStoreSkipped),
+                                                             MonadExecuteQuery (..))
 import           Hasura.GraphQL.Transport.HTTP.Protocol     (toParsed)
 import           Hasura.Logging
 import           Hasura.Metadata.Class
@@ -86,7 +90,7 @@ import           Hasura.Server.Telemetry
 import           Hasura.Server.Types
 import           Hasura.Server.Version
 import           Hasura.Session
-
+import           Network.HTTP.Client.DynamicTlsPermissions  (mkMgr)
 
 data ExitCode
 -- these are used during server initialization:
@@ -172,6 +176,11 @@ data GlobalCtx
     -- and optional retries
   }
 
+
+readTlsAllowlist :: SchemaCacheRef -> IO [TlsAllow]
+readTlsAllowlist scRef = do
+  (rbsc, _) <- readIORef (_scrCache scRef)
+  pure $ scTlsAllowlist $ lastBuiltSchemaCache rbsc
 
 initGlobalCtx
   :: (MonadIO m)
@@ -301,7 +310,8 @@ initialiseServeCtx env GlobalCtx{..} so@ServeOptions{..} = do
         in PostgresConnConfiguration sourceConnInfo Nothing
       sqlGenCtx = SQLGenCtx soStringifyNum soDangerousBooleanCollapse
 
-  let serverConfigCtx =
+  let
+    serverConfigCtx =
         ServerConfigCtx soInferFunctionPermissions soEnableRemoteSchemaPermissions
                         sqlGenCtx soEnableMaintenanceMode soExperimentalFeatures
 
@@ -323,7 +333,9 @@ initialiseServeCtx env GlobalCtx{..} so@ServeOptions{..} = do
 
   schemaCacheRef <- initialiseCache rebuildableSchemaCache
 
-  pure $ ServeCtx _gcHttpManager instanceId loggers soEnabledLogTypes metadataDbPool latch
+  srvMgr <- liftIO $ mkMgr (readTlsAllowlist schemaCacheRef)
+
+  pure $ ServeCtx srvMgr instanceId loggers soEnabledLogTypes metadataDbPool latch
                   rebuildableSchemaCache schemaCacheRef metaVersionRef
 
 mkLoggers
@@ -341,8 +353,12 @@ mkLoggers enabledLogs logLevel = do
 -- | helper function to initialize or migrate the @hdb_catalog@ schema (used by pro as well)
 migrateCatalogSchema
   :: (HasVersion, MonadIO m, MonadBaseControl IO m)
-  => Env.Environment -> Logger Hasura -> Q.PGPool -> Maybe (SourceConnConfiguration ('Postgres 'Vanilla))
-  -> HTTP.Manager -> ServerConfigCtx
+  => Env.Environment
+  -> Logger Hasura
+  -> Q.PGPool
+  -> Maybe (SourceConnConfiguration ('Postgres 'Vanilla))
+  -> HTTP.Manager
+  -> ServerConfigCtx
   -> SourceResolver
   -> m (RebuildableSchemaCache, UTCTime)
 migrateCatalogSchema env logger pool defaultSourceConfig
@@ -481,9 +497,11 @@ runHGEServer setupHook env ServeOptions{..} ServeCtx{..} initTime postPollHook s
   -- tool.
   --
   -- NOTE: be sure to compile WITHOUT code coverage, for this to work properly.
+
 #ifndef PROFILING
   liftIO disableAssertNF
 #endif
+
 
   let sqlGenCtx = SQLGenCtx soStringifyNum soDangerousBooleanCollapse
       Loggers loggerCtx logger _ = _scLoggers
@@ -520,6 +538,7 @@ runHGEServer setupHook env ServeOptions{..} ServeCtx{..} initTime postPollHook s
              soEnableMaintenanceMode
              soExperimentalFeatures
              _scEnabledLogTypes
+             soWebsocketConnectionInitTimeout
 
   let serverConfigCtx =
         ServerConfigCtx soInferFunctionPermissions
@@ -854,7 +873,7 @@ instance (MonadIO m) => HttpLog (PGMetadataStorageAppT m) where
 
 instance (Monad m) => MonadExecuteQuery (PGMetadataStorageAppT m) where
   cacheLookup _ _ _ _ = pure ([], Nothing)
-  cacheStore  _ _ _ = pure ()
+  cacheStore  _ _ _   = pure (Right CacheStoreSkipped)
 
 instance (MonadIO m, MonadBaseControl IO m) => UserAuthentication (Tracing.TraceT (PGMetadataStorageAppT m)) where
   resolveUserInfo logger manager headers authMode reqs =

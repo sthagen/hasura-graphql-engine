@@ -49,13 +49,7 @@ class TestGraphQLQueryBasicMySQL:
 @pytest.mark.parametrize("transport", ['http', 'websocket'])
 @pytest.mark.parametrize("backend", ['bigquery'])
 @usefixtures('per_class_tests_db_state')
-class TestGraphQLQueryTableCustomizationsWithReplaceMetadataBigquery:
-
-    def test_replace_metadata_with_customization(self, hge_ctx, transport):
-        if transport == 'http':
-            check_query_f(hge_ctx, self.dir() + '/replace_metadata_with_customization_and_test_query.yaml')
-            # This also sets the global_select_limit for hasura_global_limited to 1
-            # so, having that test (and related) right after here is convenient.
+class TestGraphQLQueryTableCustomizationsBigquery:
 
     def test_global_limit(self, hge_ctx, transport):
         check_query_f(hge_ctx, self.dir() + "/global_limit.yaml", transport)
@@ -63,38 +57,21 @@ class TestGraphQLQueryTableCustomizationsWithReplaceMetadataBigquery:
     def test_offset_regression(self, hge_ctx, transport):
         check_query_f(hge_ctx, self.dir() + "/offset_regression.yaml", transport)
 
-    @classmethod
-    def dir(cls):
-        return 'queries/graphql_query/bigquery'
-
-
-@pytest.mark.parametrize("transport", ['http', 'websocket'])
-@pytest.mark.parametrize("backend", ['bigquery'])
-@usefixtures('per_class_tests_db_state')
-class TestGraphQLQueryTableCustomizationsWithTrackTableBigquery:
-
     def test_track_table_with_customization(self, hge_ctx, transport):
         if transport == 'http':
             check_query_f(hge_ctx, self.dir() + '/track_table_with_customization_and_test_query.yaml')
-
-    @classmethod
-    def dir(cls):
-        return 'queries/graphql_query/bigquery'
-
-
-@pytest.mark.parametrize("transport", ['http', 'websocket'])
-@pytest.mark.parametrize("backend", ['bigquery'])
-@usefixtures('per_class_tests_db_state')
-class TestGraphQLQueryCustomizationsWithSetTableCustomizationBigquery:
 
     def test_set_table_customization(self, hge_ctx, transport):
         if transport == 'http':
             check_query_f(hge_ctx, self.dir() + '/set_table_customization_and_test_query.yaml')
 
+    def test_replace_metadata_with_customization(self, hge_ctx, transport):
+        if transport == 'http':
+            check_query_f(hge_ctx, self.dir() + '/replace_metadata_with_customization_and_test_query.yaml')
+
     @classmethod
     def dir(cls):
         return 'queries/graphql_query/bigquery'
-
 
 @pytest.mark.parametrize("transport", ['http', 'websocket'])
 @pytest.mark.parametrize("backend", ['bigquery'])
@@ -1150,6 +1127,7 @@ class TestUnauthorizedRolePermission:
     def test_unauth_role(self, hge_ctx, transport):
         check_query_f(hge_ctx, self.dir() + '/unauthorized_role.yaml', transport, False)
 
+@pytest.mark.parametrize("backend", ['postgres', 'mssql'])
 @usefixtures('per_class_tests_db_state')
 class TestGraphQLExplain:
     @classmethod
@@ -1166,26 +1144,14 @@ class TestGraphQLExplain:
         st_code, resp = hge_ctx.v1GraphqlExplain(q, {"x-hasura-role": "random_user"})
         assert st_code == 400, resp
 
-    @pytest.mark.parametrize("backend", ['postgres', 'mssql'])
     def test_simple_query_as_admin_with_user_role(self, hge_ctx, backend):
         self.with_admin_secret(hge_ctx, self.dir() + hge_ctx.backend_suffix('/permissions_query') + ".yaml")
 
-    @pytest.mark.parametrize("backend", ['postgres', 'mssql'])
     def test_simple_query(self, hge_ctx, backend):
         self.with_admin_secret(hge_ctx, self.dir() + hge_ctx.backend_suffix('/simple_query') + ".yaml")
 
-    @pytest.mark.parametrize("backend", ['postgres', 'mssql'])
     def test_permissions_query(self, hge_ctx, backend):
         self.with_admin_secret(hge_ctx, self.dir() + hge_ctx.backend_suffix('/permissions_query') + ".yaml")
-
-    def test_limit_query(self, hge_ctx):
-        self.with_admin_secret(hge_ctx, self.dir() + '/limit_query.yaml')
-
-    def test_limit_orderby_column_query(self, hge_ctx):
-        self.with_admin_secret(hge_ctx, self.dir() + '/limit_orderby_column_query.yaml')
-
-    def test_limit_orderby_relationship_query(self, hge_ctx):
-        self.with_admin_secret(hge_ctx, self.dir() + '/limit_orderby_relationship_query.yaml')
 
     def with_admin_secret(self, hge_ctx, f, hdrs=None, req_st=200):
         conf = get_conf_f(f)
