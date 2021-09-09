@@ -10,7 +10,9 @@ SELECT
     -- Note: unique_constraints does NOT include primary key constraints!
     'unique_constraints', coalesce(unique_constraints.info, '[]'),
     'foreign_keys', coalesce(foreign_key_constraints.info, '[]'),
-    'view_info', CASE "table".relkind WHEN 'v' THEN jsonb_build_object(
+    -- Note: for views and materialized views, we are asking Postgres if it is mutable or not
+    --       and for any other case, we are assuming it to be mutable.
+    'view_info', CASE WHEN "table".relkind IN ('v', 'm') THEN jsonb_build_object(
       'is_updatable', ((pg_catalog.pg_relation_is_updatable("table".oid, true) & 4) = 4),
       'is_insertable', ((pg_catalog.pg_relation_is_updatable("table".oid, true) & 8) = 8),
       'is_deletable', ((pg_catalog.pg_relation_is_updatable("table".oid, true) & 16) = 16)
@@ -37,6 +39,7 @@ LEFT JOIN LATERAL
       'position', "column".attnum,
       'type', coalesce(base_type.typname, "type".typname),
       'is_nullable', NOT "column".attnotnull,
+      'is_identity', coalesce(("info_column".is_identity::boolean), false),
       'description', pg_catalog.col_description("table".oid, "column".attnum)
     )) AS info
     FROM pg_catalog.pg_attribute "column"
@@ -44,6 +47,10 @@ LEFT JOIN LATERAL
       ON "type".oid = "column".atttypid
     LEFT JOIN pg_catalog.pg_type base_type
       ON "type".typtype = 'd' AND base_type.oid = "type".typbasetype
+    LEFT JOIN information_schema.columns "info_column"
+      ON "info_column".column_name = "column".attname
+        AND "info_column".table_name = "table".relname
+        AND "info_column".table_schema = "schema".nspname
     WHERE "column".attrelid = "table".oid
       -- columns where attnum <= 0 are special, system-defined columns
       AND "column".attnum > 0

@@ -103,14 +103,14 @@ export const TemplateGalleryBody: React.VFC<{ onModalOpen: modalOpenFn }> = ({
           ))}
         </tbody>
       </table>
-      <p>
+      <p className="mb-lg">
         Want to contribute to the official template gallery?{' '}
         <a
           target="_blank"
           rel="noopener noreferrer"
           href="https://github.com/hasura/template-gallery/discussions/2"
         >
-          Find our more{' '}
+          Find out more{' '}
           <i className="fa fa-share-square-o" aria-hidden="true" />
         </a>
       </p>

@@ -313,6 +313,7 @@ library
                      , Data.Text.NonEmpty
                      , Data.Time.Clock.Units
                      , Data.URL.Template
+                     , Database.MSSQL.Transaction
                      , GHC.Stats.Extended
                      , Hasura.App
                      , Hasura.Metadata.Class
@@ -362,6 +363,7 @@ library
                      , Hasura.Backends.Postgres.Connection
                      , Hasura.Backends.Postgres.DDL
                      , Hasura.Backends.Postgres.DDL.BoolExp
+                     , Hasura.Backends.Postgres.DDL.EventTrigger
                      , Hasura.Backends.Postgres.DDL.Field
                      , Hasura.Backends.Postgres.DDL.Function
                      , Hasura.Backends.Postgres.DDL.RunSQL
@@ -477,6 +479,7 @@ library
                      , Hasura.RQL.Types.CustomTypes
                      , Hasura.RQL.Types.Endpoint
                      , Hasura.RQL.Types.Endpoint.Trie
+                     , Hasura.RQL.Types.Eventing.Backend
                      , Hasura.RQL.Types.EventTrigger
                      , Hasura.RQL.Types.GraphqlSchemaIntrospection
                      , Hasura.RQL.Types.Function
@@ -617,11 +620,11 @@ library
                      , Hasura.GraphQL.Transport.WebSocket.Protocol
                      , Hasura.GraphQL.Transport.WebSocket.Server
 
-                     , Hasura.Eventing.HTTP
+                     , Hasura.Eventing.Common
                      , Hasura.Eventing.EventTrigger
+                     , Hasura.Eventing.HTTP
                      , Hasura.Eventing.ScheduledTrigger
                      , Hasura.Eventing.ScheduledTrigger.Types
-                     , Hasura.Eventing.Common
                      , Data.GADT.Compare.Extended
                      , Data.Tuple.Extended
                      , Hasura.SQL.AnyBackend
@@ -700,6 +703,9 @@ test-suite graphql-engine-tests
     , transformers-base
     , unordered-containers
     , vector
+    -- mssql support
+    , odbc
+    , resource-pool
   hs-source-dirs: src-test
   main-is: Main.hs
   other-modules:
@@ -709,17 +715,19 @@ test-suite graphql-engine-tests
     Data.Parser.URLTemplate
     Data.Text.RawString
     Data.TimeSpec
+    Database.MSSQL.TransactionSpec
     Hasura.EventingSpec
     Hasura.Generator
     Hasura.GraphQL.Parser.DirectivesTest
     Hasura.GraphQL.Parser.TestUtils
+    Hasura.GraphQL.RemoteServerSpec
     Hasura.GraphQL.Schema.RemoteTest
     Hasura.IncrementalSpec
-    Hasura.SessionSpec
-    Hasura.GraphQL.RemoteServerSpec
     Hasura.RQL.PermissionSpec
+    Hasura.RQL.Types.CommonSpec
     Hasura.RQL.Types.EndpointSpec
-    Hasura.SQL.WKTSpec
     Hasura.Server.AuthSpec
     Hasura.Server.MigrateSpec
     Hasura.Server.TelemetrySpec
+    Hasura.SessionSpec
+    Hasura.SQL.WKTSpec

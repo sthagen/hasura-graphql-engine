@@ -98,13 +98,13 @@ runPGMutation reqId query fieldName userInfo logger sourceConfig tx _genSql =  d
       ) tx
 
 runPGSubscription
-  :: ( MonadIO m
-     )
+  :: MonadIO m
   => SourceConfig ('Postgres pgKind)
   -> MultiplexedQuery ('Postgres pgKind)
   -> [(CohortId, CohortVariables)]
   -> m (DiffTime, Either QErr [(CohortId, B.ByteString)])
-runPGSubscription sourceConfig query variables = withElapsedTime
+runPGSubscription sourceConfig query variables =
+  withElapsedTime
   $ runExceptT
   $ runQueryTx (_pscExecCtx sourceConfig)
   $ PGL.executeMultiplexedQuery query variables
