@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Pallinder/go-randomdata"
+	"golang.org/x/term"
 
 	"github.com/hasura/graphql-engine/cli/v2/internal/testutil"
 	. "github.com/onsi/ginkgo"
@@ -134,18 +135,79 @@ var testMigrateApplySkipExecution = func(projectDirectory string, globalFlags []
 	})
 }
 
-var testProgressBar = func(projectDirectory string) {
+var testMigrateApplyAllDatabases = func(projectDirectory string, databases ...string) {
 	Context("migrate apply", func() {
+		for _, database := range databases {
+			testutil.RunCommandAndSucceed(testutil.CmdOpts{
+				Args:             []string{"migrate", "create", "schema_creation", "--up-sql", "create schema \"testing\";", "--down-sql", "drop schema \"testing\" cascade;", "--database-name", database},
+				WorkingDirectory: projectDirectory,
+			})
+		}
+
+		session := testutil.Hasura(testutil.CmdOpts{
+			Args:             []string{"migrate", "apply", "--all-databases"},
+			WorkingDirectory: projectDirectory,
+		})
+		wantKeywordList := []string{
+			"migrations applied",
+		}
+
+		Eventually(session, timeout).Should(Exit(0))
+		for _, keyword := range wantKeywordList {
+			Expect(session.Err.Contents()).Should(ContainSubstring(keyword))
+		}
+	})
+}
+
+var testMigrateApplyAllDatabasesWithError = func(projectDirectory string, databases ...string) {
+	Context("migrate apply", func() {
+		for _, database := range databases {
+			testutil.RunCommandAndSucceed(testutil.CmdOpts{
+				Args:             []string{"migrate", "create", "schema_creation", "--up-sql", "create schema \"testing\";", "--down-sql", "drop schema \"testing\" cascade;", "--database-name", database},
+				WorkingDirectory: projectDirectory,
+			})
+		}
+
+		if len(databases) > 0 {
+			testutil.RunCommandAndSucceed(testutil.CmdOpts{
+				Args:             []string{"migrate", "create", "schema_creation", "--up-sql", "create schema \"testing\";", "--down-sql", "drop schema \"testing\" cascade;", "--database-name", databases[0]},
+				WorkingDirectory: projectDirectory,
+			})
+		}
+
+		session := testutil.Hasura(testutil.CmdOpts{
+			Args:             []string{"migrate", "apply", "--all-databases"},
+			WorkingDirectory: projectDirectory,
+		})
+		wantKeywordList := []string{
+			fmt.Sprintf("operation failed on : %s", databases[0]),
+		}
+
+		if len(databases) > 0 {
+			Eventually(session, timeout).Should(Exit(1))
+			for _, keyword := range wantKeywordList {
+				Expect(session.Err.Contents()).Should(ContainSubstring(keyword))
+			}
+		} else {
+			Eventually(session, timeout).Should(Exit(0))
+		}
+
+	})
+}
+
+var testProgressBar = func(projectDirectory string) {
+	progressBar := "Applying migrations:  . / 8 .*%"
+	Context("migrate apply should display progress bar", func() {
 		testutil.RunCommandAndSucceed(testutil.CmdOpts{
 			Args:             []string{"migrate", "create", "schema_creation", "--up-sql", "create schema \"testing\";", "--down-sql", "drop schema \"testing\" cascade;"},
 			WorkingDirectory: projectDirectory,
 		})
 		session := testutil.Hasura(testutil.CmdOpts{
-			Args:             []string{"migrate", "apply"},
+			Args:             []string{"migrate", "apply", "--progressbar-logs"},
 			WorkingDirectory: projectDirectory,
 		})
 		wantKeywordList := []string{
-			"Applying migrations:  . / 8 .*%",
+			progressBar,
 			"migrations applied",
 		}
 
@@ -153,6 +215,19 @@ var testProgressBar = func(projectDirectory string) {
 		for _, keyword := range wantKeywordList {
 			Eventually(session.Err, 60*40).Should(Say(keyword))
 		}
+	})
+	Context("migrate apply shouldn't display progress bar in non-terminal (default behaviour)", func() {
+		session := testutil.Hasura(testutil.CmdOpts{
+			Args:             []string{"migrate", "apply", "--down", "all"},
+			WorkingDirectory: projectDirectory,
+		})
+
+		if !term.IsTerminal(int(os.Stdout.Fd())) {
+			Eventually(session.Err, 60*40).ShouldNot(Say(progressBar))
+		} else {
+			Eventually(session.Err, 60*40).Should(Say(progressBar))
+		}
+		Eventually(session, 60*40).Should(Exit(0))
 	})
 }
 
@@ -272,6 +347,45 @@ var _ = Describe("hasura migrate apply (config v3)", func() {
 }
 `, pgSource)
 		createTable := strings.NewReader(createTableString)
+		testByRunningAPI(hgeEndpoint, "v2/query", createTable)
+	})
+	It("should apply the migrations on all-databases", func() {
+		testMigrateApplyAllDatabases(projectDirectory, pgSource, citusSource, mssqlSource)
+		pgBody := fmt.Sprintf(`
+{
+    "type": "run_sql",
+    "args": {
+        "sql": "CREATE TABLE testing.test();",
+		"source": "%s"
+    }
+}
+`, pgSource)
+		createTable := strings.NewReader(pgBody)
+		testByRunningAPI(hgeEndpoint, "v2/query", createTable)
+		citusBody := fmt.Sprintf(`
+{
+    "type": "citus_run_sql",
+    "args": {
+        "sql": "CREATE TABLE testing.test();",
+		"source": "%s"
+    }
+}
+`, citusSource)
+		createTable = strings.NewReader(citusBody)
+		testByRunningAPI(hgeEndpoint, "v2/query", createTable)
+	})
+	It("should the migrations on all-databases except first database and it should exit with code 1", func() {
+		testMigrateApplyAllDatabasesWithError(projectDirectory, pgSource, citusSource, mssqlSource)
+		citusBody := fmt.Sprintf(`
+{
+    "type": "citus_run_sql",
+    "args": {
+        "sql": "CREATE TABLE testing.test();",
+		"source": "%s"
+    }
+}
+`, citusSource)
+		createTable := strings.NewReader(citusBody)
 		testByRunningAPI(hgeEndpoint, "v2/query", createTable)
 	})
 })

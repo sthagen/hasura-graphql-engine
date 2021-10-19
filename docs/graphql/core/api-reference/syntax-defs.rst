@@ -558,6 +558,27 @@ Custom Root Fields
      - ``String``
      - Customise the ``delete_<table-name>_by_pk`` root field
 
+.. _custom_function_root_fields:
+
+Custom Function Root Fields
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+
+   * - Key
+     - Required
+     - Schema
+     - Description
+   * - function
+     - false
+     - ``String``
+     - Customise the ``<function-name>`` root field
+   * - function_aggregate
+     - false
+     - ``String``
+     - Customise the ``<function-name>_aggregete`` root field
+
 .. _InsertPermission:
 
 InsertPermission
@@ -1522,6 +1543,10 @@ ActionDefinition
      - false
      - Integer
      - Number of seconds to wait for response before timing out. Default: 30
+   * - transform
+     - false
+     - :ref:`RequestTransformation`
+     - Request Transformation to be applied to this Action's request
 
 
 .. _InputArgument:
@@ -1589,6 +1614,16 @@ Function Configuration
      - Required
      - Schema
      - Description
+   * - custom_name
+     - false
+     - ``String``
+     - Customise the ``<function-name>`` with the provided custom name value.
+       The GraphQL nodes for the function will be generated according to the custom name.
+   * - custom_root_fields
+     - false
+     - :ref:`Custom Function Root Fields <custom_function_root_fields>`
+     - Customise the root fields
+
    * - session_argument
      - false
      - `String`
@@ -1864,6 +1899,114 @@ EventTriggerColumns
    :class: haskell-pre
 
    "*" | [:ref:`PGColumn`]
+
+.. _RequestTransformation:
+
+RequestTransformation
+^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+
+   * - Key
+     - required
+     - Schema
+     - Description
+   * - method
+     - false
+     - String
+     - Change the request method to this value.
+   * - url
+     - false
+     - String
+     - Change the request URL to this value.
+   * - body
+     - false
+     - String
+     - A template script for transforming the request body.
+   * - content_type
+     - false
+     - String
+     - Replace the Content-Type with this value. Only "application/json" and "application/x-www-form-urlencoded" are allowed. Default: "application/json"
+   * - query_params
+     - false
+     - Object (String : String)
+     - Replace the query params on the URL with this value.
+   * - request_headers
+     - false
+     - :ref:`TransformHeaders`
+     - Transform headers as described here.
+   * - template_engine
+     - false
+     - :ref:`TemplateEngine`
+     - Template language to be used for this transformation. Default: "Kriti"
+
+.. list-table::
+   :header-rows: 1
+
+   * - Key
+     - required
+     - Schema
+     - Description
+   * - Key
+     - required
+     - Schema
+     - Description
+
+.. _TransformHeaders
+
+TransformHeaders
+^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+
+   * - Key
+     - required
+     - Schema
+     - Description
+   * - addHeaders
+     - false
+     - Object (:ref:`HeaderKey` : :ref:`HeaderValue`)
+     - A map of Header Key Value pairs to be added to the request. Content-Type cannot be added via this map.
+   * - removeHeaders
+     - false
+     - Array of (:ref:`HeaderKey`)
+     - Headers to be removed from the request. Content-Type cannot be removed.
+
+
+.. _HeaderKey
+
+HeaderKey
+^^^^^^^^^
+
+.. parsed-literal::
+   :class: haskell-pre
+
+   String
+
+.. _HeaderValue
+
+HeaderKey
+^^^^^^^^^
+
+.. parsed-literal::
+   :class: haskell-pre
+
+   String
+
+.. _TemplateEngine
+
+TemplateEngine
+^^^^^^^^^^^^^^
+
+The JSON templating language to be used for this JSON transformation.
+
+.. parsed-literal::
+   :class: haskell-pre
+
+   "Kriti"
+
 
 .. _RetryConf:
 

@@ -20,34 +20,22 @@ const generateWhereClause = (
   sqlSchemaName = 'ist.table_schema',
   clausePrefix = 'where'
 ) => {
-  let whereClause = '';
-
   const whereCondtions: string[] = [];
-  if (options.schemas) {
-    options.schemas.forEach(schemaName => {
-      whereCondtions.push(`(${sqlSchemaName}='${schemaName}')`);
-    });
-  }
-  if (options.tables) {
-    options.tables.forEach(tableInfo => {
-      whereCondtions.push(
-        `(${sqlSchemaName}='${tableInfo.table_schema}' and ${sqlTableName}='${tableInfo.table_name}')`
-      );
-    });
-  }
 
-  if (whereCondtions.length > 0) {
-    whereClause = clausePrefix;
-  }
-
-  whereCondtions.forEach((whereInfo, index) => {
-    whereClause += ` ${whereInfo}`;
-    if (index + 1 !== whereCondtions.length) {
-      whereClause += ' or';
-    }
+  options.schemas?.forEach(schemaName => {
+    whereCondtions.push(`(${sqlSchemaName}='${schemaName}')`);
   });
 
-  return whereClause;
+  options.tables?.forEach(tableInfo => {
+    whereCondtions.push(
+      `(${sqlSchemaName}='${tableInfo.table_schema}' and ${sqlTableName}='${tableInfo.table_name}')`
+    );
+  });
+
+  if (whereCondtions.length) {
+    return `${clausePrefix} (${whereCondtions.join(' or ')})`;
+  }
+  return '';
 };
 
 export const getFetchTablesListQuery = (options: {
@@ -824,14 +812,12 @@ COMMIT TRANSACTION;`;
 
 const trackableFunctionsWhere = `
 AND has_variadic = FALSE
-AND returns_set = TRUE
 AND return_type_type = 'c'
 `;
 
 const nonTrackableFunctionsWhere = `
 AND NOT (
   has_variadic = false
-  AND returns_set = TRUE
   AND return_type_type = 'c'
 )
 `;
@@ -842,7 +828,7 @@ const functionWhereStatement = {
 };
 
 export const getFunctionDefinitionSql = (
-  schemaName: string,
+  schemaName: string | string[],
   functionName?: string | null,
   type?: keyof typeof functionWhereStatement
 ) => `
@@ -897,7 +883,12 @@ AND NOT(EXISTS (
     1 FROM pg_aggregate
   WHERE
     pg_aggregate.aggfnoid::oid = p.oid))) as info
-WHERE function_schema='${schemaName}'
+-- WHERE function_schema='${schemaName}'
+WHERE ${
+  Array.isArray(schemaName)
+    ? `function_schema IN (${schemaName.map(s => `'${s}'`).join(', ')})`
+    : `function_schema='${schemaName}'`
+}
 ${functionName ? `AND function_name='${functionName}'` : ''}
 ${type ? functionWhereStatement[type] : ''}
 ORDER BY function_name ASC
