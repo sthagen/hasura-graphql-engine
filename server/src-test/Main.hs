@@ -6,6 +6,7 @@ import Control.Concurrent.MVar
 import Control.Natural ((:~>) (..))
 import Data.Aeson qualified as A
 import Data.ByteString.Lazy.Char8 qualified as BL
+import Data.ByteString.Lazy.UTF8 qualified as LBS
 import Data.Environment qualified as Env
 import Data.NonNegativeIntSpec qualified as NonNegetiveIntSpec
 import Data.Parser.CacheControlSpec qualified as CacheControlParser
@@ -20,10 +21,12 @@ import Hasura.App
     mkPgSourceResolver,
   )
 import Hasura.EventingSpec qualified as EventingSpec
+import Hasura.GraphQL.NamespaceSpec qualified as NamespaceSpec
 import Hasura.GraphQL.Parser.DirectivesTest qualified as GraphQLDirectivesSpec
 import Hasura.GraphQL.RemoteServerSpec qualified as RemoteServerSpec
 import Hasura.GraphQL.Schema.RemoteTest qualified as GraphRemoteSchemaSpec
 import Hasura.IncrementalSpec qualified as IncrementalSpec
+import Hasura.Logging
 import Hasura.Metadata.Class
 import Hasura.Prelude
 import Hasura.RQL.DDL.Schema.Cache
@@ -86,6 +89,7 @@ unitSpecs = do
   describe "Hasura.Incremental" IncrementalSpec.spec
   describe "Hasura.RQL.Types.Common" CommonTypesSpec.spec
   describe "Hasura.RQL.Types.Endpoint" EndpointSpec.spec
+  describe "Hasura.GraphQL.Namespace" NamespaceSpec.spec
   describe "Hasura.GraphQL.RemoteServer" RemoteServerSpec.spec
   describe "Hasura.SQL.WKT" WKTSpec.spec
   describe "Hasura.Server.Auth" AuthSpec.spec
@@ -138,6 +142,11 @@ buildPostgresSpecs maybeUrlTemplate = do
   pgPool <- Q.initPGPool pgConnInfo Q.defaultConnParams {Q.cpConns = 1} print
   let pgContext = mkPGExecCtx Q.Serializable pgPool
 
+      logger :: Logger Hasura = Logger $ \l -> do
+        let (logLevel, logType :: EngineLogType Hasura, logDetail) = toEngineLog l
+        t <- liftIO $ getFormattedTime Nothing
+        liftIO $ putStrLn $ LBS.toString $ A.encode $ EngineLog t logLevel logType logDetail
+
       setupCacheRef = do
         httpManager <- HTTP.newManager HTTP.tlsManagerSettings
         let sqlGenCtx = SQLGenCtx False False
@@ -161,7 +170,7 @@ buildPostgresSpecs maybeUrlTemplate = do
             snd
               <$> (liftEitherM . runExceptT . runTx pgContext Q.ReadWrite)
                 (migrateCatalog (Just sourceConfig) maintenanceMode =<< liftIO getCurrentTime)
-          schemaCache <- lift $ lift $ buildRebuildableSchemaCache envMap metadata
+          schemaCache <- lift $ lift $ buildRebuildableSchemaCache logger envMap metadata
           pure (metadata, schemaCache)
 
         cacheRef <- newMVar schemaCache

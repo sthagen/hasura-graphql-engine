@@ -70,6 +70,7 @@ import {
   getDropIndexSql,
   getTableInfo,
   getDatabaseVersionSql,
+  schemaListQuery,
 } from './sqlUtils';
 import globals from '../../../Globals';
 
@@ -646,6 +647,13 @@ export const supportedFeatures: DeepRequired<SupportedFeaturesType> = {
     nonTrackableFunctions: {
       enabled: true,
     },
+    modify: {
+      enabled: true,
+      comments: {
+        view: true,
+        edit: true,
+      },
+    },
   },
   events: {
     triggers: {
@@ -794,4 +802,5 @@ export const postgres: DataSourcesAPI = {
   generateEditRowRequest,
   generateDeleteRowRequest,
   generateBulkDeleteRowRequest,
+  schemaListQuery,
 };

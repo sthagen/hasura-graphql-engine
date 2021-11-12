@@ -1,4 +1,8 @@
-module Hasura.RQL.DDL.QueryTags where
+module Hasura.RQL.DDL.QueryTags
+  ( SetQueryTagsConfig,
+    runSetQueryTagsConfig,
+  )
+where
 
 import Control.Lens
 import Data.Aeson
@@ -18,7 +22,6 @@ data SetQueryTagsConfig = SetQueryTagsConfig
   }
 
 $(J.deriveToJSON hasuraJSON {J.omitNothingFields = True} ''SetQueryTagsConfig)
-$(makeLenses ''SetQueryTagsConfig)
 
 instance FromJSON SetQueryTagsConfig where
   parseJSON = withObject "SetQueryTagsConfig" $ \o -> do
@@ -43,7 +46,7 @@ runSetQueryTagsConfig (SetQueryTagsConfig sourceName queryTagsConfig) = do
   where
     getBackendType :: BackendSourceMetadata -> BackendType
     getBackendType exists =
-      AB.dispatchAnyBackend @BackendMetadata exists $ \(_sourceMetadata :: SourceMetadata b) ->
+      AB.dispatchAnyBackend @Backend exists $ \(_sourceMetadata :: SourceMetadata b) ->
         reify $ backendTag @b
 
     setQueryTagsConfigInMetadata exists qtConfig = do
@@ -54,5 +57,5 @@ runSetQueryTagsConfig (SetQueryTagsConfig sourceName queryTagsConfig) = do
     queryTagsNotSupported backendType = throw400 NotSupported $ toTxt backendType <> " sources do not support query-tags yet"
 
     queryTagsMetadataModifier exists qtConfig =
-      AB.dispatchAnyBackend @BackendMetadata exists $ \(_sourceMetadata :: SourceMetadata b) ->
+      AB.dispatchAnyBackend @Backend exists $ \(_sourceMetadata :: SourceMetadata b) ->
         MetadataModifier $ metaSources . ix sourceName . toSourceMetadata @b . smQueryTags .~ qtConfig

@@ -77,7 +77,7 @@ runClearMetadata _ = do
           let emptyDefaultSource =
                 AB.dispatchAnyBackend @Backend exists \(s :: SourceMetadata b) ->
                   AB.mkAnyBackend @b $
-                    SourceMetadata @b defaultSource mempty mempty (_smConfiguration @b s) Nothing
+                    SourceMetadata @b defaultSource mempty mempty (_smConfiguration @b s) Nothing emptySourceCustomization
            in emptyMetadata
                 & metaSources %~ OMap.insert defaultSource emptyDefaultSource
   runReplaceMetadataV1 $ RMWithSources emptyMetadata'
@@ -327,7 +327,7 @@ runExportMetadataV2 currentResourceVersion ExportMetadata {} = do
         ]
 
 runReloadMetadata :: (QErrM m, CacheRWM m, MetadataM m) => ReloadMetadata -> m EncJSON
-runReloadMetadata (ReloadMetadata reloadRemoteSchemas reloadSources) = do
+runReloadMetadata (ReloadMetadata reloadRemoteSchemas reloadSources reloadRecreateEventTriggers) = do
   metadata <- getMetadata
   let allSources = HS.fromList $ OMap.keys $ _metaSources metadata
       allRemoteSchemas = HS.fromList $ OMap.keys $ _metaRemoteSchemas metadata
@@ -346,6 +346,9 @@ runReloadMetadata (ReloadMetadata reloadRemoteSchemas reloadSources) = do
   pgSourcesInvalidations <- case reloadSources of
     RSReloadAll -> pure allSources
     RSReloadList l -> mapM_ checkSource l *> pure l
+  recreateEventTriggersSources <- case reloadRecreateEventTriggers of
+    RSReloadAll -> pure allSources
+    RSReloadList l -> mapM_ checkSource l *> pure l
 
   let cacheInvalidations =
         CacheInvalidations
@@ -354,7 +357,7 @@ runReloadMetadata (ReloadMetadata reloadRemoteSchemas reloadSources) = do
             ciSources = pgSourcesInvalidations
           }
 
-  buildSchemaCacheWithOptions CatalogUpdate cacheInvalidations metadata
+  buildSchemaCacheWithOptions (CatalogUpdate $ Just recreateEventTriggersSources) cacheInvalidations metadata
   pure successMsg
 
 runDumpInternalState ::
@@ -476,7 +479,6 @@ runTestWebhookTransform (TestWebhookTransform url payload mt sv) = do
   initReq <- liftIO $ HTTP.mkRequestThrow url
   let req = initReq & HTTP.body .~ pure (J.encode payload)
       dataTransform = mkRequestTransform mt
-      -- TODO(Solomon) Add SessionVariables
       transformedE = applyRequestTransform url dataTransform req sv
 
   case transformedE of

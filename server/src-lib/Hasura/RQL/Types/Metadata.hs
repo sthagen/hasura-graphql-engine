@@ -1,9 +1,106 @@
 {-# LANGUAGE UndecidableInstances #-}
 
-module Hasura.RQL.Types.Metadata where
+module Hasura.RQL.Types.Metadata
+  ( Actions,
+    Allowlist,
+    BackendSourceMetadata,
+    CatalogState (..),
+    CatalogStateType (..),
+    ComputedFieldMetadata (..),
+    ComputedFields,
+    CronTriggers,
+    Endpoints,
+    EventTriggers,
+    FunctionMetadata (..),
+    Functions,
+    GetCatalogState (..),
+    InheritedRoles,
+    Metadata (..),
+    MetadataModifier (..),
+    MetadataNoSources (..),
+    MetadataVersion (..),
+    Permissions,
+    QueryCollections,
+    Relationships,
+    RemoteRelationshipMetadata (..),
+    RemoteRelationships,
+    RemoteSchemaMetadata (..),
+    RemoteSchemaPermissionMetadata (..),
+    RemoteSchemas,
+    SetCatalogState (..),
+    SourceMetadata (..),
+    Sources,
+    TableMetadata (..),
+    Tables,
+    currentMetadataVersion,
+    dropComputedFieldInMetadata,
+    dropEventTriggerInMetadata,
+    dropFunctionInMetadata,
+    dropPermissionInMetadata,
+    dropRelationshipInMetadata,
+    dropRemoteRelationshipInMetadata,
+    dropTableInMetadata,
+    emptyMetadata,
+    fmComment,
+    fmConfiguration,
+    fmFunction,
+    fmPermissions,
+    functionMetadataSetter,
+    getSourceName,
+    metaActions,
+    metaAllowlist,
+    metaApiLimits,
+    metaCronTriggers,
+    metaCustomTypes,
+    metaInheritedRoles,
+    metaMetricsConfig,
+    metaNetwork,
+    metaQueryCollections,
+    metaRemoteSchemas,
+    metaRestEndpoints,
+    metaSetGraphqlIntrospectionOptions,
+    metaSources,
+    metadataToOrdJSON,
+    mkSourceMetadata,
+    mkTableMeta,
+    noMetadataModify,
+    parseListAsMap,
+    parseNonSourcesMetadata,
+    rrmDefinition,
+    rrmName,
+    rsmComment,
+    rsmDefinition,
+    rsmName,
+    rsmPermissions,
+    rspmComment,
+    rspmDefinition,
+    rspmRole,
+    smConfiguration,
+    smFunctions,
+    smName,
+    smQueryTags,
+    smTables,
+    smCustomization,
+    tableMetadataSetter,
+    tmArrayRelationships,
+    tmComputedFields,
+    tmConfiguration,
+    tmDeletePermissions,
+    tmEventTriggers,
+    tmInsertPermissions,
+    tmIsEnum,
+    tmObjectRelationships,
+    tmRemoteRelationships,
+    tmSelectPermissions,
+    tmTable,
+    tmUpdatePermissions,
+    toSourceMetadata,
+  )
+where
 
 import Control.Lens hiding (set, (.=))
 import Data.Aeson.Casing
+import Data.Aeson.Extended (mapWithJSONPath)
 import Data.Aeson.Ordered qualified as AO
 import Data.Aeson.TH
 import Data.Aeson.Types
@@ -27,8 +124,6 @@ import Hasura.RQL.Types.Endpoint
 import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.GraphqlSchemaIntrospection
-import Hasura.RQL.Types.Metadata.Backend
-import Hasura.RQL.Types.Metadata.Instances ()
 import Hasura.RQL.Types.Network
 import Hasura.RQL.Types.Permission
 import Hasura.RQL.Types.QueryCollection
@@ -38,6 +133,7 @@ import Hasura.RQL.Types.RemoteRelationship
 import Hasura.RQL.Types.RemoteSchema
 import Hasura.RQL.Types.Roles
 import Hasura.RQL.Types.ScheduledTrigger
+import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.Backend
@@ -314,7 +410,8 @@ data SourceMetadata b = SourceMetadata
     _smTables :: !(Tables b),
     _smFunctions :: !(Functions b),
     _smConfiguration :: !(SourceConnConfiguration b),
-    _smQueryTags :: !(Maybe QueryTagsConfig)
+    _smQueryTags :: !(Maybe QueryTagsConfig),
+    _smCustomization :: !SourceCustomization
   }
   deriving (Generic)
 
@@ -333,24 +430,26 @@ instance (Backend b) => FromJSON (SourceMetadata b) where
     _smFunctions <- oMapFromL _fmFunction <$> o .:? "functions" .!= []
     _smConfiguration <- o .: "configuration"
     _smQueryTags <- o .:? "query_tags"
+    _smCustomization <- o .:? "customization" .!= emptySourceCustomization
     pure SourceMetadata {..}
 
 mkSourceMetadata ::
   forall (b :: BackendType).
-  BackendMetadata b =>
+  Backend b =>
   SourceName ->
   SourceConnConfiguration b ->
+  SourceCustomization ->
   BackendSourceMetadata
-mkSourceMetadata name config =
-  AB.mkAnyBackend $ SourceMetadata @b name mempty mempty config Nothing
+mkSourceMetadata name config customization =
+  AB.mkAnyBackend $ SourceMetadata @b name mempty mempty config Nothing customization
 
 type BackendSourceMetadata = AB.AnyBackend SourceMetadata
 
-toSourceMetadata :: forall b. (BackendMetadata b) => Prism' BackendSourceMetadata (SourceMetadata b)
+toSourceMetadata :: forall b. (Backend b) => Prism' BackendSourceMetadata (SourceMetadata b)
 toSourceMetadata = prism' AB.mkAnyBackend AB.unpackAnyBackend
 
 getSourceName :: BackendSourceMetadata -> SourceName
-getSourceName e = AB.dispatchAnyBackend @BackendMetadata e _smName
+getSourceName e = AB.dispatchAnyBackend @Backend e _smName
 
 type Sources = InsOrdHashMap SourceName BackendSourceMetadata
 
@@ -428,7 +527,7 @@ instance FromJSON Metadata where
     when (version /= MVVersion3) $
       fail $ "unexpected metadata version from storage: " <> show version
     rawSources <- o .: "sources"
-    sources <- oMapFromL getSourceName <$> traverse parseSourceMetadata rawSources
+    sources <- oMapFromL getSourceName <$> mapWithJSONPath parseSourceMetadata rawSources <?> Key "sources"
     endpoints <- oMapFromL _ceName <$> o .:? "rest_endpoints" .!= []
     network <- o .:? "network" .!= emptyNetwork
     ( remoteSchemas,
@@ -467,22 +566,23 @@ instance FromJSON Metadata where
 emptyMetadata :: Metadata
 emptyMetadata =
   Metadata
-    mempty
-    mempty
-    mempty
-    mempty
-    emptyCustomTypes
-    mempty
-    mempty
-    mempty
-    emptyApiLimit
-    emptyMetricsConfig
-    mempty
-    mempty
-    emptyNetwork
+    { _metaSources = mempty,
+      _metaRemoteSchemas = mempty,
+      _metaQueryCollections = mempty,
+      _metaAllowlist = mempty,
+      _metaActions = mempty,
+      _metaCronTriggers = mempty,
+      _metaRestEndpoints = mempty,
+      _metaInheritedRoles = mempty,
+      _metaSetGraphqlIntrospectionOptions = mempty,
+      _metaCustomTypes = emptyCustomTypes,
+      _metaApiLimits = emptyApiLimit,
+      _metaMetricsConfig = emptyMetricsConfig,
+      _metaNetwork = emptyNetwork
+    }
 
 tableMetadataSetter ::
-  (BackendMetadata b) =>
+  (Backend b) =>
   SourceName ->
   TableName b ->
   ASetter' Metadata (TableMetadata b)
@@ -492,7 +592,7 @@ tableMetadataSetter source table =
 -- | A lens setter for the metadata of a specific function as identified by
 --   the source name and function name.
 functionMetadataSetter ::
-  (BackendMetadata b) =>
+  (Backend b) =>
   SourceName ->
   FunctionName b ->
   ASetter' Metadata (FunctionMetadata b)
@@ -563,6 +663,48 @@ instance Monoid MetadataModifier where
 
 noMetadataModify :: MetadataModifier
 noMetadataModify = mempty
+
+dropTableInMetadata ::
+  forall b. (Backend b) => SourceName -> TableName b -> MetadataModifier
+dropTableInMetadata source table =
+  MetadataModifier $ metaSources . ix source . (toSourceMetadata @b) . smTables %~ OM.delete table
+
+dropRelationshipInMetadata ::
+  RelName -> TableMetadata b -> TableMetadata b
+dropRelationshipInMetadata relName =
+  -- Since the name of a relationship is unique in a table, the relationship
+  -- with given name may present in either array or object relationships but
+  -- not in both.
+  (tmObjectRelationships %~ OM.delete relName)
+    . (tmArrayRelationships %~ OM.delete relName)
+
+dropPermissionInMetadata ::
+  RoleName -> PermType -> TableMetadata b -> TableMetadata b
+dropPermissionInMetadata rn = \case
+  PTInsert -> tmInsertPermissions %~ OM.delete rn
+  PTSelect -> tmSelectPermissions %~ OM.delete rn
+  PTDelete -> tmDeletePermissions %~ OM.delete rn
+  PTUpdate -> tmUpdatePermissions %~ OM.delete rn
+
+dropComputedFieldInMetadata ::
+  ComputedFieldName -> TableMetadata b -> TableMetadata b
+dropComputedFieldInMetadata name =
+  tmComputedFields %~ OM.delete name
+
+dropEventTriggerInMetadata :: TriggerName -> TableMetadata b -> TableMetadata b
+dropEventTriggerInMetadata name =
+  tmEventTriggers %~ OM.delete name
+
+dropRemoteRelationshipInMetadata ::
+  RemoteRelationshipName -> TableMetadata b -> TableMetadata b
+dropRemoteRelationshipInMetadata name =
+  tmRemoteRelationships %~ OM.delete name
+
+dropFunctionInMetadata ::
+  forall b. (Backend b) => SourceName -> FunctionName b -> MetadataModifier
+dropFunctionInMetadata source function =
+  MetadataModifier $
+    metaSources . ix source . toSourceMetadata . (smFunctions @b) %~ OM.delete function
 
 -- | Encode 'Metadata' to JSON with deterministic ordering (e.g. "version" being at the top).
 -- The CLI system stores metadata in files and has option to show changes in git diff style.
@@ -649,7 +791,7 @@ metadataToOrdJSON
 
       sourceMetaToOrdJSON :: BackendSourceMetadata -> AO.Value
       sourceMetaToOrdJSON exists =
-        AB.dispatchAnyBackend @BackendMetadata exists $ \(SourceMetadata {..} :: SourceMetadata b) ->
+        AB.dispatchAnyBackend @Backend exists $ \(SourceMetadata {..} :: SourceMetadata b) ->
           let sourceNamePair = ("name", AO.toOrdered _smName)
               sourceKind = T.toTxt $ reify $ backendTag @b
               sourceKindPair = ("kind", AO.String sourceKind)
@@ -659,7 +801,11 @@ metadataToOrdJSON
               configurationPair = [("configuration", AO.toOrdered _smConfiguration)]
 
               queryTagsConfigPair = maybe [] (\queryTagsConfig -> [("query_tags", AO.toOrdered queryTagsConfig)]) _smQueryTags
-           in AO.object $ [sourceNamePair, sourceKindPair, tablesPair] <> maybeToList functionsPair <> configurationPair <> queryTagsConfigPair
+
+              customizationPair =
+                guard (_smCustomization /= emptySourceCustomization)
+                  *> [("customization", AO.toOrdered _smCustomization)]
+           in AO.object $ [sourceNamePair, sourceKindPair, tablesPair] <> maybeToList functionsPair <> configurationPair <> queryTagsConfigPair <> customizationPair
 
       tableMetaToOrdJSON :: (Backend b) => TableMetadata b -> AO.Value
       tableMetaToOrdJSON
@@ -990,15 +1136,14 @@ metadataToOrdJSON
                 <> catMaybes [maybeDescriptionToMaybeOrdPair descM]
 
       actionMetadataToOrdJSON :: ActionMetadata -> AO.Value
-      actionMetadataToOrdJSON (ActionMetadata name comment definition permissions metaTransform) =
+      actionMetadataToOrdJSON (ActionMetadata name comment definition permissions) =
         AO.object $
           [ ("name", AO.toOrdered name),
             ("definition", actionDefinitionToOrdJSON definition)
           ]
             <> catMaybes
               [ maybeCommentToMaybeOrdPair comment,
-                listToMaybeOrdPair "permissions" permToOrdJSON permissions,
-                fmap (("request_transform",) . AO.toOrdered) metaTransform
+                listToMaybeOrdPair "permissions" permToOrdJSON permissions
               ]
         where
           argDefinitionToOrdJSON :: ArgumentDefinition GraphQLType -> AO.Value
@@ -1019,6 +1164,7 @@ metadataToOrdJSON
                 frwrdClientHdrs
                 timeout
                 handler
+                requestTransform
               ) =
               let typeAndKind = case actionType of
                     ActionQuery -> [("type", AO.toOrdered ("query" :: String))]
@@ -1033,7 +1179,8 @@ metadataToOrdJSON
                       <> [("forward_client_headers", AO.toOrdered frwrdClientHdrs) | frwrdClientHdrs]
                       <> catMaybes
                         [ listToMaybeOrdPair "headers" AO.toOrdered headers,
-                          listToMaybeOrdPair "arguments" argDefinitionToOrdJSON args
+                          listToMaybeOrdPair "arguments" argDefinitionToOrdJSON args,
+                          fmap (("request_transform",) . AO.toOrdered) requestTransform
                         ]
                       <> typeAndKind
                       <> bool [("timeout", AO.toOrdered timeout)] mempty (timeout == defaultActionTimeoutSecs)

@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Hasura.Backends.MySQL.Instances.Types where
+module Hasura.Backends.MySQL.Instances.Types () where
 
 import Data.Aeson qualified as J
 import Database.MySQL.Base.Types qualified as MySQL
@@ -92,7 +92,7 @@ instance Backend 'MySQL where
 
   tableGraphQLName :: TableName 'MySQL -> Either QErr G.Name
   tableGraphQLName MySQL.TableName {..} =
-    let gName = schema <> "_" <> name
+    let gName = maybe "" (<> "_") schema <> name
      in (G.mkName gName)
           `onNothing` throw400 ValidationFailed ("TableName " <> gName <> " is not a valid GraphQL identifier")
 
@@ -103,4 +103,5 @@ instance Backend 'MySQL where
   scalarTypeGraphQLName = error "scalarTypeGraphQLName: MySQL backend does not support this operation yet."
 
   snakeCaseTableName :: TableName 'MySQL -> Text
-  snakeCaseTableName MySQL.TableName {name, schema} = schema <> "_" <> name
+  snakeCaseTableName MySQL.TableName {name, schema} =
+    maybe "" (<> "_") schema <> name

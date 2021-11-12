@@ -4,6 +4,8 @@ module Hasura.Backends.MySQL.Connection
     resolveDatabaseMetadata,
     fetchAllRows,
     runQueryYieldingRows,
+    withMySQLPool,
+    parseTextRows,
   )
 where
 
@@ -33,6 +35,7 @@ import Hasura.Base.Error
 import Hasura.Prelude
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.SourceCustomization
 import Hasura.SQL.Backend
 
 resolveSourceConfig :: (MonadIO m) => SourceName -> ConnSourceConfig -> Env.Environment -> m (Either QErr SourceConfig)
@@ -56,11 +59,11 @@ resolveSourceConfig _name csc@ConnSourceConfig {_cscPoolSettings = ConnPoolSetti
             (fromIntegral _cscMaxConnections)
         )
 
-resolveDatabaseMetadata :: (MonadIO m) => SourceConfig -> m (Either QErr (ResolvedSource 'MySQL))
-resolveDatabaseMetadata sc@SourceConfig {..} =
+resolveDatabaseMetadata :: (MonadIO m) => SourceConfig -> SourceTypeCustomization -> m (Either QErr (ResolvedSource 'MySQL))
+resolveDatabaseMetadata sc@SourceConfig {..} sourceCustomization =
   runExceptT $ do
     metadata <- liftIO $ withResource scConnectionPool (getMetadata scConfig)
-    pure $ ResolvedSource sc metadata mempty mempty
+    pure $ ResolvedSource sc sourceCustomization metadata mempty mempty
 
 parseFieldResult :: Field -> Maybe ByteString -> Value
 parseFieldResult f@Field {..} mBs =
@@ -69,6 +72,9 @@ parseFieldResult f@Field {..} mBs =
       let fvalue :: Double = MySQL.convert f mBs
        in Number $ fromFloatDigits fvalue
     VarString ->
+      let fvalue :: Text = MySQL.convert f mBs
+       in J.String fvalue
+    Blob ->
       let fvalue :: Text = MySQL.convert f mBs
        in J.String fvalue
     DateTime -> maybe J.Null (J.String . decodeUtf8) mBs
@@ -142,3 +148,9 @@ fetchAllRows r = reverse <$> go [] r
       fetchRow res >>= \case
         [] -> pure acc
         r' -> go (r' : acc) res
+
+parseTextRows :: [Field] -> [[Maybe ByteString]] -> [[Text]]
+parseTextRows columns rows = map (\(column, row) -> map (MySQL.convert column) row) (zip columns rows)
+
+withMySQLPool :: (MonadIO m) => Pool Connection -> (Connection -> IO a) -> m a
+withMySQLPool pool = liftIO . withResource pool

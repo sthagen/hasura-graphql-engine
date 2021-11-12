@@ -1,5 +1,10 @@
 -- | The RQL query ('/v2/query')
-module Hasura.Server.API.V2Query where
+module Hasura.Server.API.V2Query
+  ( RQLQuery,
+    queryModifiesSchema,
+    runQuery,
+  )
+where
 
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Aeson
@@ -103,7 +108,7 @@ queryModifiesSchema = \case
   RQCount _ -> False
   RQRunSql q -> Postgres.isSchemaCacheBuildRequiredRunSQL q
   RQCitusRunSql q -> Postgres.isSchemaCacheBuildRequiredRunSQL q
-  RQMssqlRunSql q -> MSSQL.sqlContainsDDLKeyword $ MSSQL._mrsSql q
+  RQMssqlRunSql q -> MSSQL.isSchemaCacheBuildRequiredRunSQL q
   RQMysqlRunSql _ -> False
   RQBigqueryRunSql _ -> False
   RQBigqueryDatabaseInspection _ -> False

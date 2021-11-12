@@ -1,10 +1,11 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Hasura.Backends.MySQL.Instances.Schema where
+module Hasura.Backends.MySQL.Instances.Schema () where
 
 import Data.Aeson qualified as J
 import Data.ByteString (ByteString)
+import Data.Has
 import Data.HashMap.Strict qualified as HM
 import Data.List.NonEmpty qualified as NE
 import Data.Text.Encoding (encodeUtf8)
@@ -21,7 +22,6 @@ import Hasura.GraphQL.Schema.Select
 import Hasura.Prelude
 import Hasura.RQL.IR
 import Hasura.RQL.IR.Select qualified as IR
-import Hasura.RQL.IR.Update qualified as IR
 import Hasura.RQL.Types as RQL
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -41,7 +41,6 @@ instance BackendSchema 'MySQL where
   jsonPathArg = jsonPathArg'
   orderByOperators = orderByOperators'
   comparisonExps = comparisonExps'
-  updateOperators = updateOperators'
   mkCountType = error "mkCountType: MySQL backend does not support this operation yet."
   aggregateOrderByCountType = error "aggregateOrderByCountType: MySQL backend does not support this operation yet."
   computedField = error "computedField: MySQL backend does not support this operation yet."
@@ -174,7 +173,7 @@ bsParser :: MonadParse m => Parser 'Both m ByteString
 bsParser = encodeUtf8 <$> P.string
 
 columnParser' ::
-  (MonadSchema n m, MonadError QErr m) =>
+  (MonadSchema n m, MonadError QErr m, MonadReader r m, Has MkTypename r) =>
   ColumnType 'MySQL ->
   G.Nullability ->
   m (Parser 'Both n (ValueWithOrigin (ColumnValue 'MySQL)))
@@ -200,7 +199,7 @@ columnParser' columnType (G.Nullability isNullable) =
       MySQL.Timestamp -> pure $ possiblyNullable scalarType $ MySQL.TimestampValue <$> P.string
       _ -> do
         name <- MySQL.mkMySQLScalarTypeName scalarType
-        let schemaType = P.NonNullable $ P.TNamed $ P.mkDefinition name Nothing P.TIScalar
+        let schemaType = P.NonNullable $ P.TNamed $ P.mkDefinition (P.Typename name) Nothing P.TIScalar
         pure $
           Parser
             { pType = schemaType,
@@ -212,7 +211,7 @@ columnParser' columnType (G.Nullability isNullable) =
       case nonEmpty (HM.toList enumValues) of
         Just enumValuesList -> do
           tableGQLName <- tableGraphQLName @'MySQL tableName `onLeft` throwError
-          let enumName = tableGQLName <> $$(G.litName "_enum")
+          enumName <- P.mkTypename $ tableGQLName <> $$(G.litName "_enum")
           pure $ possiblyNullable MySQL.VarChar $ P.enum enumName Nothing (mkEnumValue <$> enumValuesList)
         Nothing -> throw400 ValidationFailed "empty enum values"
   where
@@ -267,8 +266,8 @@ orderByOperators' =
 
 -- | TODO: Make this as thorough as the one for MSSQL/PostgreSQL
 comparisonExps' ::
-  forall m n.
-  (BackendSchema 'MySQL, MonadSchema n m, MonadError QErr m) =>
+  forall m n r.
+  (BackendSchema 'MySQL, MonadSchema n m, MonadError QErr m, MonadReader r m, Has MkTypename r) =>
   ColumnType 'MySQL ->
   m (Parser 'Input n [ComparisonExp 'MySQL])
 comparisonExps' = P.memoize 'comparisonExps $ \columnType -> do
@@ -276,7 +275,7 @@ comparisonExps' = P.memoize 'comparisonExps $ \columnType -> do
   typedParser <- columnParser columnType (G.Nullability False)
   nullableTextParser <- columnParser (ColumnScalar @'MySQL MySQL.VarChar) (G.Nullability True)
   textParser <- columnParser (ColumnScalar @'MySQL MySQL.VarChar) (G.Nullability False)
-  let name = P.getName typedParser <> $$(G.litName "_MySQL_comparison_exp")
+  let name = P.Typename $ P.getName typedParser <> $$(G.litName "_MySQL_comparison_exp")
       desc =
         G.Description $
           "Boolean expression to compare columns of type "
@@ -300,13 +299,3 @@ comparisonExps' = P.memoize 'comparisonExps $ \columnType -> do
 offsetParser' :: MonadParse n => Parser 'Both n (SQLExpression 'MySQL)
 offsetParser' =
   MySQL.ValueExpression . MySQL.BigValue . fromIntegral <$> P.int
-
--- | Various update operators
-updateOperators' ::
-  Applicative m =>
-  -- | qualified name of the table
-  TableInfo 'MySQL ->
-  -- | update permissions of the table
-  UpdPermInfo 'MySQL ->
-  m (Maybe (InputFieldsParser n [(RQL.Column 'MySQL, IR.UpdOpExpG (UnpreparedValue 'MySQL))]))
-updateOperators' _table _updatePermissions = pure Nothing

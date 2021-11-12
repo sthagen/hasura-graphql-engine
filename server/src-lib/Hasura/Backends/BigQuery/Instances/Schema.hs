@@ -22,7 +22,6 @@ import Hasura.GraphQL.Schema.Select
 import Hasura.Prelude
 import Hasura.RQL.IR
 import Hasura.RQL.IR.Select qualified as IR
-import Hasura.RQL.IR.Update qualified as IR
 import Hasura.RQL.Types
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -52,7 +51,6 @@ instance BackendSchema 'BigQuery where
   jsonPathArg = bqJsonPathArg
   orderByOperators = bqOrderByOperators
   comparisonExps = bqComparisonExps
-  updateOperators = bqUpdateOperators
   mkCountType = bqMkCountType
   aggregateOrderByCountType = BigQuery.IntegerScalarType
   computedField = bqComputedField
@@ -196,7 +194,7 @@ bqTableArgs sourceName tableInfo selectPermissions = do
 -- Individual components
 
 bqColumnParser ::
-  (MonadSchema n m, MonadError QErr m) =>
+  (MonadSchema n m, MonadError QErr m, MonadReader r m, Has MkTypename r) =>
   ColumnType 'BigQuery ->
   G.Nullability ->
   m (Parser 'Both n (ValueWithOrigin (ColumnValue 'BigQuery)))
@@ -224,7 +222,7 @@ bqColumnParser columnType (G.Nullability isNullable) =
       BigQuery.DatetimeScalarType -> pure $ possiblyNullable scalarType $ BigQuery.DatetimeValue . BigQuery.Datetime <$> P.string
       BigQuery.GeographyScalarType -> pure $ possiblyNullable scalarType $ BigQuery.GeographyValue . BigQuery.Geography <$> P.string
       BigQuery.TimestampScalarType -> do
-        let schemaType = P.Nullable . P.TNamed $ P.mkDefinition stringScalar Nothing P.TIScalar
+        let schemaType = P.Nullable . P.TNamed $ P.mkDefinition (P.Typename stringScalar) Nothing P.TIScalar
         pure $
           possiblyNullable scalarType $
             Parser
@@ -240,7 +238,7 @@ bqColumnParser columnType (G.Nullability isNullable) =
       case nonEmpty (Map.toList enumValues) of
         Just enumValuesList -> do
           tableGQLName <- tableGraphQLName @'BigQuery tableName `onLeft` throwError
-          let enumName = tableGQLName <> $$(G.litName "_enum")
+          enumName <- P.mkTypename $ tableGQLName <> $$(G.litName "_enum")
           pure $ possiblyNullable BigQuery.StringScalarType $ P.enum enumName Nothing (mkEnumValue <$> enumValuesList)
         Nothing -> throw400 ValidationFailed "empty enum values"
   where
@@ -298,7 +296,7 @@ bqOrderByOperators =
 
 bqComparisonExps ::
   forall m n r.
-  (BackendSchema 'BigQuery, MonadSchema n m, MonadError QErr m, MonadReader r m, Has QueryContext r) =>
+  (BackendSchema 'BigQuery, MonadSchema n m, MonadError QErr m, MonadReader r m, Has QueryContext r, Has MkTypename r) =>
   ColumnType 'BigQuery ->
   m (Parser 'Input n [ComparisonExp 'BigQuery])
 bqComparisonExps = P.memoize 'comparisonExps $ \columnType -> do
@@ -306,14 +304,14 @@ bqComparisonExps = P.memoize 'comparisonExps $ \columnType -> do
   -- see Note [Columns in comparison expression are never nullable]
   typedParser <- columnParser columnType (G.Nullability False)
   nullableTextParser <- columnParser (ColumnScalar @'BigQuery BigQuery.StringScalarType) (G.Nullability True)
-  textParser <- columnParser (ColumnScalar @'BigQuery BigQuery.StringScalarType) (G.Nullability False)
-  let name = P.getName typedParser <> $$(G.litName "_BigQuery_comparison_exp")
+  -- textParser <- columnParser (ColumnScalar @'BigQuery BigQuery.StringScalarType) (G.Nullability False)
+  let name = P.Typename $ P.getName typedParser <> $$(G.litName "_BigQuery_comparison_exp")
       desc =
         G.Description $
           "Boolean expression to compare columns of type "
             <> P.getName typedParser
             <<> ". All fields are combined with logical 'AND'."
-      textListParser = fmap openValueOrigin <$> P.list textParser
+      -- textListParser = fmap openValueOrigin <$> P.list textParser
       columnListParser = fmap openValueOrigin <$> P.list typedParser
       mkListLiteral :: [ColumnValue 'BigQuery] -> UnpreparedValue 'BigQuery
       mkListLiteral =
@@ -342,17 +340,6 @@ bqMkCountType (Just True) (Just cols) =
   maybe BigQuery.StarCountable BigQuery.DistinctCountable $ nonEmpty cols
 bqMkCountType _ (Just cols) =
   maybe BigQuery.StarCountable BigQuery.NonNullFieldCountable $ nonEmpty cols
-
--- | Various update operators
-bqUpdateOperators ::
-  -- :: forall m n r. (MonadSchema n m, MonadTableInfo r m)
-  Applicative m =>
-  -- | qualified name of the table
-  TableInfo 'BigQuery ->
-  -- | update permissions of the table
-  UpdPermInfo 'BigQuery ->
-  m (Maybe (InputFieldsParser n [(Column 'BigQuery, IR.UpdOpExpG (UnpreparedValue 'BigQuery))]))
-bqUpdateOperators _tableInfo _updatePermissions = pure Nothing
 
 -- | Computed field parser.
 -- Currently unsupported: returns Nothing for now.

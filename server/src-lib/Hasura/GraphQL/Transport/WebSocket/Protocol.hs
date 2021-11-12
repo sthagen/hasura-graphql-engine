@@ -1,7 +1,31 @@
 -- | This file contains types for both the websocket protocols (Apollo) and (graphql-ws)
 -- | See Apollo: https://github.com/apollographql/subscriptions-transport-ws/blob/master/PROTOCOL.md
 -- | See graphql-ws: https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md
-module Hasura.GraphQL.Transport.WebSocket.Protocol where
+module Hasura.GraphQL.Transport.WebSocket.Protocol
+  ( ClientMsg (CMConnInit, CMConnTerm, CMPing, CMPong, CMStart, CMStop),
+    CompletionMsg (CompletionMsg),
+    ConnErrMsg (ConnErrMsg, unConnErrMsg),
+    ConnParams (_cpHeaders),
+    DataMsg (DataMsg),
+    ErrorMsg (ErrorMsg),
+    OperationId (unOperationId),
+    PingPongPayload,
+    ServerErrorCode (..),
+    ServerMsg (SMComplete, SMConnAck, SMConnErr, SMConnKeepAlive, SMData, SMErr, SMNext, SMPing, SMPong),
+    ServerMsgType (..),
+    StartMsg (StartMsg),
+    StopMsg (StopMsg),
+    WSConnInitTimerStatus (Done),
+    WSSubProtocol (..),
+    encodeServerErrorMsg,
+    encodeServerMsg,
+    getNewWSTimer,
+    getWSTimerState,
+    keepAliveMessage,
+    showSubProtocol,
+    toWSSubProtocol,
+  )
+where
 
 import Control.Concurrent
 import Control.Concurrent.Extended (sleep)
@@ -188,7 +212,7 @@ data ServerMsg
 data ServerErrorCode
   = ProtocolError1002
   | GenericError4400 !String
-  | UnAuthorized4401
+  | Unauthorized4401
   | Forbidden4403
   | ConnectionInitTimeout4408
   | NonUniqueSubscription4409 !OperationId
@@ -199,24 +223,13 @@ encodeServerErrorMsg :: ServerErrorCode -> BL.ByteString
 encodeServerErrorMsg ecode = encJToLBS . encJFromJValue $ case ecode of
   ProtocolError1002 -> packMsg "1002: Protocol Error"
   GenericError4400 msg -> packMsg $ "4400: " <> msg
-  UnAuthorized4401 -> packMsg "4401: Unauthorized"
+  Unauthorized4401 -> packMsg "4401: Unauthorized"
   Forbidden4403 -> packMsg "4403: Forbidden"
   ConnectionInitTimeout4408 -> packMsg "4408: Connection initialisation timeout"
   NonUniqueSubscription4409 opId -> packMsg $ "4409: Subscriber for " <> show opId <> " already exists"
   TooManyRequests4429 -> packMsg "4429: Too many requests"
   where
     packMsg = ServerErrorMsg . pack
-
-serverMsgType :: ServerMsg -> ServerMsgType
-serverMsgType SMConnAck = SMT_GQL_CONNECTION_ACK
-serverMsgType SMConnKeepAlive = SMT_GQL_CONNECTION_KEEP_ALIVE
-serverMsgType (SMConnErr _) = SMT_GQL_CONNECTION_ERROR
-serverMsgType (SMData _) = SMT_GQL_DATA
-serverMsgType (SMErr _) = SMT_GQL_ERROR
-serverMsgType (SMComplete _) = SMT_GQL_COMPLETE
-serverMsgType (SMPing _) = SMT_GQL_PING
-serverMsgType (SMPong _) = SMT_GQL_PONG
-serverMsgType (SMNext _) = SMT_GQL_NEXT
 
 encodeServerMsg :: ServerMsg -> BL.ByteString
 encodeServerMsg msg =
@@ -269,12 +282,6 @@ data WSConnInitTimerStatus = Running | Done
   deriving stock (Show, Eq)
 
 type WSConnInitTimer = (TVar WSConnInitTimerStatus, TMVar ())
-
-waitForWSTimer :: WSConnInitTimer -> IO ()
-waitForWSTimer (_, timer) = atomically $ readTMVar timer
-
-stopWSTimer :: WSConnInitTimer -> IO ()
-stopWSTimer (timerState, _) = atomically $ writeTVar timerState Done
 
 getWSTimerState :: WSConnInitTimer -> IO WSConnInitTimerStatus
 getWSTimerState (timerState, _) = readTVarIO timerState

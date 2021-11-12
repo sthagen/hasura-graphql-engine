@@ -1,7 +1,13 @@
 -- | Here are all functions related to type-checking within the schema. This
 -- includes functions that deal with variables, and functions that craft error
 -- messages.
-module Hasura.GraphQL.Parser.Internal.TypeChecking where
+module Hasura.GraphQL.Parser.Internal.TypeChecking
+  ( peelVariable,
+    peelVariableWith,
+    typeCheck,
+    typeMismatch,
+  )
+where
 
 import Data.Aeson qualified as A
 import Data.Text.Extended
@@ -108,10 +114,10 @@ isVariableUsageAllowed locationHasDefaultValue locationType variable
 
 -- Error handling functions
 
-typeMismatch :: MonadParse m => Name -> Text -> InputValue Variable -> m a
+typeMismatch :: (HasName n, MonadParse m) => n -> Text -> InputValue Variable -> m a
 typeMismatch name expected given =
   parseError $
-    "expected " <> expected <> " for type " <> name <<> ", but found " <> describeValue given
+    "expected " <> expected <> " for type " <> getName name <<> ", but found " <> describeValue given
 
 describeValue :: InputValue Variable -> Text
 describeValue = describeValueWith (describeValueWith absurd . vValue)

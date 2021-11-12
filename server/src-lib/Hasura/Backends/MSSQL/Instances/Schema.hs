@@ -23,7 +23,6 @@ import Hasura.Prelude
 import Hasura.RQL.IR
 import Hasura.RQL.IR.Insert qualified as IR
 import Hasura.RQL.IR.Select qualified as IR
-import Hasura.RQL.IR.Update qualified as IR
 import Hasura.RQL.Types
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -54,7 +53,6 @@ instance BackendSchema 'MSSQL where
   jsonPathArg = msJsonPathArg
   orderByOperators = msOrderByOperators
   comparisonExps = msComparisonExps
-  updateOperators = msUpdateOperators
   mkCountType = msMkCountType
   aggregateOrderByCountType = MSSQL.IntegerType
   computedField = msComputedField
@@ -245,7 +243,7 @@ msMkRelationshipParser _sourceName _relationshipInfo = do
 -- Individual components
 
 msColumnParser ::
-  (MonadSchema n m, MonadError QErr m) =>
+  (MonadSchema n m, MonadError QErr m, MonadReader r m, Has MkTypename r) =>
   ColumnType 'MSSQL ->
   G.Nullability ->
   m (Parser 'Both n (ValueWithOrigin (ColumnValue 'MSSQL)))
@@ -278,7 +276,7 @@ msColumnParser columnType (G.Nullability isNullable) =
         MSSQL.BitType -> pure $ ODBC.BoolValue <$> P.boolean
         _ -> do
           name <- MSSQL.mkMSSQLScalarTypeName scalarType
-          let schemaType = P.NonNullable $ P.TNamed $ P.mkDefinition name Nothing P.TIScalar
+          let schemaType = P.NonNullable $ P.TNamed $ P.mkDefinition (P.Typename name) Nothing P.TIScalar
           pure $
             Parser
               { pType = schemaType,
@@ -290,7 +288,7 @@ msColumnParser columnType (G.Nullability isNullable) =
       case nonEmpty (Map.toList enumValues) of
         Just enumValuesList -> do
           tableGQLName <- tableGraphQLName @'MSSQL tableName `onLeft` throwError
-          let enumName = tableGQLName <> $$(G.litName "_enum")
+          enumName <- P.mkTypename $ tableGQLName <> $$(G.litName "_enum")
           pure $ possiblyNullable MSSQL.VarcharType $ P.enum enumName Nothing (mkEnumValue <$> enumValuesList)
         Nothing -> throw400 ValidationFailed "empty enum values"
   where
@@ -344,7 +342,8 @@ msComparisonExps ::
     MonadSchema n m,
     MonadError QErr m,
     MonadReader r m,
-    Has QueryContext r
+    Has QueryContext r,
+    Has MkTypename r
   ) =>
   ColumnType 'MSSQL ->
   m (Parser 'Input n [ComparisonExp 'MSSQL])
@@ -360,7 +359,7 @@ msComparisonExps = P.memoize 'comparisonExps \columnType -> do
       textListParser = fmap openValueOrigin <$> P.list textParser
 
   -- field info
-  let name = P.getName typedParser <> $$(G.litName "_MSSQL_comparison_exp")
+  let name = P.Typename $ P.getName typedParser <> $$(G.litName "_MSSQL_comparison_exp")
       desc =
         G.Description $
           "Boolean expression to compare columns of type "
@@ -441,16 +440,6 @@ msMkCountType (Just True) (Just cols) =
   maybe MSSQL.StarCountable MSSQL.DistinctCountable $ nonEmpty cols
 msMkCountType _ (Just cols) =
   maybe MSSQL.StarCountable MSSQL.NonNullFieldCountable $ nonEmpty cols
-
--- | Various update operators
-msUpdateOperators ::
-  Applicative m =>
-  -- | table info
-  TableInfo 'MSSQL ->
-  -- | update permissions of the table
-  UpdPermInfo 'MSSQL ->
-  m (Maybe (InputFieldsParser n [(Column 'MSSQL, IR.UpdOpExpG (UnpreparedValue 'MSSQL))]))
-msUpdateOperators _tableInfo _updatePermissions = pure Nothing
 
 -- | Computed field parser.
 -- Currently unsupported: returns Nothing for now.

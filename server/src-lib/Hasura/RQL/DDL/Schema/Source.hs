@@ -1,4 +1,12 @@
-module Hasura.RQL.DDL.Schema.Source where
+module Hasura.RQL.DDL.Schema.Source
+  ( AddSource,
+    DropSource,
+    RenameSource,
+    runAddSource,
+    runDropSource,
+    runRenameSource,
+  )
+where
 
 import Control.Lens (at, (.~), (^.))
 import Control.Monad.Trans.Control (MonadBaseControl)
@@ -13,8 +21,6 @@ import Hasura.Base.Error
 import Hasura.EncJSON
 import Hasura.Logging qualified as L
 import Hasura.Prelude
-import Hasura.RQL.DDL.Deps
-import Hasura.RQL.DDL.Schema.Common
 import Hasura.RQL.Types
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.Server.Logging (MetadataLog (..))
@@ -25,7 +31,8 @@ import Hasura.Server.Logging (MetadataLog (..))
 data AddSource b = AddSource
   { _asName :: !SourceName,
     _asConfiguration :: !(SourceConnConfiguration b),
-    _asReplaceConfiguration :: !Bool
+    _asReplaceConfiguration :: !Bool,
+    _asCustomization :: !SourceCustomization
   }
 
 instance (Backend b) => FromJSON (AddSource b) where
@@ -34,13 +41,14 @@ instance (Backend b) => FromJSON (AddSource b) where
       <$> o .: "name"
       <*> o .: "configuration"
       <*> o .:? "replace_configuration" .!= False
+      <*> o .:? "customization" .!= emptySourceCustomization
 
 runAddSource ::
   forall m b.
   (MonadError QErr m, CacheRWM m, MetadataM m, BackendMetadata b) =>
   AddSource b ->
   m EncJSON
-runAddSource (AddSource name sourceConfig replaceConfiguration) = do
+runAddSource (AddSource name sourceConfig replaceConfiguration sourceCustomization) = do
   sources <- scSources <$> askSchemaCache
 
   metadataModifier <-
@@ -51,7 +59,7 @@ runAddSource (AddSource name sourceConfig replaceConfiguration) = do
             then pure $ metaSources . ix name . toSourceMetadata @b . smConfiguration .~ sourceConfig
             else throw400 AlreadyExists $ "source with name " <> name <<> " already exists"
         else do
-          let sourceMetadata = mkSourceMetadata @b name sourceConfig
+          let sourceMetadata = mkSourceMetadata @b name sourceConfig sourceCustomization
           pure $ metaSources %~ OMap.insert name sourceMetadata
 
   buildSchemaCacheFor (MOSource name) metadataModifier
@@ -158,9 +166,7 @@ runDropSource (DropSource name cascade) = do
               getDependentObjs sc (SOSource name)
 
       when (not cascade && indirectDeps /= []) $
-        reportDepsExt
-          (map (SOSourceObj name . AB.mkAnyBackend) indirectDeps)
-          []
+        reportDependentObjectsExist (map (SOSourceObj name . AB.mkAnyBackend) indirectDeps)
 
       metadataModifier <- execWriterT $ do
         mapM_ (purgeDependentObject name >=> tell) indirectDeps

@@ -1,6 +1,29 @@
 {-# LANGUAGE CPP #-}
 
-module Hasura.Server.App where
+module Hasura.Server.App
+  ( APIResp (JSONResp),
+    ConsoleRenderer (..),
+    Handler,
+    HandlerCtx (hcReqHeaders, hcServerCtx, hcUser),
+    HasuraApp (HasuraApp),
+    MonadConfigApiHandler (..),
+    MonadMetadataApiAuthorization (..),
+    SchemaCacheRef (..),
+    ServerCtx (scManager),
+    boolToText,
+    configApiGetHandler,
+    getSCFromRef,
+    initialiseCache,
+    isAdminSecretSet,
+    logInconsObjs,
+    mkGetHandler,
+    mkSpockAction,
+    mkWaiApp,
+    onlyAdmin,
+    renderHtmlTemplate,
+    withSCUpdate,
+  )
+where
 
 import Control.Concurrent.Async.Lifted.Safe qualified as LA
 import Control.Concurrent.MVar.Lifted
@@ -333,10 +356,12 @@ mkSpockAction serverCtx@ServerCtx {..} qErrEncoder qErrModifier apiHandler = do
         runMetadataStorageT $ flip runReaderT handlerCtx $ runResourceLimits handlerLimit $ handler
 
       getInfo parsedRequest = do
-        userInfoE <- fmap fst <$> lift (resolveUserInfo scLogger scManager headers scAuthMode parsedRequest)
-        userInfo <- onLeft userInfoE (logErrorAndResp Nothing requestId req (reqBody, Nothing) False origHeaders . qErrModifier)
+        authenticationResp <- lift (resolveUserInfo scLogger scManager headers scAuthMode parsedRequest)
+        authInfo <- onLeft authenticationResp (logErrorAndResp Nothing requestId req (reqBody, Nothing) False origHeaders . qErrModifier)
+        let (userInfo, _, authHeaders) = authInfo
         pure
           ( userInfo,
+            authHeaders,
             HandlerCtx serverCtx userInfo headers requestId ipAddress,
             shouldIncludeInternal (_uiRole userInfo) scResponseInternalErrorsConfig
           )
@@ -346,27 +371,31 @@ mkSpockAction serverCtx@ServerCtx {..} qErrEncoder qErrModifier apiHandler = do
     -- can correlate requests and traces
     lift $ Tracing.attachMetadata [("request_id", unRequestId requestId)]
 
-    (serviceTime, (result, userInfo, includeInternal, queryJSON)) <- withElapsedTime $ case apiHandler of
+    (serviceTime, (result, userInfo, authHeaders, includeInternal, queryJSON)) <- withElapsedTime $ case apiHandler of
       -- in the case of a simple get/post we don't have to send the webhook anything
       AHGet handler -> do
-        (userInfo, handlerState, includeInternal) <- getInfo Nothing
+        (userInfo, authHeaders, handlerState, includeInternal) <- getInfo Nothing
         res <- lift $ runHandler handlerState handler
-        pure (res, userInfo, includeInternal, Nothing)
+        pure (res, userInfo, authHeaders, includeInternal, Nothing)
       AHPost handler -> do
-        (userInfo, handlerState, includeInternal) <- getInfo Nothing
+        (userInfo, authHeaders, handlerState, includeInternal) <- getInfo Nothing
         (queryJSON, parsedReq) <-
           runExcept (parseBody reqBody) `onLeft` \e ->
             logErrorAndResp (Just userInfo) requestId req (reqBody, Nothing) includeInternal origHeaders $ qErrModifier e
         res <- lift $ runHandler handlerState $ handler parsedReq
-        pure (res, userInfo, includeInternal, Just queryJSON)
+        pure (res, userInfo, authHeaders, includeInternal, Just queryJSON)
       -- in this case we parse the request _first_ and then send the request to the webhook for auth
       AHGraphQLRequest handler -> do
         (queryJSON, parsedReq) <-
-          runExcept (parseBody reqBody) `onLeft` \e ->
-            logErrorAndResp Nothing requestId req (reqBody, Nothing) False origHeaders $ qErrModifier e
-        (userInfo, handlerState, includeInternal) <- getInfo (Just parsedReq)
+          runExcept (parseBody reqBody) `onLeft` \e -> do
+            -- if the request fails to parse, call the webhook without a request body
+            -- TODO should we signal this to the webhook somehow?
+            (userInfo, _, _, _) <- getInfo Nothing
+            logErrorAndResp (Just userInfo) requestId req (reqBody, Nothing) False origHeaders $ qErrModifier e
+        (userInfo, authHeaders, handlerState, includeInternal) <- getInfo (Just parsedReq)
+
         res <- lift $ runHandler handlerState $ handler parsedReq
-        pure (res, userInfo, includeInternal, Just queryJSON)
+        pure (res, userInfo, authHeaders, includeInternal, Just queryJSON)
 
     -- apply the error modifier
     let modResult = fmapL qErrModifier result
@@ -376,7 +405,7 @@ mkSpockAction serverCtx@ServerCtx {..} qErrEncoder qErrModifier apiHandler = do
       Left err ->
         logErrorAndResp (Just userInfo) requestId req (reqBody, queryJSON) includeInternal headers err
       Right (httpLoggingMetadata, res) ->
-        logSuccessAndResp (Just userInfo) requestId req (reqBody, queryJSON) res (Just (ioWaitTime, serviceTime)) origHeaders httpLoggingMetadata
+        logSuccessAndResp (Just userInfo) requestId req (reqBody, queryJSON) res (Just (ioWaitTime, serviceTime)) origHeaders authHeaders httpLoggingMetadata
   where
     logErrorAndResp ::
       (MonadIO m, HttpLog m) =>
@@ -393,14 +422,14 @@ mkSpockAction serverCtx@ServerCtx {..} qErrEncoder qErrModifier apiHandler = do
       Spock.setStatus $ qeStatus qErr
       Spock.json $ qErrEncoder includeInternal qErr
 
-    logSuccessAndResp userInfo reqId waiReq req result qTime reqHeaders httpLoggingMetadata = do
+    logSuccessAndResp userInfo reqId waiReq req result qTime reqHeaders authHdrs httpLoggingMetadata = do
       let (respBytes, respHeaders) = case result of
             JSONResp (HttpResponse encJson h) -> (encJToLBS encJson, pure jsonHeader <> h)
             RawResp (HttpResponse rawBytes h) -> (rawBytes, h)
           (compressedResp, mEncodingHeader, mCompressionType) = compressResponse (Wai.requestHeaders waiReq) respBytes
           encodingHeader = onNothing mEncodingHeader []
           reqIdHeader = (requestIdHeader, txtToBs $ unRequestId reqId)
-          allRespHeaders = pure reqIdHeader <> encodingHeader <> respHeaders
+          allRespHeaders = pure reqIdHeader <> encodingHeader <> respHeaders <> authHdrs
       lift $ logHttpSuccess scLogger scEnabledLogTypes userInfo reqId waiReq req respBytes compressedResp qTime mCompressionType reqHeaders httpLoggingMetadata
       mapM_ setHeader allRespHeaders
       Spock.lazyBytes compressedResp

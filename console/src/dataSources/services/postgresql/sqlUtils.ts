@@ -1,4 +1,4 @@
-import { Table, FrequentlyUsedColumn, IndexType } from '../../types';
+import { FrequentlyUsedColumn, IndexType } from '../../types';
 import { isColTypeString } from '.';
 import { FunctionState } from './types';
 import { QualifiedTable } from '../../../metadata/types';
@@ -15,7 +15,7 @@ export const sqlEscapeText = (rawText: string) => {
 };
 
 const generateWhereClause = (
-  options: { schemas: string[]; tables: Table[] },
+  options: { schemas: string[]; tables?: QualifiedTable[] },
   sqlTableName = 'ist.table_name',
   sqlSchemaName = 'ist.table_schema',
   clausePrefix = 'where'
@@ -28,7 +28,7 @@ const generateWhereClause = (
 
   options.tables?.forEach(tableInfo => {
     whereCondtions.push(
-      `(${sqlSchemaName}='${tableInfo.table_schema}' and ${sqlTableName}='${tableInfo.table_name}')`
+      `(${sqlSchemaName}='${tableInfo.schema}' and ${sqlTableName}='${tableInfo.name}')`
     );
   });
 
@@ -40,7 +40,7 @@ const generateWhereClause = (
 
 export const getFetchTablesListQuery = (options: {
   schemas: string[];
-  tables: Table[];
+  tables?: QualifiedTable[];
 }) => {
   const whereQuery = generateWhereClause(
     options,
@@ -663,12 +663,21 @@ export const getSetColumnDefaultSql = (
 };
 
 export const getSetCommentSql = (
-  on: 'column' | 'table' | string,
+  on: string,
   tableName: string,
   schemaName: string,
   comment: string | null,
-  columnName?: string
+  columnName?: string,
+  functionName?: string
 ) => {
+  if (functionName) {
+    return `
+comment on ${on} "${schemaName}"."${functionName}" is ${
+      comment ? sqlEscapeText(comment) : 'NULL'
+    }
+`;
+  }
+
   if (columnName) {
     return `
   comment on ${on} "${schemaName}"."${tableName}"."${columnName}" is ${
@@ -857,6 +866,7 @@ pg_get_functiondef(p.oid) AS function_definition,
 rtn.nspname::text AS return_type_schema,
 rt.typname::text AS return_type_name,
 rt.typtype::text AS return_type_type,
+obj_description(p.oid) AS comment,
 p.proretset AS returns_set,
 ( SELECT COALESCE(json_agg(json_build_object('schema', q.schema, 'name', q.name, 'type', q.type)), '[]'::json) AS "coalesce"
        FROM ( SELECT pt.typname AS name,
@@ -898,7 +908,7 @@ ${functionName ? 'LIMIT 1' : ''}
 
 export const primaryKeysInfoSql = (options: {
   schemas: string[];
-  tables: Table[];
+  tables?: QualifiedTable[];
 }) => `
 SELECT
 COALESCE(
@@ -987,7 +997,7 @@ GROUP BY
 
 export const uniqueKeysSql = (options: {
   schemas: string[];
-  tables: Table[];
+  tables?: QualifiedTable[];
 }) => `
 SELECT
 COALESCE(
@@ -1015,7 +1025,7 @@ FROM (
 
 export const checkConstraintsSql = (options: {
   schemas: string[];
-  tables: Table[];
+  tables?: QualifiedTable[];
 }) => `
 SELECT
 COALESCE(
@@ -1101,8 +1111,8 @@ export const getCreateIndexSql = (indexObj: {
 `;
 };
 
-export const getDropIndexSql = (indexName: string) =>
-  `DROP INDEX IF EXISTS "${indexName}"`;
+export const getDropIndexSql = (indexName: string, schema: string) =>
+  `DROP INDEX IF EXISTS "${schema}"."${indexName}"`;
 
 export const frequentlyUsedColumns: FrequentlyUsedColumn[] = [
   {
@@ -1181,7 +1191,7 @@ IS 'trigger to set value of column "${columnName}" to current timestamp on row u
 
 export const getFKRelations = (options: {
   schemas: string[];
-  tables: Table[];
+  tables?: QualifiedTable[];
 }) => `
 SELECT
 	COALESCE(json_agg(row_to_json(info)), '[]'::JSON)
@@ -1311,3 +1321,11 @@ FROM (
 `;
 
 export const getDatabaseVersionSql = 'SELECT version();';
+
+export const schemaListQuery = `
+SELECT schema_name FROM information_schema.schemata
+WHERE
+	schema_name NOT in('information_schema', 'pg_catalog', 'hdb_catalog')
+	AND schema_name NOT LIKE 'pg_toast%'
+	AND schema_name NOT LIKE 'pg_temp_%';
+`;

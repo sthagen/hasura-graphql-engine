@@ -1,6 +1,28 @@
 {-# LANGUAGE UndecidableInstances #-}
 
-module Hasura.RQL.Types.Source where
+module Hasura.RQL.Types.Source
+  ( BackendSourceInfo,
+    MaintenanceModeVersion (..),
+    MonadResolveSource (..),
+    ResolvedSource (..),
+    SourceCache,
+    SourceInfo (..),
+    SourceResolver,
+    SourceTables,
+    getTableRoles,
+    siConfiguration,
+    siFunctions,
+    siName,
+    siQueryTagsConfig,
+    siTables,
+    siCustomization,
+    unsafeSourceConfiguration,
+    unsafeSourceFunctions,
+    unsafeSourceInfo,
+    unsafeSourceName,
+    unsafeSourceTables,
+  )
+where
 
 import Control.Lens
 import Data.Aeson.Extended
@@ -15,6 +37,7 @@ import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Instances ()
 import Hasura.RQL.Types.QueryTags
+import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.Backend
@@ -27,7 +50,8 @@ data SourceInfo b = SourceInfo
     _siTables :: !(TableCache b),
     _siFunctions :: !(FunctionCache b),
     _siConfiguration :: !(SourceConfig b),
-    _siQueryTagsConfig :: !(Maybe QueryTagsConfig)
+    _siQueryTagsConfig :: !(Maybe QueryTagsConfig),
+    _siCustomization :: !SourceCustomization
   }
   deriving (Generic)
 
@@ -53,7 +77,7 @@ unsafeSourceInfo = AB.unpackAnyBackend
 unsafeSourceName :: BackendSourceInfo -> SourceName
 unsafeSourceName bsi = AB.dispatchAnyBackend @Backend bsi go
   where
-    go (SourceInfo name _ _ _ _) = name
+    go (SourceInfo name _ _ _ _ _) = name
 
 unsafeSourceTables :: forall b. HasTag b => BackendSourceInfo -> Maybe (TableCache b)
 unsafeSourceTables = fmap _siTables . unsafeSourceInfo @b
@@ -73,6 +97,7 @@ getTableRoles bsi = AB.dispatchAnyBackend @Backend bsi go
 -- database to build schema cache for tables and function.
 data ResolvedSource b = ResolvedSource
   { _rsConfig :: !(SourceConfig b),
+    _rsCustomization :: !(SourceTypeCustomization),
     _rsTables :: !(DBTablesMetadata b),
     _rsFunctions :: !(DBFunctionsMetadata b),
     _rsPgScalars :: !(HashSet (ScalarType b))

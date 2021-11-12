@@ -1,13 +1,45 @@
 {-# LANGUAGE UndecidableInstances #-}
 
-module Hasura.App where
+module Hasura.App
+  ( ExitCode (DatabaseMigrationError, DowngradeProcessError, MetadataCleanError, MetadataExportError, SchemaCacheInitError),
+    ExitException (ExitException),
+    GlobalCtx (GlobalCtx, _gcDefaultPostgresConnInfo, _gcHttpManager, _gcMetadataDbConnInfo),
+    Loggers (..),
+    PGMetadataStorageAppT (runPGMetadataStorageAppT),
+    ServeCtx (ServeCtx, _scLoggers, _scMetadataDbPool, _scShutdownLatch),
+    ShutdownLatch,
+    accessDeniedErrMsg,
+    flushLogger,
+    getCatalogStateTx,
+    initGlobalCtx,
+    initialiseServeCtx,
+    migrateCatalogSchema,
+    mkLoggers,
+    mkPGLogger,
+    newShutdownLatch,
+    notifySchemaCacheSyncTx,
+    parseArgs,
+    printErrExit,
+    printErrJExit,
+    printJSON,
+    printYaml,
+    readTlsAllowlist,
+    resolvePostgresConnInfo,
+    runHGEServer,
+    setCatalogStateTx,
+    shutdownGracefully,
+
+    -- * Exported for testing
+    mkHGEServer,
+    mkPgSourceResolver,
+  )
+where
 
 import Control.Concurrent.Async.Lifted.Safe qualified as LA
 import Control.Concurrent.Extended qualified as C
 import Control.Concurrent.STM qualified as STM
 import Control.Concurrent.STM.TVar (readTVarIO)
 import Control.Exception (bracket_, throwIO)
-import Control.Exception.Lifted qualified as LE
 import Control.Monad.Catch
   ( Exception,
     MonadCatch,
@@ -19,7 +51,7 @@ import Control.Monad.Morph (hoist)
 import Control.Monad.STM (atomically)
 import Control.Monad.Stateless
 import Control.Monad.Trans.Control (MonadBaseControl (..))
-import Control.Monad.Trans.Managed (ManagedT (..))
+import Control.Monad.Trans.Managed (ManagedT (..), allocate_)
 import Control.Monad.Unique
 import Data.Aeson qualified as A
 import Data.ByteString.Char8 qualified as BC
@@ -64,7 +96,6 @@ import Hasura.RQL.DDL.Schema.Cache.Common
 import Hasura.RQL.DDL.Schema.Catalog
 import Hasura.RQL.Types
 import Hasura.RQL.Types.Eventing.Backend
-import Hasura.RQL.Types.Run
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.Server.API.Query (requiresAdmin)
 import Hasura.Server.App
@@ -74,7 +105,7 @@ import Hasura.Server.Init
 import Hasura.Server.Limits
 import Hasura.Server.Logging
 import Hasura.Server.Metrics (ServerMetrics (..))
-import Hasura.Server.Migrate (getMigratedFrom, migrateCatalog)
+import Hasura.Server.Migrate (migrateCatalog)
 import Hasura.Server.SchemaUpdate
 import Hasura.Server.Telemetry
 import Hasura.Server.Types
@@ -84,6 +115,7 @@ import Hasura.Tracing qualified as Tracing
 import Network.HTTP.Client.DynamicTlsPermissions (mkMgr)
 import Network.HTTP.Client.Manager (HasHttpManagerM (..))
 import Network.HTTP.Client.Transformable qualified as HTTP
+import Network.Wai (Application)
 import Network.Wai.Handler.Warp qualified as Warp
 import Options.Applicative
 import System.Environment (getEnvironment)
@@ -424,18 +456,10 @@ migrateCatalogSchema
             currentTime
       let cacheBuildParams =
             CacheBuildParams httpManager sourceResolver serverConfigCtx
-          buildReason = case getMigratedFrom migrationResult of
-            Nothing -> CatalogSync
-            Just version ->
-              -- Catalog version 43 marks the metadata separation which also drops
-              -- the "hdb_views" schema where table event triggers are hosted.
-              -- We need to re-create table event trigger procedures in "hdb_catalog"
-              -- schema when migration happens from version < 43. Build reason
-              -- @'CatalogUpdate' re-creates event triggers in the database.
-              if version < 43 then CatalogUpdate else CatalogSync
+          buildReason = CatalogSync
       schemaCache <-
         runCacheBuild cacheBuildParams $
-          buildRebuildableSchemaCacheWithReason buildReason env metadata
+          buildRebuildableSchemaCacheWithReason buildReason logger env metadata
       pure (migrationResult, schemaCache)
 
     (migrationResult, schemaCache) <-
@@ -542,7 +566,81 @@ runHGEServer ::
   ServerMetrics ->
   EKG.Store EKG.EmptyMetrics ->
   ManagedT m ()
-runHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook serverMetrics ekgStore = do
+runHGEServer setupHook env serveOptions serveCtx initTime postPollHook serverMetrics ekgStore = do
+  waiApplication <-
+    mkHGEServer setupHook env serveOptions serveCtx initTime postPollHook serverMetrics ekgStore
+
+  let warpSettings :: Warp.Settings
+      warpSettings =
+        Warp.setPort (soPort serveOptions)
+          . Warp.setHost (soHost serveOptions)
+          . Warp.setGracefulShutdownTimeout (Just 30) -- 30s graceful shutdown
+          . Warp.setInstallShutdownHandler shutdownHandler
+          . setForkIOWithMetrics
+          $ Warp.defaultSettings
+
+      setForkIOWithMetrics :: Warp.Settings -> Warp.Settings
+      setForkIOWithMetrics = Warp.setFork \f -> do
+        void $
+          C.forkIOWithUnmask
+            ( \unmask ->
+                bracket_
+                  (EKG.Gauge.inc $ smWarpThreads serverMetrics)
+                  (EKG.Gauge.dec $ smWarpThreads serverMetrics)
+                  (f unmask)
+            )
+
+      shutdownHandler :: IO () -> IO ()
+      shutdownHandler closeSocket =
+        LA.link =<< LA.async do
+          waitForShutdown $ _scShutdownLatch serveCtx
+          let logger = _lsLogger $ _scLoggers serveCtx
+          unLogger logger $ mkGenericStrLog LevelInfo "server" "gracefully shutting down server"
+          closeSocket
+
+  -- Here we block until the shutdown latch 'MVar' is filled, and then
+  -- shut down the server. Once this blocking call returns, we'll tidy up
+  -- any resources using the finalizers attached using 'ManagedT' above.
+  -- Structuring things using the shutdown latch in this way lets us decide
+  -- elsewhere exactly how we want to control shutdown.
+  liftIO $ Warp.runSettings warpSettings waiApplication
+
+-- | Part of a factorization of 'runHGEServer' to expose the constructed WAI
+-- application for testing purposes. See 'runHGEServer' for documentation.
+mkHGEServer ::
+  forall m impl.
+  ( MonadIO m,
+    MonadMask m,
+    MonadStateless IO m,
+    LA.Forall (LA.Pure m),
+    UserAuthentication (Tracing.TraceT m),
+    HttpLog m,
+    ConsoleRenderer m,
+    MonadMetadataApiAuthorization m,
+    MonadGQLExecutionCheck m,
+    MonadConfigApiHandler m,
+    MonadQueryLog m,
+    WS.MonadWSLog m,
+    MonadExecuteQuery m,
+    Tracing.HasReporter m,
+    HasResourceLimits m,
+    MonadMetadataStorage (MetadataStorageT m),
+    MonadResolveSource m,
+    EB.MonadQueryTags m
+  ) =>
+  (ServerCtx -> Spock.SpockT m ()) ->
+  Env.Environment ->
+  ServeOptions impl ->
+  ServeCtx ->
+  -- and mutations
+
+  -- | start time
+  UTCTime ->
+  Maybe EL.LiveQueryPostPollHook ->
+  ServerMetrics ->
+  EKG.Store EKG.EmptyMetrics ->
+  ManagedT m Application
+mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook serverMetrics ekgStore = do
   -- Comment this to enable expensive assertions from "GHC.AssertNF". These
   -- will log lines to STDOUT containing "not in normal form". In the future we
   -- could try to integrate this into our tests. For now this is a development
@@ -769,41 +867,11 @@ runHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook
   unLogger logger $
     mkGenericLog LevelInfo "server" $ StartupTimeInfo "starting API server" apiInitTime
 
-  let setForkIOWithMetrics :: Warp.Settings -> Warp.Settings
-      setForkIOWithMetrics = Warp.setFork \f -> do
-        void $
-          C.forkIOWithUnmask
-            ( \unmask ->
-                bracket_
-                  (EKG.Gauge.inc $ smWarpThreads serverMetrics)
-                  (EKG.Gauge.dec $ smWarpThreads serverMetrics)
-                  (f unmask)
-            )
+  -- These cleanup actions are not directly associated with any
+  -- resource, but we still need to make sure we clean them up here.
+  allocate_ (pure ()) (liftIO stopWsServer)
 
-  let shutdownHandler closeSocket =
-        LA.link =<< LA.async do
-          waitForShutdown _scShutdownLatch
-          unLogger logger $ mkGenericStrLog LevelInfo "server" "gracefully shutting down server"
-          closeSocket
-
-  let warpSettings =
-        Warp.setPort soPort
-          . Warp.setHost soHost
-          . Warp.setGracefulShutdownTimeout (Just 30) -- 30s graceful shutdown
-          . Warp.setInstallShutdownHandler shutdownHandler
-          . setForkIOWithMetrics
-          $ Warp.defaultSettings
-
-  -- Here we block until the shutdown latch 'MVar' is filled, and then
-  -- shut down the server. Once this blocking call returns, we'll tidy up
-  -- any resources using the finalizers attached using 'ManagedT' above.
-  -- Structuring things using the shutdown latch in this way lets us decide
-  -- elsewhere exactly how we want to control shutdown.
-  liftIO $
-    Warp.runSettings warpSettings app `LE.finally` do
-      -- These cleanup actions are not directly associated with any
-      -- resource, but we still need to make sure we clean them up here.
-      stopWsServer
+  pure app
   where
     prepareScheduledEvents (Logger logger) = do
       liftIO $ logger $ mkGenericStrLog LevelInfo "scheduled_triggers" "preparing data"
@@ -826,7 +894,7 @@ runHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook
       -- event triggers should be tied to the life cycle of a source
       lockedEvents <- readTVarIO leEvents
       forM_ sources $ \backendSourceInfo -> do
-        AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo sourceName _ _ sourceConfig _ :: SourceInfo b) -> do
+        AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo sourceName _ _ sourceConfig _ _ :: SourceInfo b) -> do
           let sourceNameString = T.unpack $ sourceNameToText sourceName
           logger $ mkGenericStrLog LevelInfo "event_triggers" $ "unlocking events of source: " ++ sourceNameString
           onJust (HM.lookup sourceName lockedEvents) $ \sourceLockedEvents -> do
@@ -891,15 +959,6 @@ runHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook
           else unless (processingEventsCount == 0) $ do
             C.sleep (5) -- sleep for 5 seconds and then repeat
             waitForProcessingAction l actionType processingEventsCountAction' shutdownAction (maxTimeout - (Seconds 5))
-
-runAsAdmin ::
-  HTTP.Manager ->
-  ServerConfigCtx ->
-  RunT m a ->
-  m (Either QErr a)
-runAsAdmin httpManager serverConfigCtx m = do
-  let runCtx = RunCtx adminUserInfo httpManager serverConfigCtx
-  runExceptT $ peelRun runCtx m
 
 instance (Monad m) => Tracing.HasReporter (PGMetadataStorageAppT m)
 

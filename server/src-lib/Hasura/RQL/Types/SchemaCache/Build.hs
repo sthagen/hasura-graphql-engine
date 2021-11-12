@@ -35,6 +35,7 @@ import Data.HashMap.Strict.Extended qualified as M
 import Data.List (nub)
 import Data.Sequence qualified as Seq
 import Data.Text.Extended
+import Database.MSSQL.Transaction qualified as MSSQL
 import Database.PG.Query qualified as Q
 import Hasura.Backends.Postgres.Connection
 import Hasura.Base.Error
@@ -136,7 +137,7 @@ data BuildReason
   = -- | The build was triggered by an update this instance made to the catalog (in the
     -- currently-active transaction), so information in Postgres that needs to be kept in sync with
     -- the catalog (i.e. table event triggers in @hdb_catalog@ schema) should be updated.
-    CatalogUpdate
+    CatalogUpdate (Maybe (HashSet SourceName))
   | -- | The build was triggered by a notification that some other currently-running Hasura instance
     -- updated the catalog. Since that instance already updated table event triggers in @hdb_catalog@,
     -- this build should be read-only.
@@ -198,6 +199,10 @@ instance (MetadataM m) => MetadataM (TraceT m) where
   getMetadata = lift getMetadata
   putMetadata = lift . putMetadata
 
+instance (MetadataM m) => MetadataM (MSSQL.TxET e m) where
+  getMetadata = lift getMetadata
+  putMetadata = lift . putMetadata
+
 newtype MetadataT m a = MetadataT {unMetadataT :: StateT Metadata m a}
   deriving
     ( Functor,
@@ -239,7 +244,7 @@ buildSchemaCacheWithInvalidations :: (MetadataM m, CacheRWM m) => CacheInvalidat
 buildSchemaCacheWithInvalidations cacheInvalidations metadataModifier = do
   metadata <- getMetadata
   let modifiedMetadata = unMetadataModifier metadataModifier metadata
-  buildSchemaCacheWithOptions CatalogUpdate cacheInvalidations modifiedMetadata
+  buildSchemaCacheWithOptions (CatalogUpdate mempty) cacheInvalidations modifiedMetadata
   putMetadata modifiedMetadata
 
 buildSchemaCache :: (MetadataM m, CacheRWM m) => MetadataModifier -> m ()

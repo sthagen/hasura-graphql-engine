@@ -1,5 +1,16 @@
 -- | Defines the 'Parser' type and its primitive combinators.
-module Hasura.GraphQL.Parser.Internal.Input where
+module Hasura.GraphQL.Parser.Internal.Input
+  ( InputFieldsParser (..),
+    enum,
+    field,
+    fieldOptional,
+    fieldWithDefault,
+    inputParserInput,
+    list,
+    object,
+    pInputParser,
+  )
+where
 
 import Control.Lens.Extended hiding (enum, index)
 import Data.Aeson qualified as A
@@ -244,7 +255,7 @@ fieldWithDefault name description defaultValue parser =
 
 enum ::
   MonadParse m =>
-  Name ->
+  Typename ->
   Maybe Description ->
   NonEmpty (Definition EnumValueInfo, a) ->
   Parser 'Both m a
@@ -278,7 +289,7 @@ enum name description values =
 -- the spec.
 object ::
   MonadParse m =>
-  Name ->
+  Typename ->
   Maybe Description ->
   InputFieldsParser m a ->
   Parser 'Input m a

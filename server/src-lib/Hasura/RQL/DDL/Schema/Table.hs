@@ -35,12 +35,11 @@ import Hasura.Backends.Postgres.SQL.Types (QualifiedTable)
 import Hasura.Base.Error
 import Hasura.EncJSON
 import Hasura.GraphQL.Context
+import Hasura.GraphQL.Namespace
 import Hasura.GraphQL.Schema.Common (textToName)
 import Hasura.Incremental qualified as Inc
 import Hasura.Prelude
-import Hasura.RQL.DDL.Deps
 import Hasura.RQL.DDL.Schema.Cache.Common
-import Hasura.RQL.DDL.Schema.Common
 import Hasura.RQL.DDL.Schema.Enum (resolveEnumReferences)
 import Hasura.RQL.IR
 import Hasura.RQL.Types hiding (fmFunction)
@@ -172,7 +171,7 @@ checkConflictingNode sc tnGQL = do
   case queryParser introspectionQuery of
     Left _ -> pure ()
     Right results -> do
-      case OMap.lookup $$(G.litName "__schema") results of
+      case OMap.lookup (mkUnNamespacedRootFieldAlias $$(G.litName "__schema")) results of
         Just (RFRaw (JO.Object schema)) -> do
           let names = do
                 JO.Object queryType <- JO.lookup "queryType" schema
@@ -344,9 +343,7 @@ unTrackExistingTableOrViewP2 (UntrackTable source qtn cascade) = withNewInconsis
       indirectDeps = mapMaybe getIndirectDep allDeps
   -- Report bach with an error if cascade is not set
   when (indirectDeps /= [] && not cascade) $
-    reportDepsExt
-      (map (SOSourceObj source . AB.mkAnyBackend) indirectDeps)
-      []
+    reportDependentObjectsExist (map (SOSourceObj source . AB.mkAnyBackend) indirectDeps)
   -- Purge all the dependents from state
   metadataModifier <- execWriterT do
     mapM_ (purgeDependentObject source >=> tell) indirectDeps
@@ -366,15 +363,6 @@ unTrackExistingTableOrViewP2 (UntrackTable source qtn cascade) = withNewInconsis
             if not (s == source && qtn == dtn) then Just v else Nothing
           v -> Just v
       _ -> Nothing
-
-dropTableInMetadata ::
-  forall b.
-  (BackendMetadata b) =>
-  SourceName ->
-  TableName b ->
-  MetadataModifier
-dropTableInMetadata source table =
-  MetadataModifier $ metaSources . ix source . (toSourceMetadata @b) . smTables %~ OMap.delete table
 
 runUntrackTableQ ::
   forall b m.

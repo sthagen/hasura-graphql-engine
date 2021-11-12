@@ -1,6 +1,26 @@
 -- |
 -- Description: Create/delete SQL functions to/from Hasura metadata.
-module Hasura.RQL.DDL.Schema.Function where
+module Hasura.RQL.DDL.Schema.Function
+  ( FunctionPermissionArgument (..),
+    SetFunctionCustomization (..),
+    TrackFunction (..),
+    TrackFunctionV2 (..),
+    UnTrackFunction (..),
+    askFunctionInfo,
+    doesFunctionPermissionExist,
+    dropFunctionInMetadata,
+    dropFunctionPermissionInMetadata,
+    handleMultipleFunctions,
+    runCreateFunctionPermission,
+    runDropFunctionPermission,
+    runSetFunctionCustomization,
+    runTrackFunc,
+    runTrackFunctionV2,
+    runUntrackFunc,
+    trackFunctionP1,
+    trackFunctionP2,
+  )
+where
 
 import Control.Lens ((.~), (^.))
 import Data.Aeson
@@ -166,16 +186,6 @@ runUntrackFunc (UnTrackFunction functionName sourceName) = do
     buildSchemaCache $
       dropFunctionInMetadata @b sourceName functionName
   pure successMsg
-
-dropFunctionInMetadata ::
-  forall b.
-  (BackendMetadata b) =>
-  SourceName ->
-  FunctionName b ->
-  MetadataModifier
-dropFunctionInMetadata source function =
-  MetadataModifier $
-    metaSources . ix source . toSourceMetadata . (smFunctions @b) %~ OMap.delete function
 
 {- Note [Function Permissions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

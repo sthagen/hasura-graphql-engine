@@ -11,37 +11,127 @@ pytestmark = pytest.mark.allow_server_upgrade_test
 usefixtures = pytest.mark.usefixtures
 
 
+@pytest.mark.parametrize("transport", ['http'])
+@pytest.mark.parametrize("backend", ['mysql'])
+@usefixtures('per_class_tests_db_state')
+class TestGraphQLQueryReplaceMetadataMySQL:
+
+    # initialize the metadata with default 'http' transport fixture
+    def test_replace_metadata(self, hge_ctx, transport):
+        check_query_f(hge_ctx, self.dir() + '/replace_metadata.yaml', transport)
+
+    @classmethod
+    def dir(cls):
+        return 'queries/graphql_query/mysql'
+
+
 @pytest.mark.parametrize("backend", ['mysql'])
 @usefixtures('per_class_tests_db_state')
 class TestGraphQLQueryBasicMySQL:
 
-    # initialize the metadata with default 'http' transport fixture
-    def test_replace_metadata(self, hge_ctx):
-        check_query_f(hge_ctx, self.dir() + '/replace_metadata.yaml')
-
-    def test_select_query_author(self, hge_ctx):
+    # basic queries
+    def test_select_query_author(self, hge_ctx): # extra
         check_query_f(hge_ctx, self.dir() + '/basic.yaml')
+
+    def test_select_query_ignore_author(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author.yaml')
+
+    def test_nested_select_query_deep(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/nested_select_query_deep.yaml')
 
     def test_select_quoted_col(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + '/select_query_author_quoted_col.yaml')
 
+    def test_non_tracked_table(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_non_tracked_table_err.yaml')
+
+    def test_select_query_non_tracked_table(self, hge_ctx): # may be duplicate of the one above
+        check_query_f(hge_ctx, self.dir() + '/select_query_non_tracked_table.yaml')
+
+    def test_col_not_present(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_col_not_present_err.yaml')
+
+    # offsets / limit
+    def test_offset_1_limit_2(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/offset_1_limit_2.yaml')
+
+    def test_offset_2_limit_1(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/offset_2_limit_1.yaml')
+
     def test_select_offset_limit(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + '/select_query_author_limit.yaml')
-
-    def test_select_query_ignore_author(self, hge_ctx):
-        check_query_f(hge_ctx, self.dir() + '/select_query_author.yaml')
 
     def test_select_offset(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + '/select_query_author_offset.yaml')
 
     def test_select_limit(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_limit_offset.yaml')
+
+
+    # where clause
+    def test_select_query_where(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_where.yaml')
+
+    def test_select_query_where(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/nested_select_where_query_author_article.yaml')
+
+    # order by
+    def test_select_query_author_order_by(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_order_by.yaml')
+
+    # directives
+    def test_select_query_author_with_skip_directive(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_with_skip_directive.yaml')
+
+    # TODO select_query_author_with_include_directive
+
+    def test_select_query_author_with_skip_include_directive(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_with_skip_include_directive.yaml')
+
+    def test_select_query_author_with_wrong_directive_err(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_with_wrong_directive_err.yaml')
+
+    # views
+    def test_query_search_author_view(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/query_search_author_view.yaml')
+
+    def test_offset_2_limit_1(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/offset_2_limit_1.yaml')
+
+    def test_select_offset_limit(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + '/select_query_author_limit.yaml')
 
-    def test_col_not_present(self, hge_ctx):
-        check_query_f(hge_ctx, self.dir() + '/select_query_author_col_not_present_err.yaml')
+    def test_select_offset(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_offset.yaml')
 
-    def test_non_tracked_table(self, hge_ctx):
-        check_query_f(hge_ctx, self.dir() + '/select_query_non_tracked_table_err.yaml')
+    def test_select_limit(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_limit_offset.yaml')
+
+
+    # where clause
+    def test_select_query_where(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_where.yaml')
+
+    def test_select_query_where(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/nested_select_where_query_author_article.yaml')
+
+    # order by
+    def test_select_query_author_order_by(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_order_by.yaml')
+
+    # directives
+    def test_select_query_author_with_skip_directive(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_with_skip_directive.yaml')
+
+    def test_select_query_author_with_skip_include_directive(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_with_skip_include_directive.yaml')
+
+    def test_select_query_author_with_wrong_directive_err(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_with_wrong_directive_err.yaml')
+
+    # views
+    def test_query_search_author_view(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/query_search_author_view.yaml')
 
     @classmethod
     def dir(cls):
@@ -216,7 +306,6 @@ class TestGraphQLQueryBasicCommon:
     def test_select_query_multiple_columns_obj_fkey(self, hge_ctx, transport):
         check_query_f(hge_ctx, self.dir() + "/select_multiple_columns_obj_fkey.yaml", transport)
 
-
     @classmethod
     def dir(cls):
         return 'queries/graphql_query/basic'
@@ -241,6 +330,12 @@ class TestGraphQLQueryBasicMSSQL:
     def test_nodes_aggregates_conditions_mssql(self, hge_ctx, transport):
         check_query_f(hge_ctx, self.dir() + "/nodes_aggregates_conditions_mssql.yaml", transport)
 
+    def test_select_query_author_pk(self, hge_ctx, transport):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_by_pkey.yaml', transport)
+
+    def test_select_query_author_pk_null(self, hge_ctx, transport):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_by_pkey_null.yaml', transport)
+
     @classmethod
     def dir(cls):
         return 'queries/graphql_query/basic'
@@ -253,12 +348,6 @@ class TestGraphQLQueryBasicPostgres:
     @pytest.mark.skip_server_upgrade_test
     def test_select_various_postgres_types(self, hge_ctx, transport):
         check_query_f(hge_ctx, self.dir() + '/select_query_test_types_postgres.yaml', transport)
-
-    # TODO: https://github.com/hasura/graphql-engine-mono/issues/866
-    # This test currently fails on MSSQL.
-    # Move to TestGraphQLQueryBasicCommon once linked issue is fixed.
-    def test_select_query_author_pk(self, hge_ctx, transport):
-        check_query_f(hge_ctx, self.dir() + '/select_query_author_by_pkey.yaml', transport)
 
     def test_select_query_invalid_escape_sequence(self, hge_ctx, transport):
         transport = 'http'
@@ -293,6 +382,12 @@ class TestGraphQLQueryBasicPostgres:
         st_code, resp = hge_ctx.v1q_f(self.dir() + '/setup_invalid_fkey_relationship.yaml')
         assert st_code == 400, resp
         assert resp['error'] == "Expecting object { table, columns }."
+
+    def test_select_query_author_pk(self, hge_ctx, transport):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_by_pkey.yaml', transport)
+
+    def test_select_query_author_pk_null(self, hge_ctx, transport):
+        check_query_f(hge_ctx, self.dir() + '/select_query_author_by_pkey_null.yaml', transport)
 
     @classmethod
     def dir(cls):
@@ -1144,15 +1239,11 @@ class TestGraphQLExplain:
         st_code, resp = hge_ctx.v1GraphqlExplain(q, {"x-hasura-role": "random_user"})
         assert st_code == 400, resp
 
-    @pytest.mark.parametrize("backend", ['postgres', 'mssql'])
-    def test_simple_query_as_admin_with_user_role(self, hge_ctx, backend):
-        self.with_admin_secret("query", hge_ctx, self.dir() + hge_ctx.backend_suffix('/permissions_query') + ".yaml")
-
-    @pytest.mark.parametrize("backend", ['postgres', 'mssql'])
+    @pytest.mark.parametrize("backend", ['postgres', 'mssql', 'mysql'])
     def test_simple_query(self, hge_ctx, backend):
         self.with_admin_secret("query", hge_ctx, self.dir() + hge_ctx.backend_suffix('/simple_query') + ".yaml")
 
-    @pytest.mark.parametrize("backend", ['postgres', 'mssql'])
+    @pytest.mark.parametrize("backend", ['postgres', 'mssql', 'mysql'])
     def test_permissions_query(self, hge_ctx, backend):
         self.with_admin_secret("query", hge_ctx, self.dir() + hge_ctx.backend_suffix('/permissions_query') + ".yaml")
 

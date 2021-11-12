@@ -1,3 +1,7 @@
+-- | Migrations for postgres source catalog
+--
+--    NOTE: Please have a look at the `server/documentation/migration-guidelines.md` before adding any new migration
+--       if you haven't already looked at it
 module Hasura.Backends.Postgres.DDL.Source
   ( ToMetadataFetchQuery,
     fetchPgScalars,
@@ -7,10 +11,14 @@ module Hasura.Backends.Postgres.DDL.Source
     postDropSourceHook,
     resolveDatabaseMetadata,
     resolveSourceConfig,
+    logPGSourceCatalogMigrationLockedQueries,
   )
 where
 
+import Control.Concurrent.Extended (sleep)
 import Control.Monad.Trans.Control (MonadBaseControl)
+import Data.Aeson (ToJSON, toJSON)
+import Data.Aeson.TH
 import Data.Environment qualified as Env
 import Data.FileEmbed (makeRelativeToProject)
 import Data.HashMap.Strict qualified as Map
@@ -21,12 +29,14 @@ import Hasura.Backends.Postgres.Connection
 import Hasura.Backends.Postgres.DDL.Source.Version
 import Hasura.Backends.Postgres.SQL.Types
 import Hasura.Base.Error
+import Hasura.Logging
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.EventTrigger (RecreateEventTriggers (..))
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
 import Hasura.SQL.Backend
 import Hasura.Server.Migrate.Internal
@@ -56,18 +66,80 @@ resolveSourceConfig name config _env = runExceptT do
   sourceResolver <- getSourceResolver
   liftEitherM $ liftIO $ sourceResolver name config
 
+-- | 'PGSourceLockQuery' is a data type which represents the contents of a single object of the
+--   locked queries which are queried from the `pg_stat_activity`. See `logPGSourceCatalogMigrationLockedQueries`.
+data PGSourceLockQuery = PGSourceLockQuery
+  { _psqaQuery :: !Text,
+    _psqaLockGranted :: !(Maybe Bool),
+    _psqaLockMode :: !Text,
+    _psqaTransactionStartTime :: !UTCTime,
+    _psqaQueryStartTime :: !UTCTime,
+    _psqaWaitEventType :: !Text,
+    _psqaBlockingQuery :: !Text
+  }
+
+$(deriveJSON hasuraJSON ''PGSourceLockQuery)
+
+instance ToEngineLog [PGSourceLockQuery] Hasura where
+  toEngineLog resp = (LevelInfo, sourceCatalogMigrationLogType, toJSON resp)
+
+newtype PGSourceLockQueryError = PGSourceLockQueryError QErr
+  deriving (ToJSON)
+
+instance ToEngineLog PGSourceLockQueryError Hasura where
+  toEngineLog resp = (LevelError, sourceCatalogMigrationLogType, toJSON resp)
+
+-- | 'logPGSourceCatalogMigrationLockedQueries' as the name suggests logs
+--   the queries which are blocking in the database. This function is called
+--   asynchronously from `initCatalogIfNeeded` while the source catalog is being
+--   migrated.
+--   NOTE: When there are no locking queries present in the database, nothing will be logged.
+logPGSourceCatalogMigrationLockedQueries ::
+  MonadIO m =>
+  Logger Hasura ->
+  PGSourceConfig ->
+  m Void
+logPGSourceCatalogMigrationLockedQueries logger sourceConfig = forever $ do
+  dbStats <- liftIO $ runPgSourceReadTx sourceConfig fetchLockedQueriesTx
+  case dbStats of
+    Left err -> unLogger logger $ PGSourceLockQueryError err
+    Right (val :: (Maybe [PGSourceLockQuery])) ->
+      case val of
+        Nothing -> pure ()
+        Just [] -> pure ()
+        Just val' -> liftIO $ unLogger logger $ val'
+  liftIO $ sleep $ seconds 5
+  where
+    -- The blocking query in the below transaction is truncated to the first 20 characters because it may contain
+    -- sensitive info.
+    fetchLockedQueriesTx =
+      (Q.getAltJ . runIdentity . Q.getRow)
+        <$> Q.withQE
+          defaultTxErrorHandler
+          [Q.sql|
+         SELECT COALESCE(json_agg(DISTINCT jsonb_build_object('query', psa.query, 'lock_granted', pl.granted, 'lock_mode', pl.mode, 'transaction_start_time', psa.xact_start, 'query_start_time', psa.query_start, 'wait_event_type', psa.wait_event_type, 'blocking_query', (SUBSTRING(blocking.query, 1, 20) || '...') )), '[]'::json)
+         FROM     pg_stat_activity psa
+         JOIN     pg_stat_activity blocking ON blocking.pid = ANY(pg_blocking_pids(psa.pid))
+         LEFT JOIN pg_locks pl ON psa.pid = pl.pid
+         WHERE    psa.query ILIKE '%hdb_catalog%' AND psa.wait_event_type IS NOT NULL
+         AND      psa.query ILIKE any (array ['%create%', '%drop%', '%alter%']);
+       |]
+          ()
+          False
+
 resolveDatabaseMetadata ::
   forall pgKind m.
   (Backend ('Postgres pgKind), ToMetadataFetchQuery pgKind, MonadIO m, MonadBaseControl IO m) =>
   SourceConfig ('Postgres pgKind) ->
+  SourceTypeCustomization ->
   m (Either QErr (ResolvedSource ('Postgres pgKind)))
-resolveDatabaseMetadata sourceConfig = runExceptT do
+resolveDatabaseMetadata sourceConfig sourceCustomization = runExceptT do
   (tablesMeta, functionsMeta, pgScalars) <- runTx (_pscExecCtx sourceConfig) Q.ReadOnly $ do
     tablesMeta <- fetchTableMetadata
     functionsMeta <- fetchFunctionMetadata
     pgScalars <- fetchPgScalars
     pure (tablesMeta, functionsMeta, pgScalars)
-  pure $ ResolvedSource sourceConfig tablesMeta functionsMeta pgScalars
+  pure $ ResolvedSource sourceConfig sourceCustomization tablesMeta functionsMeta pgScalars
 
 -- | Initialise catalog tables for a source, including those required by the event delivery subsystem.
 initCatalogForSource ::
@@ -93,13 +165,13 @@ initCatalogForSource maintenanceMode migrationTime = do
       | not sourceVersionTableExist && eventLogTableExist -> do
         -- Update the Source Catalog to v43 to include the new migration
         -- changes. Skipping this step will result in errors.
-        currMetadataCatalogVersion <- liftTx getCatalogVersion
+        currMetadataCatalogVersionFloat <- liftTx getCatalogVersion
         -- we migrate to the 43 version, which is the migration where
         -- metadata separation is introduced
-        migrateTo43MetadataCatalog currMetadataCatalogVersion
+        migrateTo43MetadataCatalog currMetadataCatalogVersionFloat
         liftTx createVersionTable
-        -- Migrate the catalog from initial version i.e '1'
-        migrateSourceCatalogFrom "1"
+        -- Migrate the catalog from initial version i.e '0'
+        migrateSourceCatalogFrom "0"
       | otherwise -> migrateSourceCatalog
   where
     initPgSourceCatalog = do
@@ -122,7 +194,7 @@ initCatalogForSource maintenanceMode migrationTime = do
       pure ()
 
     migrateTo43MetadataCatalog prevVersion = do
-      let neededMigrations = dropWhile ((/= prevVersion) . fst) upMigrationsUntil43
+      let neededMigrations = dropWhile ((< prevVersion) . fst) upMigrationsUntil43
       case NE.nonEmpty neededMigrations of
         Just nonEmptyNeededMigrations -> do
           -- Migrations aren't empty. We need to update the catalog version after migrations
@@ -184,30 +256,35 @@ sourceMigrations =
 
          migrationsFromFile = map $ \(from :: Integer) ->
            [|($(TH.lift $ tshow from), $(migrationFromFile from))|]
-      in TH.listE $ migrationsFromFile [1 .. (latestSourceCatalogVersion - 1)]
+      in TH.listE $ migrationsFromFile [0 .. (latestSourceCatalogVersion - 1)]
    )
 
 -- Upgrade the hdb_catalog schema to v43 (Metadata catalog)
-upMigrationsUntil43 :: [(Text, Q.TxE QErr ())]
+upMigrationsUntil43 :: [(Float, Q.TxE QErr ())]
 upMigrationsUntil43 =
   $( let migrationFromFile from to =
            let path = "src-rsr/migrations/" <> from <> "_to_" <> to <> ".sql"
             in [|Q.multiQE defaultTxErrorHandler $(makeRelativeToProject path >>= Q.sqlFromFile)|]
 
-         migrationsFromFile = map $ \(to :: Integer) ->
+         migrationsFromFile = map $ \(to :: Float) ->
            let from = to - 1
             in [|
-                 ( $(TH.lift $ tshow from),
-                   $(migrationFromFile (show from) (show to))
+                 ( $(TH.lift from),
+                   $(migrationFromFile (show (floor from :: Integer)) (show (floor to :: Integer)))
                  )
                  |]
       in TH.listE
          -- version 0.8 is the only non-integral catalog version
+         -- The 41st migration which included only source catalog migration
+         -- was introduced before metadata separation changes were introduced
+         -- in the graphql-engine. Now the earlier 41st migration has been
+         -- moved to source catalog migrations and the 41st up migration is removed
+         -- entirely.
          $
-           [|("0.8", $(migrationFromFile "08" "1"))|] :
+           [|(0.8, $(migrationFromFile "08" "1"))|] :
            migrationsFromFile [2 .. 3]
-             ++ [|("3", from3To4)|] :
-           migrationsFromFile [5 .. 43]
+             ++ [|(3, from3To4)|] :
+           (migrationsFromFile [5 .. 40]) ++ migrationsFromFile [42 .. 43]
    )
 
 -- | Fetch Postgres metadata of all user tables

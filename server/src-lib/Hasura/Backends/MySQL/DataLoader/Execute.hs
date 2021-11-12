@@ -3,7 +3,13 @@
 -- |
 --
 -- Execute the plan given from .Plan.
-module Hasura.Backends.MySQL.DataLoader.Execute where
+module Hasura.Backends.MySQL.DataLoader.Execute
+  ( OutputValue (..),
+    RecordSet (..),
+    execute,
+    runExecute,
+  )
+where
 
 import Control.Monad.IO.Class
 import Data.Aeson hiding (Value)
@@ -16,6 +22,7 @@ import Data.IORef
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import GHC.TypeLits qualified
+import Hasura.Backends.MySQL.Connection (runQueryYieldingRows)
 import Hasura.Backends.MySQL.DataLoader.Plan hiding
   ( Join (wantedFields),
     Relationship (leftRecordSet),
@@ -23,12 +30,13 @@ import Hasura.Backends.MySQL.DataLoader.Plan hiding
   )
 import Hasura.Backends.MySQL.DataLoader.Plan qualified as DataLoaderPlan
 import Hasura.Backends.MySQL.DataLoader.Plan qualified as Plan
+import Hasura.Backends.MySQL.ToQuery (fromSelect, toQueryFlat)
 import Hasura.Backends.MySQL.Types hiding
   ( FieldName,
     ScalarValue,
     selectWhere,
   )
-import Hasura.Backends.MySQL.Types qualified as MySQL
+-- import Hasura.Backends.MySQL.Types qualified as MySQL
 import Hasura.GraphQL.Parser ()
 -- Brings an instance for Hashable (Vector a)...
 import Hasura.Prelude hiding
@@ -66,7 +74,9 @@ data ExecuteReader = ExecuteReader
 
 -- | Any problem encountered while executing the plan.
 data ExecuteProblem
-  = JoinProblem ExecuteProblem
+  = GetJobDecodeProblem String
+  | CreateQueryJobDecodeProblem String
+  | JoinProblem ExecuteProblem
   | UnsupportedJoinBug JoinType
   | MissingRecordSetBug Ref
   deriving (Show)
@@ -127,15 +137,17 @@ fetchRecordSetForAction :: Action -> Execute RecordSet
 fetchRecordSetForAction =
   \case
     SelectAction select -> do
-      _relationshipIn <-
-        maybe (pure []) makeRelationshipIn (selectRelationship select)
-      -- TODO: This record set is set to empty for now. In a follow-up
-      -- code change, this will be pulled from the Connection
-      -- module. However, it requires changes to the Select type,
-      -- which in turn affect FromIr. In the interest of a simple PR,
-      -- this is omitted. This comment will be removed when the below
-      -- is updated in the follow-up PR.
-      recordSet <- pure (makeRecordSet mempty)
+      recordSet <- do
+        SourceConfig {scConnectionPool} <- asks credentials
+        result <-
+          liftIO $
+            runExceptT $
+              runQueryYieldingRows
+                scConnectionPool
+                (toQueryFlat (fromSelect (selectQuery select)))
+        case result of
+          Left problem -> throwError (JoinProblem problem)
+          Right rows -> pure (makeRecordSet rows)
       -- Update the wanted fields from the original select. This lets
       -- the executor know which fields to include after performing a
       -- join.
@@ -213,6 +225,7 @@ getFinalRecordSet HeadAndTail {..} = do
             (rows tailSet)
       }
 
+{- WIP, it seems:
 -- | Make an lhs_fk IN (rhs_fk1, rhs_fk2, ..) expression list.
 makeRelationshipIn :: DataLoaderPlan.Relationship -> Execute [Expression]
 makeRelationshipIn
@@ -235,6 +248,7 @@ makeRelationshipIn
 planFieldNameToQueryFieldName :: EntityAlias -> FieldName -> MySQL.FieldName
 planFieldNameToQueryFieldName (EntityAlias fieldNameEntity) (FieldName fieldName) =
   MySQL.FieldName {fNameEntity = fieldNameEntity, fName = fieldName}
+-}
 
 -- | Inefficient but clean left object join.
 leftObjectJoin ::

@@ -1,7 +1,57 @@
--- | Top-level schema building function. Those are used to construct a schema for a given resource,
--- such as a table or a function. Those matches what the @BackendSchema@ class expects, and are the
--- default implementation a fully-fledged backend should support.
-module Hasura.GraphQL.Schema.Build where
+-- | This module provides building blocks for the GraphQL Schema that the
+-- GraphQL Engine presents.
+--
+-- The functions defined here are used to serve as default implementations for
+-- their namesakes in the 'BackendSchema' type class.
+--
+-- When, for some backend, you want to implement a new feature that manifests
+-- itself visibly in the schema (e.g., if you're developing support for update
+-- mutations), this module is likely where your efforts should start.
+--
+-- Using these functions help us present a consistent GraphQL schema across
+-- different backends.
+--
+-- There is a bit of tension however, as sometimes we intentionally do want the
+-- GraphQL Schema relating to some backend to be different in some way.
+--
+-- It could be that a backend only has limited support for some common feature,
+-- or, more interestingly, that some backend just does things differently (c.f.
+-- MSSQL's @MERGE@ statement with PostgreSQL's @INSERT .. ON CONFLICT@, which
+-- are similar enough that we want to use the same overall upsert schema but
+-- different enough that we want to use different field names)
+--
+-- When you want to implement new schema for a backend, there is overall three
+-- different ways do deal with this tension:
+--
+-- 1. You can duplicate existing code and implement the new behavior in the
+--    duplicate.
+-- 2. You can infuse the new behavior into existing code and switch dynamically
+--    at runtime (or via type class instance dispatch, which is the same
+--    for our purposes)
+-- 3. You can refactor the existing building blocks and compose them differently
+--    at use sites to get the desired behavior nuances.
+--
+-- Of these three, steps 1. and 2. are by far the easiest to execute, while 3.
+-- requires some critical thought. However, both 1. and 2. produce legacy code
+-- that is difficult to maintain and understand.
+--
+-- As a guideline, if you find yourself wanting add new behavior to some of
+-- these functions it's very likely that you should consider refactoring them
+-- instead, thus shifting the responsibility deciding on the correct behavior to
+-- use sites.
+--
+-- It an ongoing effort to adapt and refactor these building blocks such that
+-- they have the sizes and shapes that result in the most elegant uses of them
+-- that we can manage.
+module Hasura.GraphQL.Schema.Build
+  ( buildFunctionMutationFields,
+    buildFunctionQueryFields,
+    buildTableDeleteMutationFields,
+    buildTableInsertMutationFields,
+    buildTableQueryFields,
+    buildTableUpdateMutationFields,
+  )
+where
 
 import Data.Text.Extended
 import Hasura.GraphQL.Parser hiding (EnumValueInfo, field)
@@ -34,14 +84,14 @@ buildTableQueryFields sourceName sourceInfo queryTagsConfig tableName tableInfo 
           . QDBR
       customRootFields = _tcCustomRootFields $ _tciCustomConfig $ _tiCoreInfo tableInfo
       -- select table
-      selectName = fromMaybe gqlName $ _tcrfSelect customRootFields
       selectDesc = Just $ G.Description $ "fetch data from the table: " <>> tableName
       -- select table by pk
-      selectPKName = fromMaybe (gqlName <> $$(G.litName "_by_pk")) $ _tcrfSelectByPk customRootFields
       selectPKDesc = Just $ G.Description $ "fetch data from the table: " <> tableName <<> " using primary key columns"
       -- select table aggregate
-      selectAggName = fromMaybe (gqlName <> $$(G.litName "_aggregate")) $ _tcrfSelectAggregate customRootFields
       selectAggDesc = Just $ G.Description $ "fetch aggregated fields from the table: " <>> tableName
+  selectName <- mkRootFieldName $ fromMaybe gqlName $ _tcrfSelect customRootFields
+  selectPKName <- mkRootFieldName $ fromMaybe (gqlName <> $$(G.litName "_by_pk")) $ _tcrfSelectByPk customRootFields
+  selectAggName <- mkRootFieldName $ fromMaybe (gqlName <> $$(G.litName "_aggregate")) $ _tcrfSelectAggregate customRootFields
   catMaybes
     <$> sequenceA
       [ requiredFieldParser (mkRF . QDBMultipleRows) $ selectTable sourceName tableInfo selectName selectDesc selPerms,
@@ -88,11 +138,11 @@ buildTableInsertMutationFields
               )
           customRootFields = _tcCustomRootFields $ _tciCustomConfig $ _tiCoreInfo tableInfo
           -- insert into table
-          insertName = fromMaybe ($$(G.litName "insert_") <> gqlName) $ _tcrfInsert customRootFields
           insertDesc = Just $ G.Description $ "insert data into the table: " <>> tableName
           -- insert one into table
-          insertOneName = fromMaybe ($$(G.litName "insert_") <> gqlName <> $$(G.litName "_one")) $ _tcrfInsertOne customRootFields
           insertOneDesc = Just $ G.Description $ "insert a single row into the table: " <>> tableName
+      insertName <- mkRootFieldName $ fromMaybe ($$(G.litName "insert_") <> gqlName) $ _tcrfInsert customRootFields
+      insertOneName <- mkRootFieldName $ fromMaybe ($$(G.litName "insert_") <> gqlName <> $$(G.litName "_one")) $ _tcrfInsertOne customRootFields
       insert <- insertIntoTable sourceName tableInfo insertName insertDesc insPerms mSelPerms mUpdPerms
       -- Select permissions are required for insertOne: the selection set is the
       -- same as a select on that table, and it therefore can't be populated if the
@@ -101,19 +151,53 @@ buildTableInsertMutationFields
         insertOneIntoTable sourceName tableInfo insertOneName insertOneDesc insPerms selPerms mUpdPerms
       pure $ map mkRF (insert : maybeToList insertOne)
 
+-- | This function is the basic building block for update mutations. It
+-- implements the mutation schema in the general shape described in
+-- @https://hasura.io/docs/latest/graphql/core/databases/postgres/mutations/update.html@.
+--
+-- Something that varies between backends is the @update operators@ that they
+-- support (i.e. the schema fields @_set@, @_inc@, etc., see
+-- <src/Hasura.Backends.Postgres.Instances.Schema.html#updateOperators Hasura.Backends.Postgres.Instances.Schema.updateOperators> for an example
+-- implementation). Therefore, this function is parameterised over a monadic
+-- action that produces the operators that the backend supports in the context
+-- of some table and associated update permissions.
+--
+-- Apart from this detail, the rest of the arguments are the same as those
+-- of @BackendSchema.@'Hasura.GraphQL.Schema.Backend.buildTableUpdateMutationFields'.
+--
+-- The suggested way to use this is like:
+--
+-- > instance BackendSchema MyBackend where
+-- >   ...
+-- >   buildTableUpdateMutationFields = GSB.buildTableUpdateMutationFields myBackendUpdateOperators
+-- >   ...
 buildTableUpdateMutationFields ::
   forall b r m n.
   MonadBuildSchema b r m n =>
+  -- | Action that builds the @update operators@ the backend supports
+  ( TableInfo b ->
+    UpdPermInfo b ->
+    m
+      (InputFieldsParser n [(Column b, UpdOpExpG (UnpreparedValue b))])
+  ) ->
+  -- | The source that the table lives in
   SourceName ->
+  -- | The associated 'SourceConfig'
   SourceConfig b ->
+  -- TODO: What are Query Tags?
   Maybe QueryTagsConfig ->
+  -- | The name of the table being acted on
   TableName b ->
+  -- | table info
   TableInfo b ->
+  -- | field display name
   G.Name ->
+  -- | update permissions of the table
   UpdPermInfo b ->
+  -- | select permissions of the table (if any)
   Maybe (SelPermInfo b) ->
   m [FieldParser n (MutationRootField UnpreparedValue)]
-buildTableUpdateMutationFields sourceName sourceInfo queryTagsConfig tableName tableInfo gqlName updPerms mSelPerms = do
+buildTableUpdateMutationFields updateOperators sourceName sourceInfo queryTagsConfig tableName tableInfo gqlName updPerms mSelPerms = do
   let mkRF =
         RFDB sourceName
           . AB.mkAnyBackend
@@ -121,17 +205,17 @@ buildTableUpdateMutationFields sourceName sourceInfo queryTagsConfig tableName t
           . MDBR
       customRootFields = _tcCustomRootFields $ _tciCustomConfig $ _tiCoreInfo tableInfo
       -- update table
-      updateName = fromMaybe ($$(G.litName "update_") <> gqlName) $ _tcrfUpdate customRootFields
       updateDesc = Just $ G.Description $ "update data of the table: " <>> tableName
       -- update table by pk
-      updatePKName = fromMaybe ($$(G.litName "update_") <> gqlName <> $$(G.litName "_by_pk")) $ _tcrfUpdateByPk customRootFields
       updatePKDesc = Just $ G.Description $ "update single row of the table: " <>> tableName
-  update <- updateTable sourceName tableInfo updateName updateDesc updPerms mSelPerms
-  -- Primary keys can only be tested in the `where` clause if the user has
-  -- select permissions for them, which at the very least requires select
-  -- permissions.
-  updateByPk <- fmap join $ for mSelPerms $ updateTableByPk sourceName tableInfo updatePKName updatePKDesc updPerms
-  pure $ fmap (mkRF . MDBUpdate) <$> catMaybes [update, updateByPk]
+  updateName <- mkRootFieldName $ fromMaybe ($$(G.litName "update_") <> gqlName) $ _tcrfUpdate customRootFields
+  updatePKName <- mkRootFieldName $ fromMaybe ($$(G.litName "update_") <> gqlName <> $$(G.litName "_by_pk")) $ _tcrfUpdateByPk customRootFields
+  update <- updateTable updateOperators sourceName tableInfo updateName updateDesc updPerms mSelPerms
+  -- Primary keys can only be tested in the `where` clause if a primary key
+  -- exists on the table and if the user has select permissions on all columns
+  -- that make up the key.
+  updateByPk <- fmap join $ for mSelPerms $ updateTableByPk updateOperators sourceName tableInfo updatePKName updatePKDesc updPerms
+  pure $ fmap (mkRF . MDBUpdate) <$> update : catMaybes [updateByPk]
 
 buildTableDeleteMutationFields ::
   forall b r m n.
@@ -153,11 +237,11 @@ buildTableDeleteMutationFields sourceName sourceInfo queryTagsConfig tableName t
           . MDBR
       customRootFields = _tcCustomRootFields $ _tciCustomConfig $ _tiCoreInfo tableInfo
       -- delete from table
-      deleteName = fromMaybe ($$(G.litName "delete_") <> gqlName) $ _tcrfDelete customRootFields
       deleteDesc = Just $ G.Description $ "delete data from the table: " <>> tableName
       -- delete from table by pk
-      deletePKName = fromMaybe ($$(G.litName "delete_") <> gqlName <> $$(G.litName "_by_pk")) $ _tcrfDeleteByPk customRootFields
       deletePKDesc = Just $ G.Description $ "delete single row from the table: " <>> tableName
+  deleteName <- mkRootFieldName $ fromMaybe ($$(G.litName "delete_") <> gqlName) $ _tcrfDelete customRootFields
+  deletePKName <- mkRootFieldName $ fromMaybe ($$(G.litName "delete_") <> gqlName <> $$(G.litName "_by_pk")) $ _tcrfDeleteByPk customRootFields
   delete <- deleteFromTable sourceName tableInfo deleteName deleteDesc delPerms mSelPerms
   -- Primary keys can only be tested in the `where` clause if the user has
   -- select permissions for them, which at the very least requires select
