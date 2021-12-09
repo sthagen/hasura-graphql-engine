@@ -28,6 +28,7 @@ import Hasura.GraphQL.Schema.Common
 import Hasura.GraphQL.Schema.Select
 import Hasura.Prelude
 import Hasura.RQL.DML.Internal qualified as RQL
+import Hasura.RQL.IR.Root qualified as RQL
 import Hasura.RQL.IR.Select qualified as RQL
 import Hasura.RQL.Types
 import Hasura.Session
@@ -48,7 +49,7 @@ actionExecute ::
   MonadBuildSchema ('Postgres 'Vanilla) r m n =>
   NonObjectTypeMap ->
   ActionInfo ->
-  m (Maybe (FieldParser n (AnnActionExecution ('Postgres 'Vanilla) (RQL.RemoteSelect UnpreparedValue) (UnpreparedValue ('Postgres 'Vanilla)))))
+  m (Maybe (FieldParser n (AnnActionExecution ('Postgres 'Vanilla) (RQL.RemoteRelationshipField UnpreparedValue) (UnpreparedValue ('Postgres 'Vanilla)))))
 actionExecute nonObjectTypeMap actionInfo = runMaybeT do
   roleName <- askRoleName
   guard (roleName == adminRoleName || roleName `Map.member` permissions)
@@ -119,7 +120,7 @@ actionAsyncQuery ::
   forall r m n.
   MonadBuildSchema ('Postgres 'Vanilla) r m n =>
   ActionInfo ->
-  m (Maybe (FieldParser n (AnnActionAsyncQuery ('Postgres 'Vanilla) (RQL.RemoteSelect UnpreparedValue) (UnpreparedValue ('Postgres 'Vanilla)))))
+  m (Maybe (FieldParser n (AnnActionAsyncQuery ('Postgres 'Vanilla) (RQL.RemoteRelationshipField UnpreparedValue) (UnpreparedValue ('Postgres 'Vanilla)))))
 actionAsyncQuery actionInfo = runMaybeT do
   roleName <- askRoleName
   guard $ roleName == adminRoleName || roleName `Map.member` permissions
@@ -318,7 +319,7 @@ actionInputArguments nonObjectTypeMap arguments = do
                     `onNothing` throw500 "object type for a field found in custom input object type"
                 (fieldName,) <$> argumentParser fieldName fieldDesc fieldType nonObjectFieldType
             pure $
-              P.object (P.Typename objectName) objectDesc $
+              P.object objectName objectDesc $
                 J.Object <$> inputFieldsToObject inputFieldsParsers
 
 mkArgumentInputFieldParser ::
@@ -358,9 +359,9 @@ customScalarParser = \case
         | _stdName == floatScalar -> J.toJSON <$> P.float
         | _stdName == stringScalar -> J.toJSON <$> P.string
         | _stdName == boolScalar -> J.toJSON <$> P.boolean
-        | otherwise -> P.jsonScalar (P.Typename _stdName) _stdDescription
+        | otherwise -> P.jsonScalar _stdName _stdDescription
   ASTReusedScalar name pgScalarType ->
-    let schemaType = P.NonNullable $ P.TNamed $ P.mkDefinition (P.Typename name) Nothing P.TIScalar
+    let schemaType = P.NonNullable $ P.TNamed $ P.Definition name Nothing P.TIScalar
      in P.Parser
           { pType = schemaType,
             pParser =
@@ -381,8 +382,8 @@ customEnumParser (EnumTypeDefinition typeName description enumValues) =
         enumValues <&> \enumValue ->
           let valueName = G.unEnumValue $ _evdValue enumValue
            in (,J.toJSON valueName) $
-                P.mkDefinition
+                P.Definition
                   valueName
                   (_evdDescription enumValue)
                   P.EnumValueInfo
-   in P.enum (P.Typename enumName) description enumValueDefinitions
+   in P.enum enumName description enumValueDefinitions

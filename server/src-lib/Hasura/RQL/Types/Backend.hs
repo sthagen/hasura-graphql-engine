@@ -104,7 +104,14 @@ class
     Eq (XNodesAgg b),
     Show (XNodesAgg b),
     Eq (XRelay b),
-    Show (XRelay b)
+    Show (XRelay b),
+    -- Intermediate Representations
+    Functor (BackendUpdate b),
+    Foldable (BackendUpdate b),
+    Traversable (BackendUpdate b),
+    Functor (BackendInsert b),
+    Foldable (BackendInsert b),
+    Traversable (BackendInsert b)
   ) =>
   Backend (b :: BackendType)
   where
@@ -129,8 +136,19 @@ class
 
   type ExtraTableMetadata b :: Type
 
-  -- | Extra backend specific context needed for insert mutations.
-  type ExtraInsertData b :: Type
+  -- Backend-specific IR types
+
+  -- | Intermediate Representation of Update Mutations.
+  -- The default implementation makes update expressions uninstantiable.
+  type BackendUpdate b :: Type -> Type
+
+  type BackendUpdate b = Const Void
+
+  -- | Intermediate Representation of Insert Mutations.
+  -- The default implementation makes insert expressions uninstantiable.
+  type BackendInsert b :: Type -> Type
+
+  type BackendInsert b = Const Void
 
   -- extension types
   type XComputedField b :: Type
@@ -139,9 +157,6 @@ class
 
   -- | Extension to flag the availability of object and array relationships in inserts (aka nested inserts).
   type XNestedInserts b :: Type
-
-  -- | Extension to flag the availability of `on_conflict` input field in inserts (aka upsert feature)
-  type XOnConflict b :: Type
 
   -- functions on types
   functionArgScalarType :: FunctionArgType b -> ScalarType b

@@ -13,10 +13,8 @@ type PayloadOptionsTransformsProps = {
   requestSampleInput: string;
   requestTransformedBody: string;
   requestContentType: RequestTransformContentType;
-  webhookUrl: string;
   resetSampleInput: () => void;
   requestBodyOnChange: (requestBody: string) => void;
-  requestBodyErrorOnChange: (requestBodyError: string) => void;
   requestSampleInputOnChange: (requestSampleInput: string) => void;
   requestContentTypeOnChange: (
     requestContentType: RequestTransformContentType
@@ -31,7 +29,6 @@ const PayloadOptionsTransforms: React.FC<PayloadOptionsTransformsProps> = ({
   requestContentType,
   resetSampleInput,
   requestBodyOnChange,
-  requestBodyErrorOnChange,
   requestSampleInputOnChange,
   requestContentTypeOnChange,
 }) => {
@@ -85,7 +82,6 @@ const PayloadOptionsTransforms: React.FC<PayloadOptionsTransformsProps> = ({
           requestBodyError={requestBodyError}
           requestSampleInput={requestSampleInput}
           requestBodyOnChange={requestBodyOnChange}
-          requestBodyErrorOnChange={requestBodyErrorOnChange}
         />
       </div>
 

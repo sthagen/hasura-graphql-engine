@@ -112,7 +112,7 @@ resolveActionExecution ::
   Env.Environment ->
   L.Logger L.Hasura ->
   UserInfo ->
-  AnnActionExecution ('Postgres 'Vanilla) (Const Void) (UnpreparedValue ('Postgres 'Vanilla)) ->
+  AnnActionExecution ('Postgres 'Vanilla) Void (UnpreparedValue ('Postgres 'Vanilla)) ->
   ActionExecContext ->
   Maybe GQLQueryText ->
   ActionExecution
@@ -265,7 +265,7 @@ Resolving async action query happens in two steps;
 -- | See Note: [Resolving async action query]
 resolveAsyncActionQuery ::
   UserInfo ->
-  AnnActionAsyncQuery ('Postgres 'Vanilla) (Const Void) (UnpreparedValue ('Postgres 'Vanilla)) ->
+  AnnActionAsyncQuery ('Postgres 'Vanilla) Void (UnpreparedValue ('Postgres 'Vanilla)) ->
   AsyncActionQueryExecution (UnpreparedValue ('Postgres 'Vanilla))
 resolveAsyncActionQuery userInfo annAction =
   case actionSource of
@@ -326,17 +326,27 @@ resolveAsyncActionQuery userInfo annAction =
 
     -- TODO (from master):- Avoid using ColumnInfo
     mkPGColumnInfo (column', columnType) =
-      ColumnInfo column' (G.unsafeMkName $ getPGColTxt column') 0 (ColumnScalar columnType) True Nothing
+      ColumnInfo
+        { pgiColumn = column',
+          pgiName = G.unsafeMkName $ getPGColTxt column',
+          pgiPosition = 0,
+          pgiType = ColumnScalar columnType,
+          pgiIsNullable = True,
+          pgiDescription = Nothing,
+          pgiMutability = ColumnMutability False False
+        }
 
     tableBoolExpression =
       let actionIdColumnInfo =
             ColumnInfo
-              (unsafePGCol "id")
-              $$(G.litName "id")
-              0
-              (ColumnScalar PGUUID)
-              False
-              Nothing
+              { pgiColumn = unsafePGCol "id",
+                pgiName = $$(G.litName "id"),
+                pgiPosition = 0,
+                pgiType = ColumnScalar PGUUID,
+                pgiIsNullable = False,
+                pgiDescription = Nothing,
+                pgiMutability = ColumnMutability False False
+              }
           actionIdColumnEq = BoolFld $ AVColumn actionIdColumnInfo [AEQ True $ UVLiteral $ S.SELit $ actionIdToText actionId]
           sessionVarsColumnInfo = mkPGColumnInfo sessionVarsColumn
           sessionVarValue =

@@ -13,6 +13,7 @@ module Hasura.Backends.Postgres.Connection
     setHeadersTx,
     setTraceContextInTx,
     sessionInfoJsonExp,
+    checkDbConnection,
     doesSchemaExist,
     doesTableExist,
     enablePgcryptoExtension,
@@ -42,7 +43,6 @@ where
 import Control.Lens (makeLenses)
 import Control.Monad.Morph (hoist)
 import Control.Monad.Trans.Control (MonadBaseControl (..))
-import Control.Monad.Unique
 import Control.Monad.Validate
 import Data.Aeson
 import Data.Aeson.Casing (aesonDrop)
@@ -52,6 +52,7 @@ import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (toLower)
+import Data.Either (isRight)
 import Data.Hashable.Time ()
 import Data.Semigroup (Max (..))
 import Data.Text (unpack)
@@ -174,8 +175,15 @@ withTraceContext ctx tx = setTraceContextInTx ctx >> tx
 
 deriving instance Tracing.MonadTrace m => Tracing.MonadTrace (Q.TxET e m)
 
-instance (MonadIO m) => MonadUnique (Q.TxET e m) where
-  newUnique = liftIO newUnique
+checkDbConnection :: MonadIO m => Q.PGPool -> m Bool
+checkDbConnection pool = do
+  e <- liftIO $ runExceptT $ Q.runTx' pool select1Query
+  pure $ isRight e
+  where
+    select1Query :: Q.TxE QErr Int
+    select1Query =
+      runIdentity . Q.getRow
+        <$> Q.withQE defaultTxErrorHandler [Q.sql| SELECT 1 |] () False
 
 doesSchemaExist :: MonadTx m => SchemaName -> m Bool
 doesSchemaExist schemaName =

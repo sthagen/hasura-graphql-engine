@@ -2,6 +2,8 @@ module Hasura.Server.Types
   ( ExperimentalFeature (..),
     InstanceId (..),
     MaintenanceMode (..),
+    EventingMode (..),
+    ReadOnlyMode (..),
     PGVersion (PGVersion),
     RequestId (..),
     ServerConfigCtx (..),
@@ -72,11 +74,23 @@ instance FromJSON MaintenanceMode where
 instance ToJSON MaintenanceMode where
   toJSON = Bool . (== MaintenanceModeEnabled)
 
+-- | See Note [ReadOnly Mode]
+data ReadOnlyMode = ReadOnlyModeEnabled | ReadOnlyModeDisabled
+  deriving (Show, Eq)
+
+-- | EventingMode decides whether the eventing subsystem should be enabled or disabled.
+-- `EventDisabled` mode disables Event Triggers, Async Actions, Scheduled Events and source catalaog migrations.
+-- This is an internal feature and will not be exposed to users.
+data EventingMode = EventingEnabled | EventingDisabled
+  deriving (Show, Eq)
+
 data ServerConfigCtx = ServerConfigCtx
-  { _sccFunctionPermsCtx :: !FunctionPermissionsCtx,
-    _sccRemoteSchemaPermsCtx :: !RemoteSchemaPermsCtx,
-    _sccSQLGenCtx :: !SQLGenCtx,
-    _sccMaintenanceMode :: !MaintenanceMode,
-    _sccExperimentalFeatures :: !(Set.HashSet ExperimentalFeature)
+  { _sccFunctionPermsCtx :: FunctionPermissionsCtx,
+    _sccRemoteSchemaPermsCtx :: RemoteSchemaPermsCtx,
+    _sccSQLGenCtx :: SQLGenCtx,
+    _sccMaintenanceMode :: MaintenanceMode,
+    _sccExperimentalFeatures :: Set.HashSet ExperimentalFeature,
+    _sccEventingMode :: EventingMode,
+    _sccReadOnlyMode :: ReadOnlyMode
   }
   deriving (Show, Eq)

@@ -32,6 +32,7 @@ import Hasura.Backends.Postgres.SQL.Types qualified as PG
 import Hasura.Backends.Postgres.SQL.Value qualified as PG
 import Hasura.Backends.Postgres.Translate.Select (PostgresAnnotatedFieldJSON)
 import Hasura.Backends.Postgres.Translate.Select qualified as DS
+import Hasura.Backends.Postgres.Types.Update
 import Hasura.Base.Error (QErr)
 import Hasura.EncJSON (EncJSON, encJFromJValue)
 import Hasura.GraphQL.Execute.Backend
@@ -113,7 +114,7 @@ pgDBQueryPlan ::
   UserInfo ->
   SourceName ->
   SourceConfig ('Postgres pgKind) ->
-  QueryDB ('Postgres pgKind) (Const Void) (UnpreparedValue ('Postgres pgKind)) ->
+  QueryDB ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   m (DBStepInfo ('Postgres pgKind))
 pgDBQueryPlan userInfo sourceName sourceConfig qrf = do
   (preparedQuery, PlanningSt _ _ planVals) <-
@@ -133,7 +134,7 @@ pgDBQueryExplain ::
   UserInfo ->
   SourceName ->
   SourceConfig ('Postgres pgKind) ->
-  QueryDB ('Postgres pgKind) (Const Void) (UnpreparedValue ('Postgres pgKind)) ->
+  QueryDB ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   m (AB.AnyBackend DBStepInfo)
 pgDBQueryExplain fieldName userInfo sourceName sourceConfig rootSelection = do
   preparedQuery <- traverse (resolveUnpreparedValue userInfo) rootSelection
@@ -181,7 +182,7 @@ convertDelete ::
     PostgresAnnotatedFieldJSON pgKind
   ) =>
   UserInfo ->
-  IR.AnnDelG ('Postgres pgKind) (Const Void) (UnpreparedValue ('Postgres pgKind)) ->
+  IR.AnnDelG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   Bool ->
   QueryTagsComment ->
   m (Tracing.TraceT (Q.TxET QErr IO) EncJSON)
@@ -196,14 +197,14 @@ convertUpdate ::
     PostgresAnnotatedFieldJSON pgKind
   ) =>
   UserInfo ->
-  IR.AnnUpdG ('Postgres pgKind) (Const Void) (UnpreparedValue ('Postgres pgKind)) ->
+  IR.AnnotatedUpdateG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   Bool ->
   QueryTagsComment ->
   m (Tracing.TraceT (Q.TxET QErr IO) EncJSON)
 convertUpdate userInfo updateOperation stringifyNum queryTags = do
   preparedUpdate <- traverse (prepareWithoutPlan userInfo) updateOperation
-  if null $ IR.uqp1OpExps updateOperation
-    then pure $ pure $ IR.buildEmptyMutResp $ IR.uqp1Output preparedUpdate
+  if null $ updateOperations . IR._auBackend $ updateOperation
+    then pure $ pure $ IR.buildEmptyMutResp $ IR._auOutput preparedUpdate
     else
       pure $
         flip runReaderT queryTags $
@@ -216,7 +217,7 @@ convertInsert ::
     PostgresAnnotatedFieldJSON pgKind
   ) =>
   UserInfo ->
-  IR.AnnInsert ('Postgres pgKind) (Const Void) (UnpreparedValue ('Postgres pgKind)) ->
+  IR.AnnInsert ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   Bool ->
   QueryTagsComment ->
   m (Tracing.TraceT (Q.TxET QErr IO) EncJSON)
@@ -235,7 +236,7 @@ convertFunction ::
   UserInfo ->
   JsonAggSelect ->
   -- | VOLATILE function as 'SelectExp'
-  IR.AnnSimpleSelectG ('Postgres pgKind) (Const Void) (UnpreparedValue ('Postgres pgKind)) ->
+  IR.AnnSimpleSelectG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   -- | Query Tags
   QueryTagsComment ->
   m (Tracing.TraceT (Q.TxET QErr IO) EncJSON)
@@ -264,7 +265,7 @@ pgDBMutationPlan ::
   Bool ->
   SourceName ->
   SourceConfig ('Postgres pgKind) ->
-  MutationDB ('Postgres pgKind) (Const Void) (UnpreparedValue ('Postgres pgKind)) ->
+  MutationDB ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   m (DBStepInfo ('Postgres pgKind))
 pgDBMutationPlan userInfo stringifyNum sourceName sourceConfig mrf = do
   mutationQueryTagsComment <- ask
@@ -290,7 +291,7 @@ pgDBSubscriptionPlan ::
   SourceName ->
   SourceConfig ('Postgres pgKind) ->
   Maybe G.Name ->
-  RootFieldMap (QueryDB ('Postgres pgKind) (Const Void) (UnpreparedValue ('Postgres pgKind))) ->
+  RootFieldMap (QueryDB ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind))) ->
   m (LiveQueryPlan ('Postgres pgKind) (MultiplexedQuery ('Postgres pgKind)))
 pgDBSubscriptionPlan userInfo _sourceName sourceConfig namespace unpreparedAST = do
   (preparedAST, PGL.QueryParametersInfo {..}) <-
@@ -338,7 +339,7 @@ irToRootFieldPlan ::
     DS.PostgresAnnotatedFieldJSON pgKind
   ) =>
   PrepArgMap ->
-  QueryDB ('Postgres pgKind) (Const Void) S.SQLExp ->
+  QueryDB ('Postgres pgKind) Void S.SQLExp ->
   PreparedSql
 irToRootFieldPlan prepped = \case
   QDBMultipleRows s -> mkPreparedSql (DS.selectQuerySQL JASMultipleRows) s
@@ -386,7 +387,7 @@ pgDBRemoteRelationshipPlan ::
   -- | This is a field name from the lhs that *has* to be selected in the
   -- response along with the relationship.
   FieldName ->
-  (FieldName, IR.SourceRelationshipSelection ('Postgres pgKind) (Const Void) UnpreparedValue) ->
+  (FieldName, IR.SourceRelationshipSelection ('Postgres pgKind) Void UnpreparedValue) ->
   m (DBStepInfo ('Postgres pgKind))
 pgDBRemoteRelationshipPlan userInfo sourceName sourceConfig lhs lhsSchema argumentId relationship = do
   -- NOTE: 'QueryTags' currently cannot support remote relationship queries.

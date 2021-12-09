@@ -29,6 +29,7 @@ module Hasura.Backends.MSSQL.FromIr
     jsonFieldName,
     fromInsert,
     fromDelete,
+    toSelectIntoTempTable,
   )
 where
 
@@ -40,13 +41,15 @@ import Data.Proxy
 import Data.Text qualified as T
 import Database.ODBC.SQLServer qualified as ODBC
 import Hasura.Backends.MSSQL.Instances.Types ()
-import Hasura.Backends.MSSQL.Types as TSQL
+import Hasura.Backends.MSSQL.Types.Insert as TSQL (MSSQLExtraInsertData (..))
+import Hasura.Backends.MSSQL.Types.Internal as TSQL
 import Hasura.Prelude
 import Hasura.RQL.IR qualified as IR
 import Hasura.RQL.Types.Column qualified as IR
 import Hasura.RQL.Types.Common qualified as IR
-import Hasura.RQL.Types.Relationship qualified as IR
+import Hasura.RQL.Types.Relationships.Local qualified as IR
 import Hasura.SQL.Backend
+import Language.GraphQL.Draft.Syntax (unName)
 
 --------------------------------------------------------------------------------
 -- Types
@@ -94,7 +97,7 @@ runFromIr fromIr = evalStateT (unFromIr fromIr) mempty
 
 mkSQLSelect ::
   IR.JsonAggSelect ->
-  IR.AnnSelectG 'MSSQL (Const Void) (IR.AnnFieldG 'MSSQL (Const Void)) Expression ->
+  IR.AnnSelectG 'MSSQL Void (IR.AnnFieldG 'MSSQL Void) Expression ->
   FromIr TSQL.Select
 mkSQLSelect jsonAggSelect annSimpleSel =
   case jsonAggSelect of
@@ -109,7 +112,7 @@ mkSQLSelect jsonAggSelect annSimpleSel =
           }
 
 -- | Convert from the IR database query into a select.
-fromRootField :: IR.QueryDB 'MSSQL (Const Void) Expression -> FromIr Select
+fromRootField :: IR.QueryDB 'MSSQL Void Expression -> FromIr Select
 fromRootField =
   \case
     (IR.QDBSingleRow s) -> mkSQLSelect IR.JASSingleObject s
@@ -120,7 +123,7 @@ fromRootField =
 -- Top-level exported functions
 
 -- | Top/root-level 'Select'. All descendent/sub-translations are collected to produce a root TSQL.Select.
-fromSelectRows :: IR.AnnSelectG 'MSSQL (Const Void) (IR.AnnFieldG 'MSSQL (Const Void)) Expression -> FromIr TSQL.Select
+fromSelectRows :: IR.AnnSelectG 'MSSQL Void (IR.AnnFieldG 'MSSQL Void) Expression -> FromIr TSQL.Select
 fromSelectRows annSelectG = do
   selectFrom <-
     case from of
@@ -143,8 +146,7 @@ fromSelectRows annSelectG = do
       (fromAlias selectFrom)
   filterExpression <-
     runReaderT (fromGBoolExp permFilter) (fromAlias selectFrom)
-  let selectProjections =
-        concatMap (toList . fieldSourceProjections) fieldSources
+  let selectProjections = map fieldSourceProjections fieldSources
   pure $
     emptySelect
       { selectOrderBy = argsOrderBy,
@@ -173,29 +175,28 @@ fromSelectRows annSelectG = do
         then StringifyNumbers
         else LeaveNumbersAlone
 
-mkNodesSelect :: Args -> Where -> Expression -> Top -> From -> [(Int, (IR.FieldName, [Projection]))] -> [(Int, [Projection])]
+mkNodesSelect :: Args -> Where -> Expression -> Top -> From -> [(Int, (IR.FieldName, [FieldSource]))] -> [(Int, Projection)]
 mkNodesSelect Args {..} foreignKeyConditions filterExpression permissionBasedTop selectFrom nodes =
   [ ( index,
-      [ ExpressionProjection $
-          Aliased
-            { aliasedThing =
-                SelectExpression $
-                  emptySelect
-                    { selectProjections = projections,
-                      selectTop = permissionBasedTop <> argsTop,
-                      selectFrom = pure selectFrom,
-                      selectJoins = argsJoins,
-                      selectWhere = argsWhere <> Where [filterExpression] <> foreignKeyConditions,
-                      selectFor =
-                        JsonFor ForJson {jsonCardinality = JsonArray, jsonRoot = NoRoot},
-                      selectOrderBy = argsOrderBy,
-                      selectOffset = argsOffset
-                    },
-              aliasedAlias = IR.getFieldNameTxt fieldName
-            }
-      ] -- singleton
+      ExpressionProjection $
+        Aliased
+          { aliasedThing =
+              SelectExpression $
+                emptySelect
+                  { selectProjections = map fieldSourceProjections fieldSources,
+                    selectTop = permissionBasedTop <> argsTop,
+                    selectFrom = pure selectFrom,
+                    selectJoins = argsJoins <> mapMaybe fieldSourceJoin fieldSources,
+                    selectWhere = argsWhere <> Where [filterExpression] <> foreignKeyConditions,
+                    selectFor =
+                      JsonFor ForJson {jsonCardinality = JsonArray, jsonRoot = NoRoot},
+                    selectOrderBy = argsOrderBy,
+                    selectOffset = argsOffset
+                  },
+            aliasedAlias = IR.getFieldNameTxt fieldName
+          }
     )
-    | (index, (fieldName, projections)) <- nodes
+    | (index, (fieldName, fieldSources)) <- nodes
   ]
 
 --
@@ -208,55 +209,54 @@ mkNodesSelect Args {..} foreignKeyConditions filterExpression permissionBasedTop
 -- @StarProjection@ for the inner. But the joins, conditions, top,
 -- offset are on the inner.
 --
-mkAggregateSelect :: Args -> Where -> From -> [(Int, (IR.FieldName, [Projection]))] -> [(Int, [Projection])]
-mkAggregateSelect Args {..} foreignKeyConditions selectFrom aggregates =
+mkAggregateSelect :: Args -> Where -> Expression -> From -> [(Int, (IR.FieldName, [Projection]))] -> [(Int, Projection)]
+mkAggregateSelect Args {..} foreignKeyConditions filterExpression selectFrom aggregates =
   [ ( index,
-      [ ExpressionProjection $
-          Aliased
-            { aliasedThing =
-                JsonQueryExpression $
-                  SelectExpression $
-                    emptySelect
-                      { selectProjections = projections,
-                        selectTop = NoTop,
-                        selectFrom =
-                          pure $
-                            FromSelect
-                              Aliased
-                                { aliasedAlias = aggSubselectName,
-                                  aliasedThing =
-                                    emptySelect
-                                      { selectProjections = pure StarProjection,
-                                        selectTop = argsTop,
-                                        selectFrom = pure selectFrom,
-                                        selectJoins = argsJoins,
-                                        selectWhere = argsWhere <> foreignKeyConditions,
-                                        selectFor = NoFor,
-                                        selectOrderBy = mempty,
-                                        selectOffset = argsOffset
-                                      }
-                                },
-                        selectJoins = mempty,
-                        selectWhere = mempty,
-                        selectFor =
-                          JsonFor
-                            ForJson
-                              { jsonCardinality = JsonSingleton,
-                                jsonRoot = NoRoot
+      ExpressionProjection $
+        Aliased
+          { aliasedThing =
+              JsonQueryExpression $
+                SelectExpression $
+                  emptySelect
+                    { selectProjections = projections,
+                      selectTop = NoTop,
+                      selectFrom =
+                        pure $
+                          FromSelect
+                            Aliased
+                              { aliasedAlias = aggSubselectName,
+                                aliasedThing =
+                                  emptySelect
+                                    { selectProjections = pure StarProjection,
+                                      selectTop = argsTop,
+                                      selectFrom = pure selectFrom,
+                                      selectJoins = argsJoins,
+                                      selectWhere = argsWhere <> Where [filterExpression] <> foreignKeyConditions,
+                                      selectFor = NoFor,
+                                      selectOrderBy = mempty,
+                                      selectOffset = argsOffset
+                                    }
                               },
-                        selectOrderBy = mempty,
-                        selectOffset = Nothing
-                      },
-              aliasedAlias = IR.getFieldNameTxt fieldName
-            }
-      ] -- singleton
+                      selectJoins = mempty,
+                      selectWhere = mempty,
+                      selectFor =
+                        JsonFor
+                          ForJson
+                            { jsonCardinality = JsonSingleton,
+                              jsonRoot = NoRoot
+                            },
+                      selectOrderBy = mempty,
+                      selectOffset = Nothing
+                    },
+            aliasedAlias = IR.getFieldNameTxt fieldName
+          }
     )
     | (index, (fieldName, projections)) <- aggregates
   ]
 
 fromSelectAggregate ::
   Maybe (EntityAlias, HashMap ColumnName ColumnName) ->
-  IR.AnnSelectG 'MSSQL (Const Void) (IR.TableAggregateFieldG 'MSSQL (Const Void)) Expression ->
+  IR.AnnSelectG 'MSSQL Void (IR.TableAggregateFieldG 'MSSQL Void) Expression ->
   FromIr TSQL.Select
 fromSelectAggregate
   mparentRelationship
@@ -285,18 +285,18 @@ fromSelectAggregate
         runReaderT (fromSelectArgsG args) (fromAlias selectFrom)
       -- Although aggregates, exps and nodes could be handled in one list,
       -- we need to separately treat the subselect expressions
-      expss :: [(Int, [Projection])] <- flip runReaderT (fromAlias selectFrom) $ sequence $ mapMaybe fromTableExpFieldG fields
-      nodes :: [(Int, (IR.FieldName, [Projection]))] <-
+      expss :: [(Int, Projection)] <- flip runReaderT (fromAlias selectFrom) $ sequence $ mapMaybe fromTableExpFieldG fields
+      nodes :: [(Int, (IR.FieldName, [FieldSource]))] <-
         flip runReaderT (fromAlias selectFrom) $ sequence $ mapMaybe (fromTableNodesFieldG argsExistingJoins stringifyNumbers) fields
       let aggregates :: [(Int, (IR.FieldName, [Projection]))] = mapMaybe fromTableAggFieldG fields
       pure
         emptySelect
           { selectProjections =
-              concatMap snd $
+              map snd $
                 sortBy (comparing fst) $
                   expss
                     <> mkNodesSelect args' mforeignKeyConditions filterExpression permissionBasedTop selectFrom nodes
-                    <> mkAggregateSelect args' mforeignKeyConditions selectFrom aggregates,
+                    <> mkAggregateSelect args' mforeignKeyConditions filterExpression selectFrom aggregates,
             selectTop = NoTop,
             selectFrom =
               pure $
@@ -605,8 +605,8 @@ data FieldSource
 
 -- | Get FieldSource from a TAFExp type table aggregate field
 fromTableExpFieldG :: -- TODO: Convert function to be similar to Nodes function
-  (Int, (IR.FieldName, IR.TableAggregateFieldG 'MSSQL (Const Void) Expression)) ->
-  Maybe (ReaderT EntityAlias FromIr (Int, [Projection]))
+  (Int, (IR.FieldName, IR.TableAggregateFieldG 'MSSQL Void Expression)) ->
+  Maybe (ReaderT EntityAlias FromIr (Int, Projection))
 fromTableExpFieldG = \case
   (index, (IR.FieldName name, IR.TAFExp text)) ->
     Just $
@@ -622,7 +622,7 @@ fromTableExpFieldG = \case
   _ -> Nothing
 
 fromTableAggFieldG ::
-  (Int, (IR.FieldName, IR.TableAggregateFieldG 'MSSQL (Const Void) Expression)) ->
+  (Int, (IR.FieldName, IR.TableAggregateFieldG 'MSSQL Void Expression)) ->
   Maybe (Int, (IR.FieldName, [Projection]))
 fromTableAggFieldG = \case
   (index, (fieldName, IR.TAFAgg (aggregateFields :: [(IR.FieldName, IR.AggregateField 'MSSQL)]))) ->
@@ -636,13 +636,12 @@ fromTableAggFieldG = \case
 fromTableNodesFieldG ::
   Map TableName EntityAlias ->
   StringifyNumbers ->
-  (Int, (IR.FieldName, IR.TableAggregateFieldG 'MSSQL (Const Void) Expression)) ->
-  Maybe (ReaderT EntityAlias FromIr (Int, (IR.FieldName, [Projection])))
+  (Int, (IR.FieldName, IR.TableAggregateFieldG 'MSSQL Void Expression)) ->
+  Maybe (ReaderT EntityAlias FromIr (Int, (IR.FieldName, [FieldSource])))
 fromTableNodesFieldG argsExistingJoins stringifyNumbers = \case
-  (index, (fieldName, IR.TAFNodes () (annFieldsG :: [(IR.FieldName, IR.AnnFieldG 'MSSQL (Const Void) Expression)]))) -> Just do
+  (index, (fieldName, IR.TAFNodes () (annFieldsG :: [(IR.FieldName, IR.AnnFieldG 'MSSQL Void Expression)]))) -> Just do
     fieldSources' <- fromAnnFieldsG argsExistingJoins stringifyNumbers `traverse` annFieldsG
-    let nodesProjections' :: [Projection] = concatMap fieldSourceProjections fieldSources'
-    pure (index, (fieldName, nodesProjections'))
+    pure (index, (fieldName, fieldSources'))
   _ -> Nothing
 
 fromAggregateField :: Text -> IR.AggregateField 'MSSQL -> Projection
@@ -677,7 +676,7 @@ fromAggregateField alias aggregateField =
 fromAnnFieldsG ::
   Map TableName EntityAlias ->
   StringifyNumbers ->
-  (IR.FieldName, IR.AnnFieldG 'MSSQL (Const Void) Expression) ->
+  (IR.FieldName, IR.AnnFieldG 'MSSQL Void Expression) ->
   ReaderT EntityAlias FromIr FieldSource
 fromAnnFieldsG existingJoins stringifyNumbers (IR.FieldName name, field) =
   case field of
@@ -752,27 +751,25 @@ fromPGCol pgCol = columnNameToFieldName pgCol <$> ask
 --  pure (columnNameToFieldName pgCol entityAlias -- FieldName {fieldName = PG.getPGColTxt pgCol, fieldNameEntity = entityAliasText}
 --       )
 
-fieldSourceProjections :: FieldSource -> [Projection]
+fieldSourceProjections :: FieldSource -> Projection
 fieldSourceProjections =
   \case
     ExpressionFieldSource aliasedExpression ->
-      pure (ExpressionProjection aliasedExpression)
+      ExpressionProjection aliasedExpression
     JoinFieldSource aliasedJoin ->
-      pure
-        ( ExpressionProjection
-            ( aliasedJoin
-                { aliasedThing =
-                    -- Basically a cast, to ensure that SQL Server won't
-                    -- double-encode the JSON but will "pass it through"
-                    -- untouched.
-                    JsonQueryExpression
-                      ( ColumnExpression
-                          ( joinAliasToField
-                              (joinJoinAlias (aliasedThing aliasedJoin))
-                          )
+      ExpressionProjection
+        ( aliasedJoin
+            { aliasedThing =
+                -- Basically a cast, to ensure that SQL Server won't
+                -- double-encode the JSON but will "pass it through"
+                -- untouched.
+                JsonQueryExpression
+                  ( ColumnExpression
+                      ( joinAliasToField
+                          (joinJoinAlias (aliasedThing aliasedJoin))
                       )
-                }
-            )
+                  )
+            }
         )
 
 joinAliasToField :: JoinAlias -> FieldName
@@ -793,7 +790,7 @@ fieldSourceJoin =
 
 fromObjectRelationSelectG ::
   Map TableName {-PG.QualifiedTable-} EntityAlias ->
-  IR.ObjectRelationSelectG 'MSSQL (Const Void) Expression ->
+  IR.ObjectRelationSelectG 'MSSQL Void Expression ->
   ReaderT EntityAlias FromIr Join
 fromObjectRelationSelectG existingJoins annRelationSelectG = do
   eitherAliasOrFrom <- lift (lookupTableFrom existingJoins tableFrom)
@@ -802,8 +799,7 @@ fromObjectRelationSelectG existingJoins annRelationSelectG = do
     local
       (const entityAlias)
       (traverse (fromAnnFieldsG mempty LeaveNumbersAlone) fields)
-  let selectProjections =
-        concatMap (toList . fieldSourceProjections) fieldSources
+  let selectProjections = map fieldSourceProjections fieldSources
   joinJoinAlias <-
     do
       fieldName <- lift (fromRelName aarRelationshipName)
@@ -850,14 +846,14 @@ fromObjectRelationSelectG existingJoins annRelationSelectG = do
           }
   where
     IR.AnnObjectSelectG
-      { _aosFields = fields :: IR.AnnFieldsG 'MSSQL (Const Void) Expression,
+      { _aosFields = fields :: IR.AnnFieldsG 'MSSQL Void Expression,
         _aosTableFrom = tableFrom :: TableName {-PG.QualifiedTable-},
         _aosTableFilter = tableFilter :: IR.AnnBoolExp 'MSSQL Expression
       } = annObjectSelectG
     IR.AnnRelationSelectG
       { aarRelationshipName,
         aarColumnMapping = mapping :: HashMap ColumnName ColumnName, -- PG.PGCol PG.PGCol
-        aarAnnSelect = annObjectSelectG :: IR.AnnObjectSelectG 'MSSQL (Const Void) Expression
+        aarAnnSelect = annObjectSelectG :: IR.AnnObjectSelectG 'MSSQL Void Expression
       } = annRelationSelectG
 
 lookupTableFrom ::
@@ -869,7 +865,7 @@ lookupTableFrom existingJoins tableFrom = do
     Just entityAlias -> pure (Left entityAlias)
     Nothing -> fmap Right (fromQualifiedTable tableFrom)
 
-fromArraySelectG :: IR.ArraySelectG 'MSSQL (Const Void) Expression -> ReaderT EntityAlias FromIr Join
+fromArraySelectG :: IR.ArraySelectG 'MSSQL Void Expression -> ReaderT EntityAlias FromIr Join
 fromArraySelectG =
   \case
     IR.ASSimple arrayRelationSelectG ->
@@ -878,7 +874,7 @@ fromArraySelectG =
       fromArrayAggregateSelectG arrayAggregateSelectG
 
 fromArrayAggregateSelectG ::
-  IR.AnnRelationSelectG 'MSSQL (IR.AnnAggregateSelectG 'MSSQL (Const Void) Expression) ->
+  IR.AnnRelationSelectG 'MSSQL (IR.AnnAggregateSelectG 'MSSQL Void Expression) ->
   ReaderT EntityAlias FromIr Join
 fromArrayAggregateSelectG annRelationSelectG = do
   fieldName <- lift (fromRelName aarRelationshipName)
@@ -904,7 +900,7 @@ fromArrayAggregateSelectG annRelationSelectG = do
         aarAnnSelect = annSelectG
       } = annRelationSelectG
 
-fromArrayRelationSelectG :: IR.ArrayRelationSelectG 'MSSQL (Const Void) Expression -> ReaderT EntityAlias FromIr Join
+fromArrayRelationSelectG :: IR.ArrayRelationSelectG 'MSSQL Void Expression -> ReaderT EntityAlias FromIr Join
 fromArrayRelationSelectG annRelationSelectG = do
   fieldName <- lift (fromRelName aarRelationshipName)
   sel <- lift (fromSelectRows annSelectG)
@@ -1069,14 +1065,14 @@ fromGBoolExp =
 --------------------------------------------------------------------------------
 -- Insert
 
-fromInsert :: IR.AnnInsert 'MSSQL (Const Void) Expression -> Insert
+fromInsert :: IR.AnnInsert 'MSSQL Void Expression -> Insert
 fromInsert IR.AnnInsert {..} =
   let IR.AnnIns {..} = _aiData
       insertRows = normalizeInsertRows _aiData $ map (IR.getInsertColumns) _aiInsObj
       insertColumnNames = maybe [] (map fst) $ listToMaybe insertRows
       insertValues = map (Values . map snd) insertRows
-      primaryKeyColumns = map OutputColumn $ _mssqlPrimaryKeyColumns _aiExtraInsertData
-   in Insert _aiTableName insertColumnNames (InsertOutput primaryKeyColumns) insertValues
+      primaryKeyColumns = map OutputColumn $ _mssqlPrimaryKeyColumns _aiBackendInsert
+   in Insert _aiTableName insertColumnNames (Output Inserted primaryKeyColumns) insertValues
 
 -- | Normalize a row by adding missing columns with 'DEFAULT' value and sort by column name to make sure
 -- all rows are consistent in column values and order.
@@ -1101,7 +1097,7 @@ fromInsert IR.AnnInsert {..} =
 normalizeInsertRows :: IR.AnnIns 'MSSQL [] Expression -> [[(Column 'MSSQL, Expression)]] -> [[(Column 'MSSQL, Expression)]]
 normalizeInsertRows IR.AnnIns {..} insertRows =
   let isIdentityColumn column =
-        IR.pgiColumn column `elem` _mssqlIdentityColumns _aiExtraInsertData
+        IR.pgiColumn column `elem` _mssqlIdentityColumns _aiBackendInsert
       allColumnsWithDefaultValue =
         -- DEFAULT or NULL are not allowed as explicit identity values.
         map ((,DefaultExpression) . IR.pgiColumn) $ filter (not . isIdentityColumn) _aiTableCols
@@ -1113,13 +1109,15 @@ normalizeInsertRows IR.AnnIns {..} insertRows =
 --------------------------------------------------------------------------------
 -- Delete
 
+-- | Convert IR AST representing delete into MSSQL AST representing a delete statement
 fromDelete :: IR.AnnDel 'MSSQL -> FromIr Delete
-fromDelete (IR.AnnDel tableName (permFilter, whereClause) _ _) = do
+fromDelete (IR.AnnDel tableName (permFilter, whereClause) _ allColumns) = do
   tableAlias <- fromTableName tableName
   runReaderT
     ( do
         permissionsFilter <- fromGBoolExp permFilter
         whereExpression <- fromGBoolExp whereClause
+        let columnNames = map (ColumnName . unName . IR.pgiName) allColumns
         pure
           Delete
             { deleteTable =
@@ -1127,10 +1125,37 @@ fromDelete (IR.AnnDel tableName (permFilter, whereClause) _ _) = do
                   { aliasedAlias = entityAliasText tableAlias,
                     aliasedThing = tableName
                   },
+              deleteOutput = Output Deleted (map OutputColumn columnNames),
+              deleteTempTable = TempTable tempTableNameDeleted columnNames,
               deleteWhere = Where [permissionsFilter, whereExpression]
             }
     )
     tableAlias
+
+-- | Create a temporary table with the same schema as the given table.
+toSelectIntoTempTable :: TempTableName -> TableName -> [IR.ColumnInfo 'MSSQL] -> SelectIntoTempTable
+toSelectIntoTempTable tempTableName fromTable allColumns = do
+  SelectIntoTempTable
+    { sittTempTableName = tempTableName,
+      sittColumns = map columnInfoToUnifiedColumn allColumns,
+      sittFromTableName = fromTable
+    }
+
+-- | Extracts the type and column name of a ColumnInfo
+columnInfoToUnifiedColumn :: IR.ColumnInfo 'MSSQL -> UnifiedColumn
+columnInfoToUnifiedColumn colInfo =
+  case IR.pgiType colInfo of
+    IR.ColumnScalar t ->
+      UnifiedColumn
+        { name = unName $ IR.pgiName colInfo,
+          type' = t
+        }
+    -- Enum values are represented as text value so they will always be of type text
+    IR.ColumnEnumReference {} ->
+      UnifiedColumn
+        { name = unName $ IR.pgiName colInfo,
+          type' = TextType
+        }
 
 --------------------------------------------------------------------------------
 -- Misc combinators
@@ -1187,6 +1212,7 @@ fromAlias (FromQualifiedTable Aliased {aliasedAlias}) = EntityAlias aliasedAlias
 fromAlias (FromOpenJson Aliased {aliasedAlias}) = EntityAlias aliasedAlias
 fromAlias (FromSelect Aliased {aliasedAlias}) = EntityAlias aliasedAlias
 fromAlias (FromIdentifier identifier) = EntityAlias identifier
+fromAlias (FromTempTable Aliased {aliasedAlias}) = EntityAlias aliasedAlias
 
 columnNameToFieldName :: ColumnName -> EntityAlias -> FieldName
 columnNameToFieldName (ColumnName fieldName) EntityAlias {entityAliasText = fieldNameEntity} =

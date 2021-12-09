@@ -9,7 +9,6 @@ module Hasura.Server.API.Metadata
 where
 
 import Control.Monad.Trans.Control (MonadBaseControl)
-import Control.Monad.Unique
 import Data.Aeson
 import Data.Aeson.Casing
 import Data.Aeson.Types qualified as A
@@ -49,7 +48,7 @@ import Hasura.SQL.AnyBackend
 import Hasura.SQL.Tag
 import Hasura.Server.API.Backend
 import Hasura.Server.API.Instances ()
-import Hasura.Server.Types (InstanceId (..), MaintenanceMode (..))
+import Hasura.Server.Types (InstanceId (..), MaintenanceMode (..), ReadOnlyMode (..))
 import Hasura.Server.Utils (APIVersion (..))
 import Hasura.Session
 import Hasura.Tracing qualified as Tracing
@@ -83,9 +82,9 @@ data RQLMetadataV1
   | RMSetRelationshipComment !(AnyBackend SetRelComment)
   | RMRenameRelationship !(AnyBackend RenameRel)
   | -- Tables remote relationships
-    RMCreateRemoteRelationship !(AnyBackend RemoteRelationship)
-  | RMUpdateRemoteRelationship !(AnyBackend RemoteRelationship)
-  | RMDeleteRemoteRelationship !(DeleteRemoteRelationship ('Postgres 'Vanilla))
+    RMCreateRemoteRelationship !(AnyBackend CreateFromSourceRelationship)
+  | RMUpdateRemoteRelationship !(AnyBackend CreateFromSourceRelationship)
+  | RMDeleteRemoteRelationship !(DeleteFromSourceRelationship ('Postgres 'Vanilla))
   | -- Functions
     RMTrackFunction !(AnyBackend TrackFunctionV2)
   | RMUntrackFunction !(AnyBackend UnTrackFunction)
@@ -307,8 +306,8 @@ runMetadataQuery env logger instanceId userInfo httpManager serverConfigCtx sche
       & liftEitherM
   -- set modified metadata in storage
   if queryModifiesMetadata _rqlMetadata
-    then case _sccMaintenanceMode serverConfigCtx of
-      MaintenanceModeDisabled -> do
+    then case (_sccMaintenanceMode serverConfigCtx, _sccReadOnlyMode serverConfigCtx) of
+      (MaintenanceModeDisabled, ReadOnlyModeDisabled) -> do
         -- set modified metadata in storage
         newResourceVersion <- setMetadata (fromMaybe currentResourceVersion _rqlMetadataResourceVersion) modMetadata
         -- notify schema cache sync
@@ -321,7 +320,11 @@ runMetadataQuery env logger instanceId userInfo httpManager serverConfigCtx sche
             & liftEitherM
 
         pure (r, modSchemaCache')
-      MaintenanceModeEnabled ->
+      (MaintenanceModeEnabled, ReadOnlyModeDisabled) ->
+        throw500 "metadata cannot be modified in maintenance mode"
+      (MaintenanceModeDisabled, ReadOnlyModeEnabled) ->
+        throw400 NotSupported "metadata cannot be modified in read-only mode"
+      (MaintenanceModeEnabled, ReadOnlyModeEnabled) ->
         throw500 "metadata cannot be modified in maintenance mode"
     else pure (r, modSchemaCache)
 
@@ -355,7 +358,6 @@ runMetadataQueryM ::
     CacheRWM m,
     Tracing.MonadTrace m,
     UserInfoM m,
-    MonadUnique m,
     HTTP.HasHttpManagerM m,
     MetadataM m,
     MonadMetadataStorageQueryAPI m,
@@ -379,7 +381,6 @@ runMetadataQueryV1M ::
     CacheRWM m,
     Tracing.MonadTrace m,
     UserInfoM m,
-    MonadUnique m,
     HTTP.HasHttpManagerM m,
     MetadataM m,
     MonadMetadataStorageQueryAPI m,

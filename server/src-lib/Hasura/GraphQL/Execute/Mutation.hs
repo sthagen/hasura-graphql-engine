@@ -46,7 +46,7 @@ convertMutationAction ::
   HTTP.Manager ->
   HTTP.RequestHeaders ->
   Maybe GH.GQLQueryText ->
-  ActionMutation ('Postgres 'Vanilla) (Const Void) (UnpreparedValue ('Postgres 'Vanilla)) ->
+  ActionMutation ('Postgres 'Vanilla) Void (UnpreparedValue ('Postgres 'Vanilla)) ->
   m ActionExecutionPlan
 convertMutationAction env logger userInfo manager reqHeaders gqlQueryText = \case
   AMSync s -> pure $ AEPSync $ resolveActionExecution env logger userInfo s actionExecContext gqlQueryText
@@ -128,7 +128,7 @@ convertMutationSelectionSet
               pure $ ExecStepDB [] (AB.mkAnyBackend dbStepInfo) remoteJoins
         RFRemote remoteField -> do
           RemoteFieldG remoteSchemaInfo resultCustomizer resolvedRemoteField <- runVariableCache $ resolveRemoteField userInfo remoteField
-          pure $ buildExecStepRemote remoteSchemaInfo resultCustomizer G.OperationTypeMutation $ getRemoteFieldSelectionSet resolvedRemoteField
+          pure $ buildExecStepRemote remoteSchemaInfo resultCustomizer G.OperationTypeMutation [G.SelectionField resolvedRemoteField]
         RFAction action -> do
           let (noRelsDBAST, remoteJoins) = RJ.getRemoteJoinsActionMutation action
           (actionName, _fch) <- pure $ case noRelsDBAST of

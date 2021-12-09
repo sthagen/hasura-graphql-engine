@@ -15,6 +15,8 @@ import Hasura.Backends.Postgres.SQL.Types qualified as PG
 import Hasura.Backends.Postgres.SQL.Value qualified as PG
 import Hasura.Backends.Postgres.Types.BoolExp qualified as PG
 import Hasura.Backends.Postgres.Types.CitusExtraTableMetadata qualified as Citus
+import Hasura.Backends.Postgres.Types.Insert qualified as PG (BackendInsert)
+import Hasura.Backends.Postgres.Types.Update qualified as PG
 import Hasura.Base.Error
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
@@ -28,6 +30,9 @@ import Hasura.SQL.Tag
 -- Some types of 'Backend' differ across different Postgres "kinds". This
 -- class alllows each "kind" to specify its own specific implementation. All
 -- common code is directly part of the `Backend` instance.
+--
+-- Note: Users shouldn't ever put this as a constraint. Use `Backend ('Postgres
+-- pgKind)` instead.
 class
   ( Representable (PgExtraTableMetadata pgKind),
     J.ToJSON (PgExtraTableMetadata pgKind),
@@ -71,14 +76,15 @@ instance
   type SQLExpression ('Postgres pgKind) = PG.SQLExp
   type SQLOperator ('Postgres pgKind) = PG.SQLOp
 
+  type BackendUpdate ('Postgres pgKind) = PG.BackendUpdate
+
   type ExtraTableMetadata ('Postgres pgKind) = PgExtraTableMetadata pgKind
-  type ExtraInsertData ('Postgres pgKind) = ()
+  type BackendInsert ('Postgres pgKind) = PG.BackendInsert pgKind
 
   type XComputedField ('Postgres pgKind) = XEnable
   type XRelay ('Postgres pgKind) = XEnable
   type XNodesAgg ('Postgres pgKind) = XEnable
   type XNestedInserts ('Postgres pgKind) = XEnable
-  type XOnConflict ('Postgres pgKind) = XEnable
 
   functionArgScalarType = PG.mkFunctionArgScalarType
   isComparableType = PG.isComparableType

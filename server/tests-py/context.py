@@ -690,10 +690,17 @@ class HGECtx:
         self.meta.reflect(bind=self.engine)
 
     def anyq(self, u, q, h, b = None, v = None):
+
         resp = None
         if v == 'GET':
           resp = self.http.get(
               self.hge_url + u,
+              headers=h
+          )
+        elif v == 'POSTJSON' and b:
+          resp = self.http.post(
+              self.hge_url + u,
+              json=b,
               headers=h
           )
         elif v == 'POST' and b:
@@ -702,7 +709,7 @@ class HGECtx:
               self.hge_url + u,
               data=b,
               headers=h
-           )
+          )
         elif v == 'PATCH' and b:
           resp = self.http.patch(
               self.hge_url + u,
@@ -785,6 +792,15 @@ class HGECtx:
             # NOTE: preserve ordering with ruamel
             yml = yaml.YAML()
             return self.v1metadataq(yml.load(f))
+
+    def v1graphqlq(self, q, headers = {}):
+        return self.execute_query(q, "/v1/graphql", headers)
+
+    def v1graphql_f(self, fn):
+        with open(fn) as f:
+            # NOTE: preserve ordering with ruamel
+            yml = yaml.YAML()
+            return self.v1graphqlq(yml.load(f))
 
     def teardown(self):
         self.http.close()
