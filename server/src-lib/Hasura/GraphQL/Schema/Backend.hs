@@ -44,7 +44,6 @@ import Hasura.RQL.IR
 import Hasura.RQL.IR.Insert qualified as IR
 import Hasura.RQL.IR.Select qualified as IR
 import Hasura.RQL.Types hiding (EnumValueInfo)
-import Language.GraphQL.Draft.Syntax (Nullability)
 import Language.GraphQL.Draft.Syntax qualified as G
 
 -- TODO: Might it make sense to add those constraints to MonadSchema directly?
@@ -56,16 +55,8 @@ import Language.GraphQL.Draft.Syntax qualified as G
 -- the functions used to implement a class instance are defined in multiple
 -- modules.
 type MonadBuildSchema b r m n =
-  ( Backend b,
-    BackendSchema b,
-    MonadError QErr m,
-    MonadSchema n m,
-    MonadTableInfo r m,
-    MonadRole r m,
-    Has QueryContext r,
-    Has MkTypename r,
-    Has MkRootFieldName r,
-    Has CustomizeRemoteFieldName r
+  ( BackendSchema b,
+    MonadBuildSchemaBase r m n
   )
 
 -- | This type class is responsible for generating the schema of a backend.
@@ -204,7 +195,7 @@ class Backend b => BackendSchema (b :: BackendType) where
   columnParser ::
     (MonadSchema n m, MonadError QErr m, MonadReader r m, Has MkTypename r) =>
     ColumnType b ->
-    Nullability ->
+    G.Nullability -> -- TODO maybe use Hasura.GraphQL.Parser.Schema.Nullability instead?
     m (Parser 'Both n (ValueWithOrigin (ColumnValue b)))
 
   -- | The "path" argument for json column fields
@@ -220,7 +211,12 @@ class Backend b => BackendSchema (b :: BackendType) where
     ColumnType b ->
     m (Parser 'Input n [ComparisonExp b])
 
-  mkCountType :: Maybe Bool -> Maybe [Column b] -> CountType b
+  -- | The input fields parser, for "count" aggregate field, yielding a function
+  -- which generates @'CountType b' from optional "distinct" field value
+  countTypeInput ::
+    MonadParse n =>
+    Maybe (Parser 'Both n (Column b)) ->
+    InputFieldsParser n (CountDistinct -> CountType b)
 
   aggregateOrderByCountType :: ScalarType b
 

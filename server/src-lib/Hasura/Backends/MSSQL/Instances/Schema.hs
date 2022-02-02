@@ -1,6 +1,9 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
+-- | MSSQL Instances Schema
+--
+-- Defines a 'Hasura.GraphQL.Schema.Backend.BackendSchema' type class instance for MSSQL.
 module Hasura.Backends.MSSQL.Instances.Schema () where
 
 import Data.Has
@@ -9,7 +12,8 @@ import Data.List.NonEmpty qualified as NE
 import Data.Text.Encoding (encodeUtf8)
 import Data.Text.Extended
 import Database.ODBC.SQLServer qualified as ODBC
-import Hasura.Backends.MSSQL.Types.Insert (BackendInsert (..), ExtraColumnInfo (..))
+import Hasura.Backends.MSSQL.Schema.IfMatched
+import Hasura.Backends.MSSQL.Types.Insert (BackendInsert (..))
 import Hasura.Backends.MSSQL.Types.Internal qualified as MSSQL
 import Hasura.Backends.MSSQL.Types.Update (BackendUpdate (..), UpdateOperator (..))
 import Hasura.Base.Error
@@ -30,13 +34,15 @@ import Hasura.RQL.Types hiding (BackendInsert)
 import Language.GraphQL.Draft.Syntax qualified as G
 
 ----------------------------------------------------------------
--- BackendSchema instance
+
+-- * BackendSchema instance
 
 instance BackendSchema 'MSSQL where
   -- top level parsers
   buildTableQueryFields = GSB.buildTableQueryFields
   buildTableRelayQueryFields = msBuildTableRelayQueryFields
-  buildTableInsertMutationFields = msBuildTableInsertMutationFields
+  buildTableInsertMutationFields =
+    GSB.buildTableInsertMutationFields backendInsertParser
   buildTableDeleteMutationFields = GSB.buildTableDeleteMutationFields
   buildTableUpdateMutationFields = msBuildTableUpdateMutationFields
 
@@ -57,7 +63,7 @@ instance BackendSchema 'MSSQL where
   jsonPathArg = msJsonPathArg
   orderByOperators = msOrderByOperators
   comparisonExps = msComparisonExps
-  mkCountType = msMkCountType
+  countTypeInput = msCountTypeInput
   aggregateOrderByCountType = MSSQL.IntegerType
   computedField = msComputedField
   node = msNode
@@ -65,12 +71,9 @@ instance BackendSchema 'MSSQL where
   -- SQL literals
   columnDefaultValue = msColumnDefaultValue
 
--- | MSSQL only supports inserts into tables that have a primary key defined.
-supportsInserts :: TableInfo 'MSSQL -> Bool
-supportsInserts = isJust . _tciPrimaryKey . _tiCoreInfo
-
 ----------------------------------------------------------------
--- Top level parsers
+
+-- * Top level parsers
 
 msBuildTableRelayQueryFields ::
   MonadBuildSchema 'MSSQL r m n =>
@@ -84,37 +87,6 @@ msBuildTableRelayQueryFields ::
 msBuildTableRelayQueryFields _sourceName _tableName _tableInfo _gqlName _pkeyColumns _selPerms =
   pure []
 
-msBuildTableInsertMutationFields ::
-  forall r m n.
-  MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
-  TableName 'MSSQL ->
-  TableInfo 'MSSQL ->
-  G.Name ->
-  InsPermInfo 'MSSQL ->
-  Maybe (SelPermInfo 'MSSQL) ->
-  Maybe (UpdPermInfo 'MSSQL) ->
-  m [FieldParser n (AnnInsert 'MSSQL (RemoteRelationshipField UnpreparedValue) (UnpreparedValue 'MSSQL))]
-msBuildTableInsertMutationFields
-  sourceName
-  tableName
-  tableInfo
-  gqlName
-  insPerms
-  mSelPerms
-  mUpdPerms
-    | supportsInserts tableInfo =
-      GSB.buildTableInsertMutationFields
-        backendInsertParser
-        sourceName
-        tableName
-        tableInfo
-        gqlName
-        insPerms
-        mSelPerms
-        mUpdPerms
-    | otherwise = return []
-
 backendInsertParser ::
   forall m r n.
   MonadBuildSchema 'MSSQL r m n =>
@@ -123,20 +95,12 @@ backendInsertParser ::
   Maybe (SelPermInfo 'MSSQL) ->
   Maybe (UpdPermInfo 'MSSQL) ->
   m (InputFieldsParser n (BackendInsert (UnpreparedValue 'MSSQL)))
-backendInsertParser _sourceName tableInfo _selectPerms _updatePerms = do
-  -- Uncomment when we implement execution of upserts.
-  -- import Hasura.Backends.MSSQL.Schema.IfMatched
-  -- ifMatched <- ifMatchedFieldParser sourceName tableInfo selectPerms updatePerms
+backendInsertParser sourceName tableInfo selectPerms updatePerms = do
+  ifMatched <- ifMatchedFieldParser sourceName tableInfo selectPerms updatePerms
+  let _biIdentityColumns = _tciExtraTableMetadata $ _tiCoreInfo tableInfo
   pure $ do
-    -- _biIfMatched <- ifMatched
-    let _biIfMatched = Nothing
+    _biIfMatched <- ifMatched
     pure $ BackendInsert {..}
-  where
-    _biExtraColumnInfo :: ExtraColumnInfo
-    _biExtraColumnInfo =
-      let pkeyColumns = fmap (map pgiColumn . toList . _pkColumns) . _tciPrimaryKey . _tiCoreInfo $ tableInfo
-          identityColumns = _tciExtraTableMetadata $ _tiCoreInfo tableInfo
-       in ExtraColumnInfo (fromMaybe [] pkeyColumns) identityColumns
 
 msBuildTableUpdateMutationFields ::
   MonadBuildSchema 'MSSQL r m n =>
@@ -207,7 +171,8 @@ msBuildFunctionMutationFields _ _ _ _ _ =
   pure []
 
 ----------------------------------------------------------------
--- Table arguments
+
+-- * Table arguments
 
 msTableArgs ::
   forall r m n.
@@ -254,7 +219,8 @@ msMkRelationshipParser _sourceName _relationshipInfo = do
   return Nothing
 
 ----------------------------------------------------------------
--- Individual components
+
+-- * Individual components
 
 msColumnParser ::
   (MonadSchema n m, MonadError QErr m, MonadReader r m, Has MkTypename r) =>
@@ -290,7 +256,7 @@ msColumnParser columnType (G.Nullability isNullable) =
         MSSQL.BitType -> pure $ ODBC.BoolValue <$> P.boolean
         _ -> do
           name <- MSSQL.mkMSSQLScalarTypeName scalarType
-          let schemaType = P.NonNullable $ P.TNamed $ P.Definition name Nothing P.TIScalar
+          let schemaType = P.TNamed P.NonNullable $ P.Definition name Nothing P.TIScalar
           pure $
             Parser
               { pType = schemaType,
@@ -444,16 +410,20 @@ msComparisonExps = P.memoize 'comparisonExps \columnType -> do
     mkListLiteral =
       P.UVLiteral . MSSQL.ListExpression . fmap (MSSQL.ValueExpression . cvValue)
 
-msMkCountType ::
-  -- | distinct values
-  Maybe Bool ->
-  Maybe [Column 'MSSQL] ->
-  CountType 'MSSQL
-msMkCountType _ Nothing = MSSQL.StarCountable
-msMkCountType (Just True) (Just cols) =
-  maybe MSSQL.StarCountable MSSQL.DistinctCountable $ nonEmpty cols
-msMkCountType _ (Just cols) =
-  maybe MSSQL.StarCountable MSSQL.NonNullFieldCountable $ nonEmpty cols
+msCountTypeInput ::
+  MonadParse n =>
+  Maybe (Parser 'Both n (Column 'MSSQL)) ->
+  InputFieldsParser n (IR.CountDistinct -> CountType 'MSSQL)
+msCountTypeInput = \case
+  Just columnEnum -> do
+    column <- P.fieldOptional $$(G.litName "column") Nothing columnEnum
+    pure $ flip mkCountType column
+  Nothing -> pure $ flip mkCountType Nothing
+  where
+    mkCountType :: IR.CountDistinct -> Maybe (Column 'MSSQL) -> CountType 'MSSQL
+    mkCountType _ Nothing = MSSQL.StarCountable
+    mkCountType IR.SelectCountDistinct (Just col) = MSSQL.DistinctCountable col
+    mkCountType IR.SelectCountNonDistinct (Just col) = MSSQL.NonNullFieldCountable col
 
 -- | Computed field parser.
 -- Currently unsupported: returns Nothing for now.
@@ -470,7 +440,7 @@ msComputedField _sourceName _fieldInfo _table _selectPemissions = pure Nothing
 -- Currently unsupported: returns Nothing for now.
 msRemoteRelationshipField ::
   MonadBuildSchema 'MSSQL r m n =>
-  RemoteFieldInfo 'MSSQL ->
+  RemoteFieldInfo (DBJoinField 'MSSQL) ->
   m (Maybe [FieldParser n (AnnotatedField 'MSSQL)])
 msRemoteRelationshipField _remoteFieldInfo = pure Nothing
 
@@ -496,7 +466,8 @@ msNode ::
 msNode = throw500 "MSSQL does not support relay; `node` should never be exposed in the schema."
 
 ----------------------------------------------------------------
--- SQL literals
+
+-- * SQL literals
 
 -- FIXME: this is nonsensical for MSSQL, we'll need to adjust the corresponding mutation
 -- and its representation.

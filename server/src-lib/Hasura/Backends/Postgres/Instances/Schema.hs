@@ -1,3 +1,4 @@
+{-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -149,7 +150,7 @@ instance
   jsonPathArg = jsonPathArg
   orderByOperators = orderByOperators
   comparisonExps = comparisonExps
-  mkCountType = mkCountType
+  countTypeInput = countTypeInput
   aggregateOrderByCountType = PG.PGInteger
   computedField = computedFieldPG
   node = pgkNode
@@ -233,7 +234,7 @@ columnParser columnType (G.Nullability isNullable) =
         --
         -- TODO: introduce new dedicated scalars for Postgres column types.
         name <- mkScalarTypeName scalarType
-        let schemaType = P.NonNullable $ P.TNamed $ P.Definition name Nothing P.TIScalar
+        let schemaType = P.TNamed P.NonNullable $ P.Definition name Nothing P.TIScalar
         pure $
           Parser
             { pType = schemaType,
@@ -642,10 +643,20 @@ intersectsGeomNbandInput = do
         <$> (mkParameter <$> P.field $$(G.litName "geommin") Nothing geometryParser)
         <*> (fmap mkParameter <$> P.fieldOptional $$(G.litName "nband") Nothing integerParser)
 
-mkCountType :: Maybe Bool -> Maybe [Column ('Postgres pgKind)] -> CountType ('Postgres pgKind)
-mkCountType _ Nothing = PG.CTStar
-mkCountType (Just True) (Just cols) = PG.CTDistinct cols
-mkCountType _ (Just cols) = PG.CTSimple cols
+countTypeInput ::
+  MonadParse n =>
+  Maybe (Parser 'Both n (Column ('Postgres pgKind))) ->
+  InputFieldsParser n (IR.CountDistinct -> CountType ('Postgres pgKind))
+countTypeInput = \case
+  Just columnEnum -> do
+    columns <- P.fieldOptional $$(G.litName "columns") Nothing (P.list columnEnum)
+    pure $ flip mkCountType columns
+  Nothing -> pure $ flip mkCountType Nothing
+  where
+    mkCountType :: IR.CountDistinct -> Maybe [Column ('Postgres pgKind)] -> CountType ('Postgres pgKind)
+    mkCountType _ Nothing = PG.CTStar
+    mkCountType IR.SelectCountDistinct (Just cols) = PG.CTDistinct cols
+    mkCountType IR.SelectCountNonDistinct (Just cols) = PG.CTSimple cols
 
 -- | Update operator that prepends a value to a column containing jsonb arrays.
 --
@@ -662,14 +673,14 @@ prependOp ::
   SU.UpdateOperator ('Postgres pgKind) m n (UnpreparedValue ('Postgres pgKind))
 prependOp = SU.UpdateOperator {..}
   where
-    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . pgiType
+    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . ciType
 
     updateOperatorParser tableGQLName tableName columns = do
       let typedParser columnInfo =
             fmap P.mkParameter
               <$> BS.columnParser
-                (pgiType columnInfo)
-                (G.Nullability $ pgiIsNullable columnInfo)
+                (ciType columnInfo)
+                (G.Nullability $ ciIsNullable columnInfo)
 
           desc = "prepend existing jsonb value of filtered columns with new jsonb value"
 
@@ -696,14 +707,14 @@ appendOp ::
   SU.UpdateOperator ('Postgres pgKind) m n (UnpreparedValue ('Postgres pgKind))
 appendOp = SU.UpdateOperator {..}
   where
-    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . pgiType
+    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . ciType
 
     updateOperatorParser tableGQLName tableName columns = do
       let typedParser columnInfo =
             fmap P.mkParameter
               <$> BS.columnParser
-                (pgiType columnInfo)
-                (G.Nullability $ pgiIsNullable columnInfo)
+                (ciType columnInfo)
+                (G.Nullability $ ciIsNullable columnInfo)
 
           desc = "append existing jsonb value of filtered columns with new jsonb value"
       SU.updateOperator
@@ -730,7 +741,7 @@ deleteKeyOp ::
   SU.UpdateOperator ('Postgres pgKind) m n (UnpreparedValue ('Postgres pgKind))
 deleteKeyOp = SU.UpdateOperator {..}
   where
-    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . pgiType
+    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . ciType
 
     updateOperatorParser tableGQLName tableName columns = do
       let nullableTextParser _ = fmap P.mkParameter <$> columnParser (ColumnScalar PGText) (G.Nullability True)
@@ -760,7 +771,7 @@ deleteElemOp ::
   SU.UpdateOperator ('Postgres pgKind) m n (UnpreparedValue ('Postgres pgKind))
 deleteElemOp = SU.UpdateOperator {..}
   where
-    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . pgiType
+    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . ciType
 
     updateOperatorParser tableGQLName tableName columns = do
       let nonNullableIntParser _ = fmap P.mkParameter <$> columnParser (ColumnScalar PGInteger) (G.Nullability False)
@@ -792,7 +803,7 @@ deleteAtPathOp ::
   SU.UpdateOperator ('Postgres pgKind) m n [UnpreparedValue ('Postgres pgKind)]
 deleteAtPathOp = SU.UpdateOperator {..}
   where
-    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . pgiType
+    updateOperatorApplicableColumn = isScalarColumnWhere (== PGJSONB) . ciType
 
     updateOperatorParser tableGQLName tableName columns = do
       let nonNullableTextListParser _ = P.list . fmap P.mkParameter <$> columnParser (ColumnScalar PGText) (G.Nullability False)
@@ -806,7 +817,7 @@ deleteAtPathOp = SU.UpdateOperator {..}
         desc
         desc
 
--- | Various update operators
+-- | The update operators that we support on Postgres.
 updateOperators ::
   forall pgKind m n r.
   ( MonadParse n,

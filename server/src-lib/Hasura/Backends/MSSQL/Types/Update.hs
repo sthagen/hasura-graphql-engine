@@ -1,4 +1,6 @@
--- | This module defines the Update-related IR types specific to MSSQL.
+-- | MSSQL Types Update
+--
+-- This module defines the Update-related IR types specific to MSSQL.
 module Hasura.Backends.MSSQL.Types.Update
   ( BackendUpdate (..),
     UpdateOperator (..),
@@ -19,6 +21,11 @@ import Hasura.Prelude
 -- the data at the leaves.
 data BackendUpdate v = BackendUpdate
   { -- | The update operations to perform on each column.
+    --
+    -- This HashMap will also contain the update operators for the presets.
+    -- They are populated as part of the schema building in
+    -- 'Hasura.Backends.MSSQL.Instances.Schema.msBuildTableUpdateMutationFields'
+    -- in the call to @buildUpdateOperators@.
     updateOperations :: HashMap ColumnName (UpdateOperator v)
   }
   deriving (Functor, Foldable, Traversable, Generic, Data)

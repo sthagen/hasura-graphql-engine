@@ -1,17 +1,26 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- | Convert the simple T-SQL AST to an SQL query, ready to be passed
--- to the odbc package's query/exec functions.
+-- | MSSQL ToQuery
+--
+-- Convert the simple T-SQL AST to an SQL query, ready to be passed to the odbc
+-- package's query/exec functions.
+--
+-- We define a custom prettyprinter with the type 'Printer'.
+--
+-- If you'd like to trace and see what a 'Printer' looks like as SQL, you can use something like:
+-- > ltraceM "sql" (ODBC.renderQuery (toQueryPretty myPrinter))
 module Hasura.Backends.MSSQL.ToQuery
   ( fromSelect,
     fromReselect,
     toQueryFlat,
     toQueryPretty,
     fromInsert,
+    fromMerge,
     fromSetIdentityInsert,
     fromDelete,
     fromUpdate,
     fromSelectIntoTempTable,
+    fromInsertValuesIntoTempTable,
     dropTempTableQuery,
     Printer (..),
   )
@@ -30,7 +39,8 @@ import Hasura.Backends.MSSQL.Types
 import Hasura.Prelude hiding (GT, LT)
 
 --------------------------------------------------------------------------------
--- Types
+
+-- * Types
 
 data Printer
   = SeqPrinter [Printer]
@@ -55,7 +65,8 @@ instance IsString Printer where
 (?<+>) (Just x) y = SeqPrinter [x, y]
 
 --------------------------------------------------------------------------------
--- Instances
+
+-- * Instances
 
 -- This is a debug instance, only here because it avoids a circular
 -- dependency between this module and Types/Instances.
@@ -63,16 +74,23 @@ instance ToJSON Expression where
   toJSON = toJSON . T.toTxt . toQueryFlat . fromExpression
 
 --------------------------------------------------------------------------------
--- Printer generators
+
+-- * Printer generators
 
 fromExpression :: Expression -> Printer
 fromExpression =
   \case
-    CastExpression e t ->
+    CastExpression e t dataLength ->
       "CAST(" <+> fromExpression e
         <+> " AS "
-        <+> fromString (T.unpack t)
+        <+> fromString (T.unpack $ scalarTypeDBName t)
+        <+> fromDataLength
         <+> ")"
+      where
+        fromDataLength = case dataLength of
+          DataLengthUnspecified -> fromString ""
+          DataLengthInt len -> "(" <+> fromString (show len) <+> ")"
+          DataLengthMax -> "(max)"
     JsonQueryExpression e -> "JSON_QUERY(" <+> fromExpression e <+> ")"
     JsonValueExpression e path ->
       "JSON_VALUE(" <+> fromExpression e <+> fromPath path <+> ")"
@@ -100,12 +118,6 @@ fromExpression =
     ColumnExpression fieldName -> fromFieldName fieldName
     ToStringExpression e -> "CONCAT(" <+> fromExpression e <+> ", '')"
     SelectExpression s -> "(" <+> IndentPrinter 1 (fromSelect s) <+> ")"
-    MethodExpression field method args ->
-      fromExpression field <+> "."
-        <+> fromString (T.unpack method)
-        <+> "("
-        <+> SeqPrinter (map fromExpression args)
-        <+> ")"
     OpExpression op x y ->
       "("
         <+> fromExpression x
@@ -114,11 +126,8 @@ fromExpression =
         <+> " ("
         <+> fromExpression y
         <+> ")"
-    FunctionExpression function args ->
-      fromString (T.unpack function)
-        <+> "("
-        <+> SepByPrinter ", " (map fromExpression args)
-        <+> ")"
+    MethodApplicationExpression ex methodAppExp -> fromMethodApplicationExpression ex methodAppExp
+    FunctionApplicationExpression funAppExp -> fromFunctionApplicationExpression funAppExp
     ListExpression xs -> SepByPrinter ", " $ fromExpression <$> xs
     STOpExpression op e str ->
       "(" <+> fromExpression e <+> ")."
@@ -135,6 +144,30 @@ fromExpression =
         <+> fromExpression falseExpression
         <+> " END)"
     DefaultExpression -> "DEFAULT"
+
+fromMethodApplicationExpression :: Expression -> MethodApplicationExpression -> Printer
+fromMethodApplicationExpression ex methodAppExp =
+  case methodAppExp of
+    MethExpSTAsText -> fromApp "STAsText" []
+  where
+    fromApp :: Text -> [Expression] -> Printer
+    fromApp method args =
+      fromExpression ex <+> "."
+        <+> fromString (T.unpack method)
+        <+> "("
+        <+> SeqPrinter (map fromExpression args)
+        <+> ")"
+
+fromFunctionApplicationExpression :: FunctionApplicationExpression -> Printer
+fromFunctionApplicationExpression funAppExp = case funAppExp of
+  (FunExpISNULL x y) -> fromApp "ISNULL" [x, y]
+  where
+    fromApp :: Text -> [Expression] -> Printer
+    fromApp function args =
+      fromString (T.unpack function)
+        <+> "("
+        <+> SepByPrinter ", " (map fromExpression args)
+        <+> ")"
 
 fromOp :: Op -> Printer
 fromOp =
@@ -198,6 +231,10 @@ fromValues :: Values -> Printer
 fromValues (Values values) =
   "( " <+> SepByPrinter ", " (map fromExpression values) <+> " )"
 
+fromValuesList :: [Values] -> Printer
+fromValuesList valuesList =
+  "VALUES " <+> SepByPrinter ", " (map fromValues valuesList)
+
 fromInsert :: Insert -> Printer
 fromInsert Insert {..} =
   SepByPrinter
@@ -205,7 +242,8 @@ fromInsert Insert {..} =
     [ "INSERT INTO " <+> fromTableName insertTable,
       "(" <+> SepByPrinter ", " (map (fromNameText . columnNameText) insertColumns) <+> ")",
       fromInsertOutput insertOutput,
-      "VALUES " <+> SepByPrinter ", " (map fromValues insertValues)
+      "INTO " <+> fromTempTable insertTempTable,
+      fromValuesList insertValues
     ]
 
 fromSetValue :: SetValue -> Printer
@@ -218,9 +256,123 @@ fromSetIdentityInsert SetIdentityInsert {..} =
   SepByPrinter
     " "
     [ "SET IDENTITY_INSERT",
-      fromTableName setTable,
+      tableName,
       fromSetValue setValue
     ]
+  where
+    tableName =
+      case setTable of
+        RegularTableName name -> fromTableName name
+        TemporaryTableName name -> fromTempTableName name
+
+-- | Generate a statement to insert values into temporary table.
+fromInsertValuesIntoTempTable :: InsertValuesIntoTempTable -> Printer
+fromInsertValuesIntoTempTable InsertValuesIntoTempTable {..} =
+  SepByPrinter
+    NewlinePrinter
+    [ "INSERT INTO " <+> fromTempTableName ivittTempTableName,
+      "(" <+> SepByPrinter ", " (map (fromNameText . columnNameText) ivittColumns) <+> ")",
+      fromValuesList ivittValues
+    ]
+
+-- | Alias for the source table in a MERGE statement. Used when pretty printing MERGE statments.
+mergeSourceAlias :: Text
+mergeSourceAlias = "source"
+
+-- | Alias for the target table in a MERGE statement. Used when pretty printing MERGE statments.
+mergeTargetAlias :: Text
+mergeTargetAlias = "target"
+
+-- | USING section of a MERGE statement. Used in 'fromMerge'.
+fromMergeUsing :: MergeUsing -> Printer
+fromMergeUsing MergeUsing {..} =
+  "USING (" <+> fromSelect selectSubQuery <+> ") AS " <+> fromNameText mergeSourceAlias
+  where
+    selectSubQuery :: Select
+    selectSubQuery =
+      let alias = "merge_temptable"
+          columnNameToProjection ColumnName {columnNameText} =
+            -- merge_temptable.column_name AS column_name
+            FieldNameProjection $
+              Aliased
+                { aliasedThing = FieldName columnNameText alias,
+                  aliasedAlias = columnNameText
+                }
+       in emptySelect
+            { selectProjections = map columnNameToProjection mergeUsingColumns,
+              selectFrom = Just (FromTempTable $ Aliased mergeUsingTempTable alias) -- FROM temp_table AS merge_temptable
+            }
+
+-- | ON section of a MERGE statement. Used in 'fromMerge'.
+fromMergeOn :: MergeOn -> Printer
+fromMergeOn MergeOn {..} =
+  "ON (" <+> onExpression <+> ")"
+  where
+    onExpression
+      | null mergeOnColumns =
+        falsePrinter
+      | otherwise =
+        (fromExpression . AndExpression) (map matchColumn mergeOnColumns)
+
+    matchColumn :: ColumnName -> Expression
+    matchColumn ColumnName {..} =
+      let sourceColumn = ColumnExpression $ FieldName columnNameText mergeSourceAlias
+          targetColumn = ColumnExpression $ FieldName columnNameText mergeTargetAlias
+       in OpExpression EQ' sourceColumn targetColumn
+
+-- | WHEN MATCHED section of a MERGE statement. Used in 'fromMerge'.
+fromMergeWhenMatched :: MergeWhenMatched -> Printer
+fromMergeWhenMatched (MergeWhenMatched updateColumns updateCondition updatePreset) =
+  if null updates
+    then ""
+    else
+      "WHEN MATCHED AND "
+        <+> fromExpression updateCondition
+        <+> " THEN UPDATE "
+        <+> fromUpdateSet updates
+  where
+    updates = updateSet <> HM.map UpdateSet updatePreset
+
+    updateSet :: UpdateSet
+    updateSet =
+      HM.fromList $
+        map
+          ( \cn@ColumnName {..} ->
+              ( cn,
+                UpdateSet $ ColumnExpression $ FieldName columnNameText mergeSourceAlias
+              )
+          )
+          updateColumns
+
+-- | WHEN NOT MATCHED section of a MERGE statement. Used in 'fromMerge'.
+fromMergeWhenNotMatched :: MergeWhenNotMatched -> Printer
+fromMergeWhenNotMatched (MergeWhenNotMatched insertColumns) =
+  SepByPrinter
+    NewlinePrinter
+    [ "WHEN NOT MATCHED THEN INSERT (" <+> SepByPrinter ", " (map fromColumnName insertColumns) <+> ")",
+      fromValuesList [Values columnsFromSource]
+    ]
+  where
+    columnsFromSource =
+      insertColumns <&> \ColumnName {..} -> ColumnExpression $ FieldName columnNameText mergeSourceAlias
+
+-- | Generate a MERGE SQL statement
+fromMerge :: Merge -> Printer
+fromMerge Merge {..} =
+  SepByPrinter
+    NewlinePrinter
+    [ "MERGE " <+> fromAliased (fmap fromTableName mergeTableAsTarget),
+      fromMergeUsing mergeUsing,
+      fromMergeOn mergeOn,
+      fromMergeWhenMatched mergeWhenMatched,
+      fromMergeWhenNotMatched mergeWhenNotMatched,
+      fromInsertOutput mergeInsertOutput,
+      "INTO " <+> fromTempTable mergeOutputTempTable,
+      ";" -- Always, a Merge statement should end with a ";"
+    ]
+  where
+    mergeTableAsTarget :: Aliased TableName
+    mergeTableAsTarget = Aliased mergeTargetTable mergeTargetAlias
 
 -- | Generate a delete statement
 --
@@ -267,13 +419,13 @@ fromUpdate Update {..} =
       "FROM " <+> fromAliased (fmap fromTableName updateTable),
       fromWhere updateWhere
     ]
-  where
-    fromUpdateSet :: UpdateSet -> Printer
-    fromUpdateSet setColumns =
-      let updateColumnValue (column, updateOp) =
-            fromColumnName column <+> fromUpdateOperator (fromExpression <$> updateOp)
-       in "SET " <+> SepByPrinter ", " (map updateColumnValue (HM.toList setColumns))
 
+fromUpdateSet :: UpdateSet -> Printer
+fromUpdateSet setColumns =
+  let updateColumnValue (column, updateOp) =
+        fromColumnName column <+> fromUpdateOperator (fromExpression <$> updateOp)
+   in "SET " <+> SepByPrinter ", " (map updateColumnValue (HM.toList setColumns))
+  where
     fromUpdateOperator :: UpdateOperator Printer -> Printer
     fromUpdateOperator = \case
       UpdateSet p -> " = " <+> p
@@ -290,18 +442,23 @@ fromUpdate Update {..} =
 --  We add the `UNION ALL` part to avoid copying identity constraints, and we cast columns with types such as `timestamp`
 --  which are non-insertable to a different type.
 fromSelectIntoTempTable :: SelectIntoTempTable -> Printer
-fromSelectIntoTempTable SelectIntoTempTable {sittTempTableName, sittColumns, sittFromTableName} =
+fromSelectIntoTempTable SelectIntoTempTable {sittTempTableName, sittColumns, sittFromTableName, sittConstraints} =
   SepByPrinter
     NewlinePrinter
-    [ "SELECT "
-        <+> columns,
-      "INTO " <+> fromTempTableName sittTempTableName,
-      "FROM " <+> fromTableName sittFromTableName,
-      "WHERE " <+> falsePrinter,
-      "UNION ALL SELECT " <+> columns,
-      "FROM " <+> fromTableName sittFromTableName,
-      "WHERE " <+> falsePrinter
-    ]
+    $ [ "SELECT "
+          <+> columns,
+        "INTO " <+> fromTempTableName sittTempTableName,
+        "FROM " <+> fromTableName sittFromTableName,
+        "WHERE " <+> falsePrinter
+      ]
+      <> case sittConstraints of
+        RemoveConstraints ->
+          [ "UNION ALL SELECT " <+> columns,
+            "FROM " <+> fromTableName sittFromTableName,
+            "WHERE " <+> falsePrinter
+          ]
+        KeepConstraints ->
+          []
   where
     -- column names separated by commas
     columns =
@@ -518,11 +675,8 @@ fromCountable :: Countable FieldName -> Printer
 fromCountable =
   \case
     StarCountable -> "*"
-    NonNullFieldCountable fields ->
-      SepByPrinter ", " (map fromFieldName (toList fields))
-    DistinctCountable fields ->
-      "DISTINCT "
-        <+> SepByPrinter ", " (map fromFieldName (toList fields))
+    NonNullFieldCountable field -> fromFieldName field
+    DistinctCountable field -> "DISTINCT " <+> fromFieldName field
 
 fromWhere :: Where -> Printer
 fromWhere =
@@ -532,7 +686,7 @@ fromWhere =
         "WHERE " <+> IndentPrinter 6 (fromExpression whereExp)
       | otherwise -> ""
 
--- Drop useless examples like this from the output:
+-- | Drop useless examples like this from the output:
 --
 -- WHERE (((1<>1))
 --       AND ((1=1)))
@@ -661,8 +815,10 @@ wrapFor for' inner = coalesceNull
         _ -> inner
 
 --------------------------------------------------------------------------------
--- Basic printing API
 
+-- * Basic printing API
+
+-- | Pretty-prints a 'Printer' as one line, converting 'NewlinePrinter' to space.
 toQueryFlat :: Printer -> Query
 toQueryFlat = go 0
   where
@@ -677,6 +833,7 @@ toQueryFlat = go 0
         IndentPrinter n p -> go (level + n) p
     notEmpty = (/= mempty) . renderQuery
 
+-- | Pretty-prints a 'Printer' as multiple lines as defined by the printer.
 toQueryPretty :: Printer -> Query
 toQueryPretty = go 0
   where

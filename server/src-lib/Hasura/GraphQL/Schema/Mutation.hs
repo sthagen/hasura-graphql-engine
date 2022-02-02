@@ -44,7 +44,7 @@ import Language.GraphQL.Draft.Syntax qualified as G
 -- This function is used to create the insert_tablename root field.
 -- The field accepts the following arguments:
 --   - objects: the list of objects to insert into the table (see 'tableFieldsInput')
---   - on_conflict: an object describing how to perform an upsert in case of conflict
+--   - parser for backend-specific fields, e.g. upsert fields on_conflict or if_matched
 insertIntoTable ::
   forall b r m n.
   MonadBuildSchema b r m n =>
@@ -64,9 +64,11 @@ insertIntoTable ::
   Maybe (UpdPermInfo b) ->
   m (FieldParser n (IR.AnnInsert b (IR.RemoteRelationshipField UnpreparedValue) (UnpreparedValue b)))
 insertIntoTable backendInsertAction sourceName tableInfo fieldName description insertPerms selectPerms updatePerms = do
-  selectionParser <- mutationSelectionSet sourceName tableInfo selectPerms
+  -- objects [{ ... }]
   objectParser <- tableFieldsInput sourceName tableInfo insertPerms
   backendInsertParser <- backendInsertAction sourceName tableInfo selectPerms updatePerms
+  -- returning clause, affected rows, etc.
+  selectionParser <- mutationSelectionSet sourceName tableInfo selectPerms
   let argsParser = do
         backendInsert <- backendInsertParser
         objects <- mkObjectsArg objectParser
@@ -128,6 +130,17 @@ insertOneIntoTable backendInsertAction sourceName tableInfo fieldName descriptio
 -- This function creates an input object type named "tablename_insert_input" in
 -- the GraphQL shema, which has a field for each of the columns of that table
 -- that the user has insert permissions for.
+--
+-- > {
+-- >  insert_author (
+-- >    objects: [
+-- >      { # tableFieldsInput output
+-- >        name: "John",
+-- >        id:12
+-- >      }
+-- >    ] ...
+-- >  ) ...
+-- > }
 tableFieldsInput ::
   forall b r m n.
   MonadBuildSchema b r m n =>
@@ -164,21 +177,24 @@ tableFieldsInput sourceName tableInfo insertPerms =
     mkFieldParser = \case
       FIComputedField _ -> pure Nothing
       FIRemoteRelationship _ -> pure Nothing
-      FIColumn columnInfo -> mkColumnParser columnInfo
+      FIColumn columnInfo -> do
+        if (_cmIsInsertable $ ciMutability columnInfo)
+          then mkColumnParser columnInfo
+          else pure Nothing
       FIRelationship relInfo -> mkRelationshipParser sourceName relInfo
 
     mkColumnParser ::
       ColumnInfo b ->
       m (Maybe (InputFieldsParser n (Maybe (IR.AnnotatedInsert b (UnpreparedValue b)))))
     mkColumnParser columnInfo = do
-      let columnName = pgiName columnInfo
-          columnDesc = pgiDescription columnInfo
-          isAllowed = Set.member (pgiColumn columnInfo) (ipiCols insertPerms)
+      let columnName = ciName columnInfo
+          columnDesc = ciDescription columnInfo
+          isAllowed = Set.member (ciColumn columnInfo) (ipiCols insertPerms)
       whenMaybe isAllowed do
-        fieldParser <- columnParser (pgiType columnInfo) (G.Nullability $ pgiIsNullable columnInfo)
+        fieldParser <- columnParser (ciType columnInfo) (G.Nullability $ ciIsNullable columnInfo)
         pure $
           P.fieldOptional columnName columnDesc fieldParser `mapField` \value ->
-            IR.AIColumn (pgiColumn columnInfo, mkParameter value)
+            IR.AIColumn (ciColumn columnInfo, mkParameter value)
 
 mkDefaultRelationshipParser ::
   forall b r m n.
@@ -304,7 +320,7 @@ mkInsertObject objects tableInfo backendInsert insertPerms updatePerms =
     updateCheck = (fmap . fmap . fmap) partialSQLExpToUnpreparedValue $ upiCheck =<< updatePerms
     defaultValues =
       Map.union (partialSQLExpToUnpreparedValue <$> ipiSet insertPerms) $
-        Map.fromList [(column, UVLiteral $ columnDefaultValue @b column) | column <- pgiColumn <$> columns]
+        Map.fromList [(column, UVLiteral $ columnDefaultValue @b column) | column <- ciColumn <$> columns]
 
 -- delete
 
@@ -432,10 +448,10 @@ primaryKeysArguments ::
 primaryKeysArguments tableInfo selectPerms = runMaybeT $ do
   primaryKeys <- hoistMaybe $ _tciPrimaryKey . _tiCoreInfo $ tableInfo
   let columns = _pkColumns primaryKeys
-  guard $ all (\c -> pgiColumn c `Map.member` spiCols selectPerms) columns
+  guard $ all (\c -> ciColumn c `Map.member` spiCols selectPerms) columns
   lift $
     fmap (BoolAnd . toList) . sequenceA <$> for columns \columnInfo -> do
-      field <- columnParser (pgiType columnInfo) (G.Nullability False)
+      field <- columnParser (ciType columnInfo) (G.Nullability False)
       pure $
         BoolFld . AVColumn columnInfo . pure . AEQ True . mkParameter
-          <$> P.field (pgiName columnInfo) (pgiDescription columnInfo) field
+          <$> P.field (ciName columnInfo) (ciDescription columnInfo) field

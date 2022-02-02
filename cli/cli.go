@@ -451,6 +451,9 @@ type ExecutionContext struct {
 	Source        Source
 	HasMetadataV3 bool
 
+	// AllDatabases should be taken only incase if database isn't mentioned
+	AllDatabases bool
+
 	// after a `scripts update-config-v3` all migrate commands will try to automatically
 	// move cli state from hdb_catalog.* tables to catalog state if that hasn't happened
 	// already this configuration option will disable this step
@@ -684,7 +687,7 @@ func (ec *ExecutionContext) Validate() error {
 		return fmt.Errorf("error while parsing the endpoint :%w", err)
 	}
 
-	err = util.GetServerStatus(ec.Config.Endpoint)
+	err = util.GetServerStatus(ec.Config.GetVersionEndpoint())
 	if err != nil {
 		ec.Logger.Error("connecting to graphql-engine server failed")
 		ec.Logger.Info("possible reasons:")

@@ -98,15 +98,15 @@ buildGQLContext queryType sources allRemoteSchemas allActions customTypes = do
 
   -- TODO factor out the common function; throw500 in both cases:
   queryFieldNames :: [G.Name] <-
-    case P.discardNullability $ P.parserType $ fst adminHasuraDBContext of
+    case P.parserType $ fst adminHasuraDBContext of
       -- It really ought to be this case; anything else is a programming error.
-      P.TNamed (P.Definition _ _ (P.TIObject (P.ObjectInfo rootFields _interfaces))) ->
+      P.TNamed _ (P.Definition _ _ (P.TIObject (P.ObjectInfo rootFields _interfaces))) ->
         pure $ fmap P.dName rootFields
       _ -> throw500 "We encountered an root query of unexpected GraphQL type.  It should be an object type."
   let mutationFieldNames :: [G.Name]
       mutationFieldNames =
-        case P.discardNullability . P.parserType <$> snd adminHasuraDBContext of
-          Just (P.TNamed def) ->
+        case P.parserType <$> snd adminHasuraDBContext of
+          Just (P.TNamed _ def) ->
             case P.dInfo def of
               -- It really ought to be this case; anything else is a programming error.
               P.TIObject (P.ObjectInfo rootFields _interfaces) -> fmap P.dName rootFields
@@ -631,9 +631,18 @@ queryWithIntrospectionHelper ::
   Maybe (Parser 'Output n (RootFieldMap (QueryRootField UnpreparedValue))) ->
   m (Parser 'Output n (RootFieldMap (QueryRootField UnpreparedValue)))
 queryWithIntrospectionHelper basicQueryFP mutationP subscriptionP = do
-  basicQueryP <- queryRootFromFields basicQueryFP
-  emptyIntro <- fmap (fmap NotNamespaced) <$> emptyIntrospection
+  let -- Per the GraphQL spec:
+      --  * "The query root operation type must be provided and must be an Object type." (§3.2.1)
+      --  * "An Object type must define one or more fields." (§3.6, type validation)
+      -- Those two requirements cannot both be met when a service is mutations-only, and does not
+      -- provide any query. In such a case, to meet both of those, we introduce a placeholder query
+      -- in the schema.
+      placeholderText = "There are no queries available to the current role. Either there are no sources or remote schemas configured, or the current role doesn't have the required permissions."
+      placeholderField = NotNamespaced (RFRaw $ JO.String placeholderText) <$ P.selection_ $$(G.litName "no_queries_available") (Just $ G.Description placeholderText) P.string
+      fixedQueryFP = if null basicQueryFP then [placeholderField] else basicQueryFP
+  basicQueryP <- queryRootFromFields fixedQueryFP
   let directives = directivesInfo @n
+  -- We extract the types from the ordinary GraphQL schema (excluding introspection)
   allBasicTypes <-
     collectTypes $
       catMaybes
@@ -642,7 +651,16 @@ queryWithIntrospectionHelper basicQueryFP mutationP subscriptionP = do
           P.TypeDefinitionsWrapper . P.parserType <$> mutationP,
           P.TypeDefinitionsWrapper . P.parserType <$> subscriptionP
         ]
-  allIntrospectionTypes <- collectTypes . P.parserType =<< queryRootFromFields emptyIntro
+  let introspection = [schema, typeIntrospection]
+      {-# INLINE introspection #-}
+
+  -- TODO: it may be worth looking at whether we can stop collecting
+  -- introspection types monadically.  They are independent of the user schema;
+  -- the types here are always the same and specified by the GraphQL spec
+
+  -- Pull all the introspection types out (__Type, __Schema, etc)
+  allIntrospectionTypes <- collectTypes (map fDefinition introspection)
+
   let allTypes =
         Map.unions
           [ allBasicTypes,
@@ -657,8 +675,9 @@ queryWithIntrospectionHelper basicQueryFP mutationP subscriptionP = do
             sSubscriptionType = P.parserType <$> subscriptionP,
             sDirectives = directives
           }
-  let partialQueryFields =
-        basicQueryFP ++ (fmap (NotNamespaced . RFRaw) <$> [schema partialSchema, typeIntrospection partialSchema])
+  let buildIntrospectionResponse fromSchema = NotNamespaced $ RFRaw $ fromSchema partialSchema
+      partialQueryFields =
+        fixedQueryFP ++ (fmap buildIntrospectionResponse <$> introspection)
   P.safeSelectionSet queryRoot Nothing partialQueryFields <&> fmap (flattenNamespaces . fmap typenameToNamespacedRawRF)
 
 queryRootFromFields ::
@@ -668,24 +687,6 @@ queryRootFromFields ::
   m (Parser 'Output n (RootFieldMap (QueryRootField UnpreparedValue)))
 queryRootFromFields fps =
   P.safeSelectionSet queryRoot Nothing fps <&> fmap (flattenNamespaces . fmap typenameToNamespacedRawRF)
-
-emptyIntrospection ::
-  forall m n.
-  (MonadSchema n m, MonadError QErr m) =>
-  m [P.FieldParser n (QueryRootField UnpreparedValue)]
-emptyIntrospection = do
-  emptyQueryP <- queryRootFromFields @n []
-  introspectionTypes <- collectTypes (P.parserType emptyQueryP)
-  let introspectionSchema =
-        Schema
-          { sDescription = Nothing,
-            sTypes = introspectionTypes,
-            sQueryType = P.parserType emptyQueryP,
-            sMutationType = Nothing,
-            sSubscriptionType = Nothing,
-            sDirectives = mempty
-          }
-  return $ fmap (fmap RFRaw) [schema introspectionSchema, typeIntrospection introspectionSchema]
 
 collectTypes ::
   forall m a.

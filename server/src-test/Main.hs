@@ -18,6 +18,7 @@ import Database.MSSQL.TransactionSpec qualified as TransactionSpec
 import Database.PG.Query qualified as Q
 import Hasura.App
   ( PGMetadataStorageAppT (..),
+    mkMSSQLSourceResolver,
     mkPgSourceResolver,
   )
 import Hasura.Backends.MySQL.DataLoader.ExecuteTests qualified as MySQLDataLoader
@@ -33,11 +34,12 @@ import Hasura.RQL.DDL.Schema.Cache
 import Hasura.RQL.DDL.Schema.Cache.Common
 import Hasura.RQL.MetadataSpec qualified as MetadataSpec
 import Hasura.RQL.PermissionSpec qualified as PermSpec
-import Hasura.RQL.RequestTransformSpec qualified as RequestTransformSpec
 import Hasura.RQL.Types
 import Hasura.RQL.Types.CommonSpec qualified as CommonTypesSpec
 import Hasura.RQL.Types.EndpointSpec qualified as EndpointSpec
+import Hasura.RQL.WebhookTransformsSpec qualified as WebhookTransformsSpec
 import Hasura.SQL.WKTSpec qualified as WKTSpec
+import Hasura.Server.Auth.JWTSpec qualified as JWTSpec
 import Hasura.Server.AuthSpec qualified as AuthSpec
 import Hasura.Server.Init
 import Hasura.Server.Migrate
@@ -93,11 +95,12 @@ unitSpecs = do
   describe "Hasura.RQL.Types.Endpoint" EndpointSpec.spec
   describe "Hasura.GraphQL.Namespace" NamespaceSpec.spec
   describe "Hasura.SQL.WKT" WKTSpec.spec
+  describe "Hasura.Server.Auth.JWT" JWTSpec.spec
   describe "Hasura.Server.Auth" AuthSpec.spec
   describe "Hasura.Server.Telemetry" TelemetrySpec.spec
   describe "Hasura.RQL.PermissionSpec" PermSpec.spec
   describe "Hasura.RQL.MetadataSpec" MetadataSpec.spec
-  describe "Hasura.RQL.RequestTransformSpec" RequestTransformSpec.spec
+  describe "Hasura.RQL.WebhookTransformsSpec" WebhookTransformsSpec.spec
   describe "Network.HTTP.Client.TransformableSpec" TransformableSpec.spec
 
 buildMSSQLSpecs :: IO Spec
@@ -151,7 +154,7 @@ buildPostgresSpecs = do
             readOnlyMode = ReadOnlyModeDisabled
             serverConfigCtx =
               ServerConfigCtx FunctionPermissionsInferred RemoteSchemaPermsDisabled sqlGenCtx maintenanceMode mempty EventingEnabled readOnlyMode
-            cacheBuildParams = CacheBuildParams httpManager (mkPgSourceResolver print) serverConfigCtx
+            cacheBuildParams = CacheBuildParams httpManager (mkPgSourceResolver print) mkMSSQLSourceResolver serverConfigCtx
             pgLogger = print
 
             run :: MetadataStorageT (PGMetadataStorageAppT CacheBuild) a -> IO a

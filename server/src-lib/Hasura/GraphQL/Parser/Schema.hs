@@ -9,15 +9,14 @@ module Hasura.GraphQL.Parser.Schema
     MkTypename (..),
     mkTypename,
     withTypenameCustomization,
+    Nullability (..),
     Type (..),
-    NonNullableType (..),
     TypeInfo (..),
     getTypeInfo,
     SomeTypeInfo (..),
     eqType,
-    eqNonNullableType,
     eqTypeInfo,
-    discardNullability,
+    typeNullability,
     nullableType,
     nonNullableType,
     toGraphQLType,
@@ -68,9 +67,9 @@ import Language.GraphQL.Draft.Syntax
     DirectiveLocation (..),
     GType (..),
     Name (..),
-    Nullability (..),
     Value (..),
   )
+import Language.GraphQL.Draft.Syntax qualified as G
 
 class HasName a where
   getName :: a -> Name
@@ -305,60 +304,45 @@ instance k1 ~ k2 => k1 <: k2 where
 instance {-# OVERLAPPING #-} k <: 'Both where
   subKind = KBoth
 
+data Nullability = Nullable | NonNullable
+  deriving (Eq)
+
+isNullable :: Nullability -> Bool
+isNullable Nullable = True
+isNullable NonNullable = False
+
 data Type k
-  = NonNullable (NonNullableType k)
-  | Nullable (NonNullableType k)
+  = TNamed Nullability (Definition (TypeInfo k))
+  | TList Nullability (Type k)
 
 instance Eq (Type k) where
   (==) = eqType
 
 -- | Like '==', but can compare 'Type's of different kinds.
 eqType :: Type k1 -> Type k2 -> Bool
-eqType (NonNullable a) (NonNullable b) = eqNonNullableType a b
-eqType (Nullable a) (Nullable b) = eqNonNullableType a b
+eqType (TNamed n a) (TNamed n' b) = n == n' && liftEq eqTypeInfo a b
+eqType (TList n a) (TList n' b) = n == n' && eqType a b
 eqType _ _ = False
 
 instance HasName (Type k) where
-  getName = getName . discardNullability
+  getName (TNamed _ def) = getName def
+  getName (TList _ t) = getName t
 
-discardNullability :: Type k -> NonNullableType k
-discardNullability (NonNullable t) = t
-discardNullability (Nullable t) = t
+typeNullability :: Type k -> Nullability
+typeNullability (TNamed n _) = n
+typeNullability (TList n _) = n
 
 nullableType :: Type k -> Type k
-nullableType (NonNullable t) = Nullable t
--- Defined like this to preserve sharing
-nullableType t@(Nullable {}) = t
+nullableType (TNamed _ def) = TNamed Nullable def
+nullableType (TList _ t) = TList Nullable t
 
 nonNullableType :: Type k -> Type k
-nonNullableType (Nullable t) = NonNullable t
-nonNullableType t@(NonNullable {}) = t
-
-data NonNullableType k
-  = TNamed (Definition (TypeInfo k))
-  | TList (Type k)
-
-instance Eq (NonNullableType k) where
-  (==) = eqNonNullableType
+nonNullableType (TNamed _ def) = TNamed NonNullable def
+nonNullableType (TList _ t) = TList NonNullable t
 
 toGraphQLType :: Type k -> GType
-toGraphQLType = \case
-  NonNullable t -> translateWith False t
-  Nullable t -> translateWith True t
-  where
-    translateWith nullability = \case
-      TNamed typeInfo -> TypeNamed (Nullability nullability) $ getName typeInfo
-      TList typeInfo -> TypeList (Nullability nullability) $ toGraphQLType typeInfo
-
--- | Like '==', but can compare 'NonNullableType's of different kinds.
-eqNonNullableType :: NonNullableType k1 -> NonNullableType k2 -> Bool
-eqNonNullableType (TNamed a) (TNamed b) = liftEq eqTypeInfo a b
-eqNonNullableType (TList a) (TList b) = eqType a b
-eqNonNullableType _ _ = False
-
-instance HasName (NonNullableType k) where
-  getName (TNamed definition) = getName definition
-  getName (TList t) = getName t
+toGraphQLType (TNamed n typeInfo) = TypeNamed (G.Nullability (isNullable n)) $ getName typeInfo
+toGraphQLType (TList n typeInfo) = TypeList (G.Nullability (isNullable n)) $ toGraphQLType typeInfo
 
 {- Note [The interfaces story]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -531,9 +515,8 @@ eqTypeInfo (TIUnion (UnionInfo objects1)) (TIUnion (UnionInfo objects2)) =
 eqTypeInfo _ _ = False
 
 getTypeInfo :: Type k -> Definition (TypeInfo k)
-getTypeInfo t = case discardNullability t of
-  TNamed d -> d
-  TList t' -> getTypeInfo t'
+getTypeInfo (TNamed _ d) = d
+getTypeInfo (TList _ t) = getTypeInfo t
 
 getObjectInfo :: Type k -> Maybe (Definition ObjectInfo)
 getObjectInfo t = case getTypeInfo t of
@@ -584,23 +567,18 @@ data EnumValueInfo = EnumValueInfo
 instance Hashable EnumValueInfo
 
 data InputFieldInfo
-  = -- | A required field with a non-nullable type.
-    forall k. ('Input <: k) => IFRequired (NonNullableType k)
-  | -- | An optional input field with a nullable type and possibly a default
-    -- value. If a default value is provided, it should be a valid value for the
-    -- type.
+  = -- | An input field with a type and possibly a default value. If a default
+    -- value is provided, it should be a valid value for the type.
     --
     -- Note that a default value of 'VNull' is subtly different from having no
-    -- default value at all. If no default value is provided, the GraphQL
-    -- specification allows distinguishing provided @null@ values from values left
-    -- completely absent; see Note [Optional fields and nullability] in
-    -- Hasura.GraphQL.Parser.Internal.Parser.
-    forall k. ('Input <: k) => IFOptional (Type k) (Maybe (Value Void))
+    -- default value at all. If no default value is provided (i.e. 'Nothing'),
+    -- the GraphQL specification allows distinguishing provided @null@ values
+    -- from values left completely absent; see Note [The value of omitted
+    -- fields] in Hasura.GraphQL.Parser.Internal.Parser.
+    forall k. ('Input <: k) => InputFieldInfo (Type k) (Maybe (Value Void))
 
 instance Eq InputFieldInfo where
-  IFRequired t1 == IFRequired t2 = eqNonNullableType t1 t2
-  IFOptional t1 v1 == IFOptional t2 v2 = eqType t1 t2 && v1 == v2
-  _ == _ = False
+  InputFieldInfo t1 v1 == InputFieldInfo t2 v2 = eqType t1 t2 && v1 == v2
 
 data FieldInfo = forall k.
   ('Output <: k) =>
@@ -691,9 +669,9 @@ instance Cacheable Variable
 
 data VariableInfo
   = VIRequired Name
-  | -- | Unlike fields (see 'IFOptional'), nullable variables with no default
-    -- value are indistinguishable from variables with a default value of null, so
-    -- we don’t distinguish those cases here.
+  | -- | Unlike fields (see 'InputFieldInfo'), nullable variables with no
+    -- default value are indistinguishable from variables with a default value
+    -- of null, so we don’t distinguish those cases here.
     VIOptional Name (Value Void)
   deriving (Show, Eq, Generic, Ord)
 
@@ -822,13 +800,8 @@ instance HasTypeDefinitions TypeDefinitionsWrapper where
 
 instance HasTypeDefinitions (Type k) where
   accumulateTypeDefinitions = \case
-    NonNullable t -> accumulateTypeDefinitions t
-    Nullable t -> accumulateTypeDefinitions t
-
-instance HasTypeDefinitions (NonNullableType k) where
-  accumulateTypeDefinitions = \case
-    TNamed d -> accumulateTypeDefinitions d
-    TList t -> accumulateTypeDefinitions t
+    TNamed _ t -> accumulateTypeDefinitions t
+    TList _ t -> accumulateTypeDefinitions t
 
 instance HasTypeDefinitions (TypeInfo k) where
   accumulateTypeDefinitions = \case
@@ -850,9 +823,8 @@ instance HasTypeDefinitions (Definition InputFieldInfo) where
     local (typeOriginRecurse dName) $ accumulateTypeDefinitions dInfo
 
 instance HasTypeDefinitions InputFieldInfo where
-  accumulateTypeDefinitions = \case
-    IFRequired t -> accumulateTypeDefinitions t
-    IFOptional t _ -> accumulateTypeDefinitions t
+  accumulateTypeDefinitions (InputFieldInfo t _) =
+    accumulateTypeDefinitions t
 
 instance HasTypeDefinitions (Definition FieldInfo) where
   accumulateTypeDefinitions Definition {..} =

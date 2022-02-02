@@ -301,7 +301,7 @@ validateInsert insCols objRels addCols = do
 mkInsertQ ::
   (MonadError QErr m, Backend ('Postgres pgKind)) =>
   QualifiedTable ->
-  Maybe (IR.ConflictClauseP1 ('Postgres pgKind) PG.SQLExp) ->
+  Maybe (IR.OnConflictClause ('Postgres pgKind) PG.SQLExp) ->
   [(PGCol, PG.SQLExp)] ->
   Map.HashMap PGCol PG.SQLExp ->
   (AnnBoolExpSQL ('Postgres pgKind), Maybe (AnnBoolExpSQL ('Postgres pgKind))) ->
@@ -331,16 +331,16 @@ fetchFromColVals ::
   m [(PGCol, PG.SQLExp)]
 fetchFromColVals colVal reqCols =
   forM reqCols $ \ci -> do
-    let valM = Map.lookup (pgiColumn ci) colVal
+    let valM = Map.lookup (ciColumn ci) colVal
     val <-
       onNothing valM $
         throw500 $
           "column "
-            <> pgiColumn ci <<> " not found in given colVal"
+            <> ciColumn ci <<> " not found in given colVal"
     let pgColVal = case val of
           TENull -> PG.SENull
           TELit t -> PG.SELit t
-    return (pgiColumn ci, pgColVal)
+    return (ciColumn ci, pgColVal)
 
 mkSQLRow :: Map.HashMap PGCol PG.SQLExp -> [(PGCol, PG.SQLExp)] -> [PG.SQLExp]
 mkSQLRow defVals withPGCol = map snd $

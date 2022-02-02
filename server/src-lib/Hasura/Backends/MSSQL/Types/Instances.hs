@@ -1,6 +1,8 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- | Instances that're slow to compile.
+-- | MSSQL Types Instances
+--
+-- Instances for types from "Hasura.Backends.MSSQL.Types.Internal" that're slow to compile.
 module Hasura.Backends.MSSQL.Types.Instances () where
 
 import Data.Aeson.Extended
@@ -42,7 +44,8 @@ $( fmap concat $ for
        ''UnifiedUsing,
        ''UnifiedOn,
        ''UnifiedColumn,
-       ''TempTableName
+       ''TempTableName,
+       ''SomeTableName
      ]
      \name ->
        [d|
@@ -78,7 +81,10 @@ $( fmap concat $ for
        ''JoinAlias,
        ''Reselect,
        ''ColumnName,
+       ''DataLength,
        ''Expression,
+       ''FunctionApplicationExpression,
+       ''MethodApplicationExpression,
        ''NullsOrder,
        ''Order,
        ''ScalarType,
@@ -96,7 +102,23 @@ $( fmap concat $ for
        ''JsonFieldSpec,
        ''Join,
        ''JoinSource,
-       ''SelectIntoTempTable
+       ''SelectIntoTempTable,
+       ''SITTConstraints,
+       ''InsertValuesIntoTempTable,
+       ''InsertOutput,
+       ''Inserted,
+       ''OutputColumn,
+       ''TempTable,
+       ''Deleted,
+       ''DeleteOutput,
+       ''Values,
+       ''Delete,
+       ''Insert,
+       ''Merge,
+       ''MergeUsing,
+       ''MergeOn,
+       ''MergeWhenMatched,
+       ''MergeWhenNotMatched
      ]
      \name ->
        [d|

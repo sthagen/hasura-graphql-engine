@@ -28,9 +28,11 @@ module Hasura.Backends.MSSQL.FromIr
     FromIr,
     jsonFieldName,
     fromInsert,
+    toMerge,
     fromDelete,
     fromUpdate,
     toSelectIntoTempTable,
+    toInsertValuesIntoTempTable,
   )
 where
 
@@ -42,7 +44,7 @@ import Data.Proxy
 import Data.Text qualified as T
 import Database.ODBC.SQLServer qualified as ODBC
 import Hasura.Backends.MSSQL.Instances.Types ()
-import Hasura.Backends.MSSQL.Types.Insert as TSQL (BackendInsert (..), ExtraColumnInfo (..))
+import Hasura.Backends.MSSQL.Types.Insert as TSQL (BackendInsert (..), IfMatched (..))
 import Hasura.Backends.MSSQL.Types.Internal as TSQL
 import Hasura.Backends.MSSQL.Types.Update as TSQL (BackendUpdate (..), Update (..))
 import Hasura.Prelude
@@ -77,7 +79,7 @@ data Error
 --
 -- A ReaderT is used around this in most of the module too, for
 -- setting the current entity that a given field name refers to. See
--- @fromPGCol@.
+-- @fromColumn@.
 newtype FromIr a = FromIr
   { unFromIr :: StateT (Map Text Int) (Validate (NonEmpty Error)) a
   }
@@ -392,11 +394,11 @@ unfurlAnnotatedOrderByElement ::
   WriterT (Seq UnfurledJoin) (ReaderT EntityAlias FromIr) (FieldName, Maybe TSQL.ScalarType)
 unfurlAnnotatedOrderByElement =
   \case
-    IR.AOCColumn pgColumnInfo -> do
-      fieldName <- lift (fromPGColumnInfo pgColumnInfo)
+    IR.AOCColumn columnInfo -> do
+      fieldName <- lift (fromColumnInfo columnInfo)
       pure
         ( fieldName,
-          case (IR.pgiType pgColumnInfo) of
+          case IR.ciType columnInfo of
             IR.ColumnScalar t -> Just t
             -- Above: It is of interest to us whether the type is
             -- text/ntext/image. See ToQuery for more explanation.
@@ -458,8 +460,8 @@ unfurlAnnotatedOrderByElement =
               (const (fromAlias selectFrom))
               ( case annAggregateOrderBy of
                   IR.AAOCount -> pure (CountAggregate StarCountable)
-                  IR.AAOOp text pgColumnInfo -> do
-                    fieldName <- fromPGColumnInfo pgColumnInfo
+                  IR.AAOOp text columnInfo -> do
+                    fieldName <- fromColumnInfo columnInfo
                     pure (OpAggregate text (pure (ColumnExpression fieldName)))
               )
           )
@@ -533,8 +535,8 @@ fromAnnBoolExpFld ::
   ReaderT EntityAlias FromIr Expression
 fromAnnBoolExpFld =
   \case
-    IR.AVColumn pgColumnInfo opExpGs -> do
-      expression <- fromColumnInfoForBoolExp pgColumnInfo
+    IR.AVColumn columnInfo opExpGs -> do
+      expression <- fromColumnInfoForBoolExp columnInfo
       expressions <- traverse (lift . fromOpExpG expression) opExpGs
       pure (AndExpression expressions)
     IR.AVRelationship IR.RelInfo {riMapping = mapping, riRTable = table} annBoolExp -> do
@@ -567,10 +569,10 @@ fromAnnBoolExpFld =
 -- special handling to ensure that SQL Server won't outright reject
 -- the comparison. See also 'shouldCastToVarcharMax'.
 fromColumnInfoForBoolExp :: IR.ColumnInfo 'MSSQL -> ReaderT EntityAlias FromIr Expression
-fromColumnInfoForBoolExp IR.ColumnInfo {pgiColumn = pgCol, pgiType} = do
-  fieldName <- columnNameToFieldName pgCol <$> ask
-  if shouldCastToVarcharMax pgiType -- See function commentary.
-    then pure (CastExpression (ColumnExpression fieldName) "VARCHAR(MAX)")
+fromColumnInfoForBoolExp IR.ColumnInfo {ciColumn = column, ciType} = do
+  fieldName <- columnNameToFieldName column <$> ask
+  if shouldCastToVarcharMax ciType -- See function commentary.
+    then pure (CastExpression (ColumnExpression fieldName) WvarcharType DataLengthMax)
     else pure (ColumnExpression fieldName)
 
 -- | There's a problem of comparing text fields with =, <, etc. that
@@ -581,15 +583,15 @@ shouldCastToVarcharMax :: IR.ColumnType 'MSSQL -> Bool
 shouldCastToVarcharMax typ =
   typ == IR.ColumnScalar TextType || typ == IR.ColumnScalar WtextType
 
-fromPGColumnInfo :: IR.ColumnInfo 'MSSQL -> ReaderT EntityAlias FromIr FieldName
-fromPGColumnInfo IR.ColumnInfo {pgiColumn = pgCol} =
-  columnNameToFieldName pgCol <$> ask
+fromColumnInfo :: IR.ColumnInfo 'MSSQL -> ReaderT EntityAlias FromIr FieldName
+fromColumnInfo IR.ColumnInfo {ciColumn = column} =
+  columnNameToFieldName column <$> ask
 
 --  entityAlias <- ask
 --  pure
---    (columnNameToFieldName pgCol entityAlias
+--    (columnNameToFieldName column entityAlias
 --     FieldName
---       {fieldName = PG.getPGColTxt pgCol, fieldNameEntity = entityAliasText})
+--       {fieldName = columnName column, fieldNameEntity = entityAliasText})
 
 --------------------------------------------------------------------------------
 -- Sources of projected fields
@@ -652,14 +654,14 @@ fromAggregateField alias aggregateField =
     IR.AFExp text -> AggregateProjection $ Aliased (TextAggregate text) alias
     IR.AFCount countType -> AggregateProjection . flip Aliased alias . CountAggregate $ case countType of
       StarCountable -> StarCountable
-      NonNullFieldCountable names -> NonNullFieldCountable $ fmap columnFieldAggEntity names
-      DistinctCountable names -> DistinctCountable $ fmap columnFieldAggEntity names
+      NonNullFieldCountable name -> NonNullFieldCountable $ columnFieldAggEntity name
+      DistinctCountable name -> DistinctCountable $ columnFieldAggEntity name
     IR.AFOp IR.AggregateOp {_aoOp = op, _aoFields = fields} ->
       let projections :: [Projection] =
-            fields <&> \(fieldName, pgColFld) ->
-              case pgColFld of
-                IR.CFCol pgCol _pgType ->
-                  let fname = columnFieldAggEntity pgCol
+            fields <&> \(fieldName, columnField) ->
+              case columnField of
+                IR.CFCol column _columnType ->
+                  let fname = columnFieldAggEntity column
                    in AggregateProjection $ Aliased (OpAggregate op [ColumnExpression fname]) (IR.getFieldNameTxt fieldName)
                 IR.CFExp text ->
                   ExpressionProjection $ Aliased (ValueExpression (ODBC.TextValue text)) (IR.getFieldNameTxt fieldName)
@@ -717,9 +719,9 @@ fromAnnColumnField ::
   IR.AnnColumnField 'MSSQL Expression ->
   ReaderT EntityAlias FromIr Expression
 fromAnnColumnField _stringifyNumbers annColumnField = do
-  fieldName <- fromPGCol pgCol
+  fieldName <- fromColumn column
   -- TODO: Handle stringifying large numbers
-  {-(IR.isScalarColumnWhere PG.isBigNum typ && stringifyNumbers == StringifyNumbers)-}
+  {-(IR.isScalarColumnWhere isBigNum typ && stringifyNumbers == StringifyNumbers)-}
 
   -- for geometry and geography values, the automatic json encoding on sql
   -- server would fail. So we need to convert it to a format the json encoding
@@ -727,7 +729,7 @@ fromAnnColumnField _stringifyNumbers annColumnField = do
   -- doesn't have any functions to convert to GeoJSON format. So we return it in
   -- WKT format
   if typ == (IR.ColumnScalar GeometryType) || typ == (IR.ColumnScalar GeographyType)
-    then pure $ MethodExpression (ColumnExpression fieldName) "STAsText" []
+    then pure $ MethodApplicationExpression (ColumnExpression fieldName) MethExpSTAsText
     else case caseBoolExpMaybe of
       Nothing -> pure (ColumnExpression fieldName)
       Just ex -> do
@@ -736,7 +738,7 @@ fromAnnColumnField _stringifyNumbers annColumnField = do
         pure (ConditionalExpression ex' (ColumnExpression fieldName) nullValue)
   where
     IR.AnnColumnField
-      { _acfColumn = pgCol,
+      { _acfColumn = column,
         _acfType = typ,
         _acfAsText = _asText :: Bool,
         _acfOp = _ :: Maybe (IR.ColumnOp 'MSSQL), -- TODO: What's this?
@@ -746,11 +748,11 @@ fromAnnColumnField _stringifyNumbers annColumnField = do
 -- | This is where a field name "foo" is resolved to a fully qualified
 -- field name [table].[foo]. The table name comes from EntityAlias in
 -- the ReaderT.
-fromPGCol :: ColumnName -> ReaderT EntityAlias FromIr FieldName
-fromPGCol pgCol = columnNameToFieldName pgCol <$> ask
+fromColumn :: ColumnName -> ReaderT EntityAlias FromIr FieldName
+fromColumn column = columnNameToFieldName column <$> ask
 
 --  entityAlias <- ask
---  pure (columnNameToFieldName pgCol entityAlias -- FieldName {fieldName = PG.getPGColTxt pgCol, fieldNameEntity = entityAliasText}
+--  pure (columnNameToFieldName column entityAlias -- FieldName {fieldName = columnName column, fieldNameEntity = entityAliasText}
 --       )
 
 fieldSourceProjections :: FieldSource -> Projection
@@ -791,7 +793,7 @@ fieldSourceJoin =
 -- Joins
 
 fromObjectRelationSelectG ::
-  Map TableName {-PG.QualifiedTable-} EntityAlias ->
+  Map TableName EntityAlias ->
   IR.ObjectRelationSelectG 'MSSQL Void Expression ->
   ReaderT EntityAlias FromIr Join
 fromObjectRelationSelectG existingJoins annRelationSelectG = do
@@ -849,18 +851,18 @@ fromObjectRelationSelectG existingJoins annRelationSelectG = do
   where
     IR.AnnObjectSelectG
       { _aosFields = fields :: IR.AnnFieldsG 'MSSQL Void Expression,
-        _aosTableFrom = tableFrom :: TableName {-PG.QualifiedTable-},
+        _aosTableFrom = tableFrom :: TableName,
         _aosTableFilter = tableFilter :: IR.AnnBoolExp 'MSSQL Expression
       } = annObjectSelectG
     IR.AnnRelationSelectG
       { aarRelationshipName,
-        aarColumnMapping = mapping :: HashMap ColumnName ColumnName, -- PG.PGCol PG.PGCol
+        aarColumnMapping = mapping :: HashMap ColumnName ColumnName,
         aarAnnSelect = annObjectSelectG :: IR.AnnObjectSelectG 'MSSQL Void Expression
       } = annRelationSelectG
 
 lookupTableFrom ::
-  Map TableName {-PG.QualifiedTable-} EntityAlias ->
-  {-PG.QualifiedTable-} TableName ->
+  Map TableName EntityAlias ->
+  TableName ->
   FromIr (Either EntityAlias From)
 lookupTableFrom existingJoins tableFrom = do
   case M.lookup tableFrom existingJoins of
@@ -924,7 +926,7 @@ fromArrayRelationSelectG annRelationSelectG = do
   where
     IR.AnnRelationSelectG
       { aarRelationshipName,
-        aarColumnMapping = mapping :: HashMap ColumnName ColumnName, -- PG.PGCol PG.PGCol
+        aarColumnMapping = mapping :: HashMap ColumnName ColumnName,
         aarAnnSelect = annSelectG
       } = annRelationSelectG
 
@@ -939,18 +941,18 @@ fromRelName relName =
 -- We should hope to see e.g. "post.category = category.id" for a
 -- local table of post and a remote table of category.
 --
--- The left/right columns in @HashMap PG.PGCol PG.PGCol@ corresponds
+-- The left/right columns in @HashMap ColumnName ColumnName@ corresponds
 -- to the left/right of @select ... join ...@. Therefore left=remote,
 -- right=local in this context.
 fromMapping ::
   From ->
-  HashMap ColumnName ColumnName -> -- PG.PGCol PG.PGCol
+  HashMap ColumnName ColumnName ->
   ReaderT EntityAlias FromIr [Expression]
 fromMapping localFrom =
   traverse
-    ( \(remotePgCol, localPgCol) -> do
-        localFieldName <- local (const (fromAlias localFrom)) (fromPGCol localPgCol)
-        remoteFieldName <- fromPGCol remotePgCol
+    ( \(remoteColumn, localColumn) -> do
+        localFieldName <- local (const (fromAlias localFrom)) (fromColumn localColumn)
+        remoteFieldName <- fromColumn remoteColumn
         pure
           ( OpExpression
               TSQL.EQ'
@@ -1070,11 +1072,13 @@ fromGBoolExp =
 fromInsert :: IR.AnnInsert 'MSSQL Void Expression -> Insert
 fromInsert IR.AnnInsert {..} =
   let IR.AnnIns {..} = _aiData
-      insertRows = normalizeInsertRows _aiData $ map (IR.getInsertColumns) _aiInsObj
+      insertRows = normalizeInsertRows (_biIdentityColumns _aiBackendInsert) _aiTableCols $ map (IR.getInsertColumns) _aiInsObj
       insertColumnNames = maybe [] (map fst) $ listToMaybe insertRows
       insertValues = map (Values . map snd) insertRows
-      primaryKeyColumns = map OutputColumn $ _eciPrimaryKeyColumns $ _biExtraColumnInfo _aiBackendInsert
-   in Insert _aiTableName insertColumnNames (Output Inserted primaryKeyColumns) insertValues
+      allColumnNames = map (ColumnName . unName . IR.ciName) _aiTableCols
+      insertOutput = Output Inserted $ map OutputColumn allColumnNames
+      tempTable = TempTable tempTableNameInserted allColumnNames
+   in Insert _aiTableName insertColumnNames insertOutput tempTable insertValues
 
 -- | Normalize a row by adding missing columns with 'DEFAULT' value and sort by column name to make sure
 -- all rows are consistent in column values and order.
@@ -1096,17 +1100,71 @@ fromInsert IR.AnnInsert {..} =
 -- We consider 'DEFAULT' value for "age" column which is missing in second insert row. The INSERT statement look like
 --
 -- INSERT INTO author (id, name, age) OUTPUT INSERTED.id VALUES (1, 'Foo', 21), (2, 'Bar', DEFAULT)
-normalizeInsertRows :: IR.AnnIns 'MSSQL [] Expression -> [[(Column 'MSSQL, Expression)]] -> [[(Column 'MSSQL, Expression)]]
-normalizeInsertRows IR.AnnIns {..} insertRows =
-  let isIdentityColumn column =
-        IR.pgiColumn column `elem` _eciIdentityColumns (_biExtraColumnInfo _aiBackendInsert)
+normalizeInsertRows ::
+  [ColumnName] ->
+  [IR.ColumnInfo 'MSSQL] ->
+  [[(Column 'MSSQL, Expression)]] ->
+  [[(Column 'MSSQL, Expression)]]
+normalizeInsertRows identityColumnNames tableColumns insertRows =
+  let isIdentityColumn column = IR.ciColumn column `elem` identityColumnNames
       allColumnsWithDefaultValue =
         -- DEFAULT or NULL are not allowed as explicit identity values.
-        map ((,DefaultExpression) . IR.pgiColumn) $ filter (not . isIdentityColumn) _aiTableCols
+        map ((,DefaultExpression) . IR.ciColumn) $ filter (not . isIdentityColumn) tableColumns
       addMissingColumns insertRow =
         HM.toList $ HM.fromList insertRow `HM.union` HM.fromList allColumnsWithDefaultValue
       sortByColumn = sortBy (\l r -> compare (fst l) (fst r))
    in map (sortByColumn . addMissingColumns) insertRows
+
+-- | Construct a MERGE statement from AnnInsert information.
+--   A MERGE statement is responsible for actually inserting and/or updating
+--   the data in the table.
+toMerge ::
+  TableName ->
+  [IR.AnnotatedInsertRow 'MSSQL Expression] ->
+  [ColumnName] ->
+  [IR.ColumnInfo 'MSSQL] ->
+  IfMatched Expression ->
+  FromIr Merge
+toMerge tableName insertRows identityColumnNames tableColumns IfMatched {..} = do
+  let normalizedInsertRows =
+        normalizeInsertRows identityColumnNames tableColumns $
+          map (IR.getInsertColumns) insertRows
+      insertColumnNames = maybe [] (map fst) $ listToMaybe normalizedInsertRows
+      allColumnNames = map (ColumnName . unName . IR.ciName) tableColumns
+
+  matchConditions <-
+    flip runReaderT (EntityAlias "target") $ -- the table is aliased as "target" in MERGE sql
+      fromGBoolExp _imConditions
+
+  pure $
+    Merge
+      { mergeTargetTable = tableName,
+        mergeUsing = MergeUsing tempTableNameValues allColumnNames,
+        mergeOn = MergeOn _imMatchColumns,
+        mergeWhenMatched = MergeWhenMatched _imUpdateColumns matchConditions _imColumnPresets,
+        mergeWhenNotMatched = MergeWhenNotMatched insertColumnNames,
+        mergeInsertOutput = Output Inserted $ map OutputColumn allColumnNames,
+        mergeOutputTempTable = TempTable tempTableNameInserted allColumnNames
+      }
+
+-- | As part of an INSERT/UPSERT process, insert VALUES into a temporary table.
+--   The content of the temporary table will later be inserted into the original table
+--   using a MERGE statement.
+--
+--   We insert the values into a temporary table first in order to replace the missing
+--   fields with @DEFAULT@ in @normalizeInsertRows@, and we can't do that in a
+--   MERGE statement directly.
+toInsertValuesIntoTempTable :: TempTableName -> IR.AnnInsert 'MSSQL Void Expression -> InsertValuesIntoTempTable
+toInsertValuesIntoTempTable tempTable IR.AnnInsert {..} =
+  let IR.AnnIns {..} = _aiData
+      insertRows = normalizeInsertRows (_biIdentityColumns _aiBackendInsert) _aiTableCols $ map IR.getInsertColumns _aiInsObj
+      insertColumnNames = maybe [] (map fst) $ listToMaybe insertRows
+      insertValues = map (Values . map snd) insertRows
+   in InsertValuesIntoTempTable
+        { ivittTempTableName = tempTable,
+          ivittColumns = insertColumnNames,
+          ivittValues = insertValues
+        }
 
 --------------------------------------------------------------------------------
 -- Delete
@@ -1119,7 +1177,7 @@ fromDelete (IR.AnnDel tableName (permFilter, whereClause) _ allColumns) = do
     ( do
         permissionsFilter <- fromGBoolExp permFilter
         whereExpression <- fromGBoolExp whereClause
-        let columnNames = map (ColumnName . unName . IR.pgiName) allColumns
+        let columnNames = map (ColumnName . unName . IR.ciName) allColumns
         pure
           Delete
             { deleteTable =
@@ -1142,7 +1200,7 @@ fromUpdate (IR.AnnotatedUpdateG tableName (permFilter, whereClause) _ backendUpd
     ( do
         permissionsFilter <- fromGBoolExp permFilter
         whereExpression <- fromGBoolExp whereClause
-        let columnNames = map (ColumnName . unName . IR.pgiName) allColumns
+        let columnNames = map (ColumnName . unName . IR.ciName) allColumns
         pure
           Update
             { updateTable =
@@ -1159,27 +1217,28 @@ fromUpdate (IR.AnnotatedUpdateG tableName (permFilter, whereClause) _ backendUpd
     tableAlias
 
 -- | Create a temporary table with the same schema as the given table.
-toSelectIntoTempTable :: TempTableName -> TableName -> [IR.ColumnInfo 'MSSQL] -> SelectIntoTempTable
-toSelectIntoTempTable tempTableName fromTable allColumns = do
+toSelectIntoTempTable :: TempTableName -> TableName -> [IR.ColumnInfo 'MSSQL] -> SITTConstraints -> SelectIntoTempTable
+toSelectIntoTempTable tempTableName fromTable allColumns withConstraints = do
   SelectIntoTempTable
     { sittTempTableName = tempTableName,
       sittColumns = map columnInfoToUnifiedColumn allColumns,
-      sittFromTableName = fromTable
+      sittFromTableName = fromTable,
+      sittConstraints = withConstraints
     }
 
 -- | Extracts the type and column name of a ColumnInfo
 columnInfoToUnifiedColumn :: IR.ColumnInfo 'MSSQL -> UnifiedColumn
 columnInfoToUnifiedColumn colInfo =
-  case IR.pgiType colInfo of
+  case IR.ciType colInfo of
     IR.ColumnScalar t ->
       UnifiedColumn
-        { name = unName $ IR.pgiName colInfo,
+        { name = unName $ IR.ciName colInfo,
           type' = t
         }
     -- Enum values are represented as text value so they will always be of type text
     IR.ColumnEnumReference {} ->
       UnifiedColumn
-        { name = unName $ IR.pgiName colInfo,
+        { name = unName $ IR.ciName colInfo,
           type' = TextType
         }
 

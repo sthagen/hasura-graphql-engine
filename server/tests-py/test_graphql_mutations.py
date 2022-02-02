@@ -514,7 +514,7 @@ class TestGraphqlUpdatePermissions:
 
 @pytest.mark.parametrize("backend", ['mssql'])
 @use_mutation_fixtures
-class TestGraphqlUpdateBasicMssql:
+class TestGraphqlUpdateBasicMSSQL:
 
     def test_set_author_name(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + "/author_set_name_mssql.yaml")
@@ -543,7 +543,7 @@ class TestGraphqlUpdateBasicMssql:
 
 @pytest.mark.parametrize("backend", ['mssql'])
 @use_mutation_fixtures
-class TestGraphqlUpdatePermissionsMssql:
+class TestGraphqlUpdatePermissionsMSSQL:
 
     def test_user_update_author(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + "/user_update_author_mssql.yaml")
@@ -867,8 +867,8 @@ class TestGraphQLInsertMSSQL:
     def test_insert_multiple_objects(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + "/insert_multiple_objects_mssql.yaml")
 
-    def test_insert_table_no_pk_fail(self, hge_ctx):
-        check_query_f(hge_ctx, self.dir() + "/insert_table_no_pk_fail_mssql.yaml")
+    def test_insert_table_no_pk(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + "/insert_table_no_pk_mssql.yaml")
 
 @pytest.mark.parametrize("backend", ['mssql'])
 @use_mutation_fixtures
@@ -884,3 +884,34 @@ class TestGraphqlInsertPermissionMSSQL:
 
     def test_insert_permission_columns_fail(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + "/article_user_role_columns_fail_mssql.yaml")
+
+    def test_user_role_if_matched_update(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + "/article_if_matched_user_role_mssql.yaml")
+
+    def test_restricted_role_if_matched_update(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + "/article_if_matched_restricted_role_mssql.yaml")
+
+
+
+@pytest.mark.parametrize("backend", ['mssql'])
+@use_mutation_fixtures
+class TestGraphqlInsertIfMatchedMSSQL:
+
+    def test_if_matched_update(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + "/article_if_matched_update.yaml")
+
+    def test_if_matched_no_update(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + "/article_if_matched_no_update.yaml")
+
+    def test_order_if_matched_where(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/order_if_matched_where.yaml')
+
+    def test_if_matched_no_match_columns(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + "/article_if_matched_no_match_columns.yaml")
+
+    def test_match_non_id_column(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/article_if_matched_match_non_id_column.yaml')
+
+    @classmethod
+    def dir(cls):
+        return "queries/graphql_mutation/insert/ifmatched"

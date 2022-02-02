@@ -6,7 +6,105 @@
 ### Bug fixes and improvements
 (Add entries below in the order of server, console, cli, docs, others)
 
+## v2.2.0
+
+### Nested Action Types
+Actions now support nested responses as described by associated action types.Example:
+```graphql
+type Product {
+ id: bigint!
+ name: String
+}
+type ElasticOutput {
+ products: [Product!]!
+ aggregations: jsonb
+}
+```
+Previously, nested responses could be encapsulated in a generic "jsonb" output type but this loses precise type information for the API. The current support now allows specifying complex return types for the output.
+
+Currently limits action relationships to top-level fields in the output types.
+
+### GraphQL REST Endpoints OpenAPI Body Specifications
+
+GraphQL REST endpoints are documented via Swagger (OpenAPI) under the `/api/swagger/json` endpoint. We now document the request and response bodies of the endpoints in addition to previous information.
+
+### MS SQL Server Update for Hasura Server
+
+##### Expand Transactions to GraphQL Queries and mssql_run-sql API
+
+Extend transactions to GraphQL queries and mssql_run_sql API
+
+##### Rollback a Transaction Based in the Transaction State
+
+We can query the transaction state using XACT_STATE() scalar function. If the transaction is not active, don't rollback the transaction.
+
+##### Upsert - SQL Generation and Execution
+
+We are translating the if_matched section from the graphql, which is represented by the if_matched  type, to a MERGE SQL statement. Example:
+
+```
+mutation {
+  insert_author(
+    objects: { id: 1, name: "aaa" }
+    if_matched: { match_columns: author_pkey, update_columns: name }
+  ) {
+    returning {
+      id
+      name
+    }
+  }
+}
+```
+
+### Breaking Changes
+- For any **MSSQL** backend, count aggregate query on multiple columns is restricted with a GraphQL
+  schema change as follows
+
+```diff
+count (
+---  columns: [table_select_column!]
++++  column: table_select_column
+  distinct: Boolean
+): Int!
+```
+  MSSQL doesn't support applying `COUNT()` on multiple columns.
+  
+### Bug fixes and improvements
+
+- server: add a placeholder field to the schema when the `query_root` would be empty
+- server: fix invalid GraphQL name in the schema arising from a remote relationship from a table in a custom schema
+- server: add a new metadata API `get_cron_triggers` to fetch all the cron triggers
+- server: add response transforms for actions, events, and triggers
+- server: bigquery: implement `distinct_on`.
+- server: extend transactions to MSSQL GraphQL queries and `mssql_run_sql` /v2/query API
+- server: improve error messages in MSSQL database query exceptions
+- server: in mssql transactions, rollback only if the transaction is active
+- server: add request and response bodies to OpenAPI specification of REST endpoints
+- server: implement upsert mutations for MS SQL Server (close #7864)
+- server: extend support for insert mutations to tables without primary key constraint in a MSSQL backend
+- server: fix parsing FLOAT64s in scientific notation and non-finite ones in BigQuery
+- server: extend support for the `min`/`max` aggregates to all comparable types in BigQuery
+- server: fix support for joins in aggregates nodes in BigQuery
+- server: fix for passing input objects in query variables to remote schemas with type name customization (#7977)
+- server: fix REST endpoints with path segments not showing correctly in the OpenAPI spec
+- server: fix aliases used in GraphQL queries in REST endpoints not being reflected in the OpenAPI spec
+- server: refresh JWKs a maximum of once per second (fix #5781)
 - server: implement update mutations for MS SQL Server (closes #7834)
+- server: support nested output object types in actions (#4796)
+- server: action webhook requests now include a User-Agent header (fix #8070)
+- console: action/event trigger transforms are now called REST connectors
+- console: fix list of tables (and schemas) being unsorted when creating a new trigger event (fix #6391)
+- console: fix custom field names breaking browse table sorting and the pre-populating of the edit row form
+- console: enable support for insert & delete permissions for mssql tables
+- console: enable inherited role on settings page
+- cli: migrate and seed subcommands has an option in prompt to choose and apply operation on all available databases
+- cli: fix `metadata diff --type json | unified-json` behaving incorrectly and showing diff in YAML format.
+- cli: fix regression in `migrate create` command (#7971)
+- cli: stop using `/healthz` endpoint to determine server health
+- cli: fix regression with `--address` flag of `hasura console` command (#8005)
+
+## v2.1.1
+
 - server: provides a more comprehensive fix for the JSON ser/de backwards incompatibility that was initially addressed by 45481db (#7906)
 
 ## v2.1.0
@@ -33,7 +131,6 @@
 - server: support database-to-database joins with BigQuery
 - server: improved startup time when using large remote schemas
 - server: fix rest-endpoints bug allow list arguments (fix #7135)
-- server: support nested output object types in actions (#4796)
 - server: fallback to unauthorized role when JWT is not found in cookie (fix #7272)
 - server: add support for building linux/arm64 docker image (#6337, #1266)
 - server: provide option to explicitly recreate event triggers for sources in the `reload_metadata` API
@@ -47,6 +144,7 @@
 - cli: fix cli-console failing to add migrations if there are tabs in SQL body (#7362)
 - cli: sign windows binary of Hasura CLI (#7147)
 - cli: core CLI features are not blocked in environments without internet (#7695)
+- server: add `_like`/`_nlike` and spatial operators for BigQuery
 
 ## v2.1.0-beta.2
 

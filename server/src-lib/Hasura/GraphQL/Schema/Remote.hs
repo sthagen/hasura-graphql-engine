@@ -216,10 +216,12 @@ exact same value as the input (if perhaps represented differently); by discardin
 just forwarding the input, we avoid expanding variables if no preset needs be inserted.
 -}
 
--- | Helper, used to track whether an input value was altered during its parsing. At time of
--- writing, the only possible source of alteration is preset values. They might force evaluation of
--- variables, and encapsulation of sub-JSON expressions as new variables. Each parser indicates
--- whether such alteration took place within its part of the tree.
+-- | Helper, used to track whether an input value was altered during its parsing.
+-- There are two possible sources of alteration:
+--   - preset values, and
+--   - type name customizations.
+-- They might force evaluation of variables, and encapsulation of sub-JSON expressions as new variables.
+-- Each parser indicates whether such alteration took place within its part of the tree.
 -- See Note [Variable expansion in remote schema input parsers] for more information.
 newtype Altered = Altered {getAltered :: Bool}
   deriving (Show)
@@ -340,16 +342,18 @@ remoteFieldScalarParser customizeTypename (G.ScalarTypeDefinition description na
     { pType = schemaType,
       pParser = \case
         JSONValue v ->
+          -- Disallow short-circuit optimisation if the type name has been changed by remote schema customization
           pure $ (Altered $ G.getBaseType gType /= name, G.VVariable $ RemoteJSONValue (mkRemoteGType gType) v)
         GraphQLValue v -> case v of
           G.VVariable var -> do
             P.typeCheck False gType var
+            -- Disallow short-circuit optimisation if the type name has been changed by remote schema customization
             pure $ (Altered $ G.getBaseType (vType var) /= name, G.VVariable $ QueryVariable var {vType = mkRemoteGType (vType var)})
           _ -> pure (Altered False, QueryVariable <$> v)
     }
   where
     customizedTypename = runMkTypename customizeTypename name
-    schemaType = NonNullable $ TNamed $ Definition customizedTypename description TIScalar
+    schemaType = TNamed NonNullable $ Definition customizedTypename description TIScalar
     gType = toGraphQLType schemaType
 
     mkRemoteGType = \case
@@ -414,7 +418,10 @@ remoteInputObjectParser schemaDoc defn@(G.InputObjectTypeDefinition desc name _ 
 
       Right <$> P.memoizeOn 'remoteInputObjectParser defn do
         typename <- mkTypename name
-        argsParser <- argumentsParser valueDefns schemaDoc
+
+        -- Disallow short-circuit optimisation if the type name has been changed by remote schema customization
+        let altered = Altered $ typename /= name
+        argsParser <- fmap (first (<> altered)) <$> argumentsParser valueDefns schemaDoc
         pure $ fmap G.VObject <$> P.object typename desc argsParser
 
 -- | Variable expansion optimization.
@@ -433,7 +440,7 @@ shortCircuitIfUnaltered parser =
         result <- P.pParser parser value
         pure $ case result of
           -- The parser did yield a value, and it was unmodified by presets
-          -- we can short-citcuit by transforming the input value, therefore
+          -- we can short-circuit by transforming the input value, therefore
           -- "unpeeling" variables and avoiding extraneous JSON variables.
           Just (Altered False, _) -> Just $
             (Altered False,) $ case castWith (P.inputParserInput @k) value of
@@ -444,7 +451,7 @@ shortCircuitIfUnaltered parser =
               -- all the leaves of said value each be their own distinct value.
               JSONValue v -> G.VVariable $ RemoteJSONValue (toGraphQLType $ P.pType parser) v
           -- Otherwise either the parser did not yield any value, or a value
-          -- that has been altered by presets and permissions; we forward it
+          -- that has been altered by presets, permissions or type name customization; we forward it
           -- unoptimized.
           _ -> result
     }
@@ -841,11 +848,11 @@ remoteFieldFromDefinition ::
 remoteFieldFromDefinition schemaDoc parentTypeName (G.FieldDefinition description name argsDefinition gType _) = do
   let addNullableList :: FieldParser n a -> FieldParser n a
       addNullableList (P.FieldParser (Definition name' desc (FieldInfo args typ)) parser) =
-        P.FieldParser (Definition name' desc (FieldInfo args (Nullable (TList typ)))) parser
+        P.FieldParser (Definition name' desc (FieldInfo args (TList Nullable typ))) parser
 
       addNonNullableList :: FieldParser n a -> FieldParser n a
       addNonNullableList (P.FieldParser (Definition name' desc (FieldInfo args typ)) parser) =
-        P.FieldParser (Definition name' desc (FieldInfo args (NonNullable (TList typ)))) parser
+        P.FieldParser (Definition name' desc (FieldInfo args (TList NonNullable typ))) parser
 
       -- TODO add directives, deprecation
       convertType :: G.GType -> m (FieldParser n (G.Field G.NoFragments RemoteSchemaVariable))

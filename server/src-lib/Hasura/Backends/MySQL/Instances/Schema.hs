@@ -41,7 +41,7 @@ instance BackendSchema 'MySQL where
   jsonPathArg = jsonPathArg'
   orderByOperators = orderByOperators'
   comparisonExps = comparisonExps'
-  mkCountType = error "mkCountType: MySQL backend does not support this operation yet."
+  countTypeInput = mysqlCountTypeInput
   aggregateOrderByCountType = error "aggregateOrderByCountType: MySQL backend does not support this operation yet."
   computedField = error "computedField: MySQL backend does not support this operation yet."
   node = error "node: MySQL backend does not support this operation yet."
@@ -184,7 +184,7 @@ columnParser' columnType (G.Nullability isNullable) =
       MySQL.Timestamp -> pure $ possiblyNullable scalarType $ MySQL.TimestampValue <$> P.string
       _ -> do
         name <- MySQL.mkMySQLScalarTypeName scalarType
-        let schemaType = P.NonNullable $ P.TNamed $ P.Definition name Nothing P.TIScalar
+        let schemaType = P.TNamed P.NonNullable $ P.Definition name Nothing P.TIScalar
         pure $
           Parser
             { pType = schemaType,
@@ -210,7 +210,7 @@ columnParser' columnType (G.Nullability isNullable) =
         MySQL.VarcharValue $ G.unName value
       )
     throughJSON scalarName =
-      let schemaType = P.NonNullable $ P.TNamed $ P.Definition scalarName Nothing P.TIScalar
+      let schemaType = P.TNamed P.NonNullable $ P.Definition scalarName Nothing P.TIScalar
        in Parser
             { pType = schemaType,
               pParser =
@@ -284,3 +284,20 @@ comparisonExps' = P.memoize 'comparisonExps $ \columnType -> do
 offsetParser' :: MonadParse n => Parser 'Both n (SQLExpression 'MySQL)
 offsetParser' =
   MySQL.ValueExpression . MySQL.BigValue . fromIntegral <$> P.int
+
+mysqlCountTypeInput ::
+  MonadParse n =>
+  Maybe (Parser 'Both n (Column 'MySQL)) ->
+  InputFieldsParser n (IR.CountDistinct -> CountType 'MySQL)
+mysqlCountTypeInput = \case
+  Just columnEnum -> do
+    columns <- P.fieldOptional $$(G.litName "columns") Nothing $ P.list columnEnum
+    pure $ flip mkCountType columns
+  Nothing -> pure $ flip mkCountType Nothing
+  where
+    mkCountType :: IR.CountDistinct -> Maybe [Column 'MySQL] -> CountType 'MySQL
+    mkCountType _ Nothing = MySQL.StarCountable
+    mkCountType IR.SelectCountDistinct (Just cols) =
+      maybe MySQL.StarCountable MySQL.DistinctCountable $ nonEmpty cols
+    mkCountType IR.SelectCountNonDistinct (Just cols) =
+      maybe MySQL.StarCountable MySQL.NonNullFieldCountable $ nonEmpty cols

@@ -11,6 +11,7 @@ args:
         `bytes` BYTES,
         `integer` INT64,
         `float` FLOAT64,
+        `special_floats` ARRAY<FLOAT64>,
         `numeric` NUMERIC,
         `bignumeric` BIGNUMERIC,
         `boolean` BOOL,
@@ -39,6 +40,8 @@ args:
         CODE_POINTS_TO_BYTES([0,1,2,3,4,5]),
         1,
         1,
+        -- IEEE_DIVIDE(x, 0) returns Infinity and Infinity/Infinity is NaN
+        [1.23e23, IEEE_DIVIDE(-1, 0), IEEE_DIVIDE(1, 0)/IEEE_DIVIDE(1, 0)],
         1,
         1,
         true,
@@ -62,6 +65,9 @@ args:
       );
       INSERT INTO `hasura_test.article` VALUES (
         3, "Title 3", "Content 3", 2, FALSE, NULL, PARSE_TIMESTAMP("%c", "Thu Dec 25 07:30:03 2008")
+      );
+      INSERT INTO `hasura_test.article` VALUES (
+        4, "Title 4", "Content 4", 2, FALSE, NULL, PARSE_TIMESTAMP("%c", "Thu Dec 26 07:31:04 2008")
       );
 
       -- a copy for remote joins as we can't have the same table tracked in two sources
