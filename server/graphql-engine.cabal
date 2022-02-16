@@ -157,6 +157,7 @@ library
                      , mtl
                      , openapi3
                      , optparse-applicative
+                     , optparse-generic
                      , parsec
                      , pg-client
                      , postgresql-binary
@@ -395,6 +396,7 @@ library
                      , Hasura.Backends.MSSQL.Plan
                      , Hasura.Backends.MSSQL.Schema.IfMatched
                      , Hasura.Backends.MSSQL.SQL.Value
+                     , Hasura.Backends.MSSQL.SQL.Error
                      , Hasura.Backends.MSSQL.ToQuery
                      , Hasura.Backends.MSSQL.Types
                      , Hasura.Backends.MSSQL.Types.Insert
@@ -405,8 +407,8 @@ library
                      , Hasura.Backends.Postgres.Connection
                      , Hasura.Backends.Postgres.DDL
                      , Hasura.Backends.Postgres.DDL.BoolExp
+                     , Hasura.Backends.Postgres.DDL.ComputedField
                      , Hasura.Backends.Postgres.DDL.EventTrigger
-                     , Hasura.Backends.Postgres.DDL.Field
                      , Hasura.Backends.Postgres.DDL.Function
                      , Hasura.Backends.Postgres.DDL.RunSQL
                      , Hasura.Backends.Postgres.DDL.Source
@@ -426,7 +428,7 @@ library
                      , Hasura.Backends.Postgres.Schema.OnConflict
                      , Hasura.Backends.Postgres.SQL.DML
                      , Hasura.Backends.Postgres.SQL.Error
-                     , Hasura.Backends.Postgres.SQL.Rewrite
+                     , Hasura.Backends.Postgres.SQL.IdentifierUniqueness
                      , Hasura.Backends.Postgres.SQL.Types
                      , Hasura.Backends.Postgres.SQL.Value
                      , Hasura.Backends.Postgres.Translate.BoolExp
@@ -537,6 +539,7 @@ library
                      , Hasura.Server.Auth.JWT.Logging
                      , Hasura.RQL.Types
                      , Hasura.RQL.Types.Action
+                     , Hasura.RQL.Types.Allowlist
                      , Hasura.RQL.Types.ApiLimit
                      , Hasura.RQL.Types.Backend
                      , Hasura.RQL.Types.Column
@@ -843,6 +846,7 @@ test-suite graphql-engine-tests
   hs-source-dirs: src-test
   main-is: Main.hs
   other-modules:
+    Data.HashMap.Strict.ExtendedSpec
     Data.NonNegativeIntSpec
     Data.Parser.CacheControlSpec
     Data.Parser.JSONPathSpec
@@ -851,6 +855,7 @@ test-suite graphql-engine-tests
     Data.TimeSpec
     Database.MSSQL.TransactionSpec
     Hasura.Backends.MySQL.DataLoader.ExecuteTests
+    Hasura.Backends.MSSQL.ErrorSpec
     Hasura.EventingSpec
     Hasura.Generator
     Hasura.Generator.Common
@@ -864,7 +869,7 @@ test-suite graphql-engine-tests
     Hasura.RQL.IR.Postgres
     Hasura.RQL.PermissionSpec
     Hasura.RQL.WebhookTransformsSpec
-    Hasura.RQL.Types.EndpointSpec
+    Hasura.RQL.Types.AllowlistSpec
     Hasura.RQL.Types.CommonSpec
     Hasura.RQL.Types.EndpointSpec
     Hasura.Server.Auth.JWTSpec
@@ -880,18 +885,26 @@ test-suite tests-hspec
   type: exitcode-stdio-1.0
   build-tool-depends: hspec-discover:hspec-discover
   build-depends:
-      aeson
+      QuickCheck
+    , Spock-core
+    , aeson
+    , aeson-casing
+    , aeson-qq
+    , async
     , base
     , bytestring
     , case-insensitive
+    , conduit
     , containers
     , cron
     , dependent-map
     , dependent-sum
+    , ekg-core
     , graphql-engine
     , graphql-parser
     , haskell-src-meta
     , hedgehog
+    , hspec
     , hspec >=2.8.3 && <3
     , hspec-core >=2.8.3 && <3
     , hspec-discover >=2.8.3 && <3
@@ -900,61 +913,54 @@ test-suite tests-hspec
     , hspec-hedgehog
     , http-client
     , http-client-tls
+    , http-conduit
     , http-types
     , insert-ordered-containers
     , jose
     , kan-extensions
     , lens
+    , lens-aeson
+    , libyaml
     , lifted-base
     , mmorph
     , monad-control
+    , monad-logger
     , mtl
+    , mysql
+    , mysql-simple
     , natural-transformation >=0.4 && <0.5
+    , network
     , network-uri
+    , odbc
     , optparse-applicative
     , parsec
     , pg-client
+    , postgresql-libpq
+    , postgresql-simple
     , process
-    , QuickCheck
+    , resource-pool
+    , resourcet
     , safe
-    , typed-process
+    , safe-exceptions
     , scientific
     , split
     , stm
     , template-haskell
     , text
+    , text-conversions
+    , th-lift
+    , th-lift-instances
     , time
     , transformers-base
+    , typed-process
+    , unix
+    , unliftio-core
     , unordered-containers
     , utf8-string
     , vector
-    -- mssql support
-    , odbc
-    , resource-pool
-    -- hspec tests
-    , text-conversions
-    , ekg-core
-    , unix
     , warp
-    , aeson-casing
     , websockets
-    , hspec
-    , async
-    , http-conduit
-    , network
-    , mysql-simple
-    , postgresql-libpq
-    , mysql
-    , aeson-qq
-    , resourcet
-    , conduit
-    , libyaml
-    , th-lift-instances
-    , th-lift
     , yaml
-    , postgresql-simple
-    , monad-logger
-    , unliftio-core
   hs-source-dirs: tests-hspec
   -- Turning off optimizations is intentional; tests aren't
   -- performance sensitive and waiting for compilation is a problem.
@@ -962,36 +968,40 @@ test-suite tests-hspec
   main-is: Spec.hs
   other-modules:
     SpecHook
+
  -- Harness
-      Harness.Constants
+    Harness.Constants
+    Harness.Env
+    Harness.GraphqlEngine
+    Harness.Http
+    Harness.RemoteServer
+    Harness.State
 
-   -- Harness.Backend
-        Harness.Backend.Mysql
-        Harness.Backend.Sqlserver
-        Harness.Backend.Postgres
-        Harness.Backend.Citus
+ -- Harness.Backend
+    Harness.Backend.BigQuery
+    Harness.Backend.Citus
+    Harness.Backend.Mysql
+    Harness.Backend.Postgres
+    Harness.Backend.Sqlserver
 
-      Harness.GraphqlEngine
-      Harness.Http
-      Harness.State
+ -- Harness.Test
+    Harness.Test.Feature
 
-   -- Harness.Test
-        Harness.Test.Feature
-
-   -- Harness.Quoter
-        Harness.Quoter.Yaml
-        Harness.Quoter.Sql
-        Harness.Quoter.Graphql
+ -- Harness.Quoter
+    Harness.Quoter.Graphql
+    Harness.Quoter.Sql
+    Harness.Quoter.Yaml
 
  -- Test
-      Test.ArrayRelationshipsSpec
-      Test.NestedRelationshipsSpec
-      Test.BasicFieldsSpec
-      Test.DirectivesSpec
-      Test.HelloWorldSpec
-      Test.LimitOffsetSpec
-      Test.ObjectRelationshipsSpec
-      Test.OrderingSpec
-      Test.ServiceLivenessSpec
-      Test.ViewsSpec
-      Test.WhereSpec
+    Test.ArrayRelationshipsSpec
+    Test.BasicFieldsSpec
+    Test.DirectivesSpec
+    Test.HelloWorldSpec
+    Test.LimitOffsetSpec
+    Test.NestedRelationshipsSpec
+    Test.ObjectRelationshipsLimitSpec
+    Test.ObjectRelationshipsSpec
+    Test.OrderingSpec
+    Test.ServiceLivenessSpec
+    Test.ViewsSpec
+    Test.WhereSpec

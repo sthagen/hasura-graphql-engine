@@ -227,7 +227,7 @@ export const getGroupedTableComputedFields = (
     table: ComputedField[];
   } = { scalar: [], table: [] };
 
-  computed_fields.forEach(computedField => {
+  computed_fields?.forEach(computedField => {
     const computedFieldFnDef = computedField.definition.function;
     const computedFieldFn = findFunction(
       allFunctions,
@@ -631,6 +631,10 @@ export const supportedFeatures: DeepRequired<SupportedFeaturesType> = {
     },
     relationships: {
       enabled: true,
+      remoteDbRelationships: {
+        hostSource: true,
+        referenceSource: true,
+      },
       remoteRelationships: true,
       track: true,
     },

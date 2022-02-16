@@ -187,7 +187,8 @@ mkServeOptions rso = do
   txIso <- fromMaybe Q.ReadCommitted <$> withEnv (rsoTxIso rso) (fst txIsoEnv)
   adminScrt <- fmap (maybe mempty Set.singleton) $ withEnvs (rsoAdminSecret rso) $ map fst [adminSecretEnv, accessKeyEnv]
   authHook <- mkAuthHook $ rsoAuthHook rso
-  jwtSecret <- withEnvJwtConf (rsoJwtSecret rso) $ fst jwtSecretEnv
+  jwtSecret <- (`onNothing` mempty) <$> withEnvJwtConf (rsoJwtSecret rso) (fst jwtSecretEnv)
+
   unAuthRole <- withEnv (rsoUnAuthRole rso) $ fst unAuthRoleEnv
   corsCfg <- mkCorsConfig $ rsoCorsConfig rso
   enableConsole <-
@@ -653,7 +654,7 @@ wsReadCookieEnv =
     "Read cookie on WebSocket initial handshake, even when CORS is disabled."
       ++ " This can be a potential security flaw! Please make sure you know "
       ++ "what you're doing."
-      ++ "This configuration is only applicable when CORS is disabled."
+      ++ " This configuration is only applicable when CORS is disabled."
   )
 
 stringifyNumEnv :: (String, String)
@@ -686,7 +687,10 @@ enabledAPIsEnv =
 experimentalFeaturesEnv :: (String, String)
 experimentalFeaturesEnv =
   ( "HASURA_GRAPHQL_EXPERIMENTAL_FEATURES",
-    "Comma separated list of experimental features. (all: inherited_roles)"
+    "Comma separated list of experimental features. (all: inherited_roles,optimize_permission_filters). "
+      <> "optimize_permission_filters: Use experimental SQL optimization"
+      <> "transformations for permission filters. "
+      <> "inherited_roles: ignored; inherited roles cannot be switched off"
   )
 
 gracefulShutdownEnv :: (String, String)
@@ -1343,7 +1347,7 @@ serveOptsToLog so =
         [ "port" J..= soPort so,
           "server_host" J..= show (soHost so),
           "transaction_isolation" J..= show (soTxIso so),
-          "admin_secret_set" J..= (not $ Set.null (soAdminSecret so)),
+          "admin_secret_set" J..= not (Set.null (soAdminSecret so)),
           "auth_hook" J..= (ahUrl <$> soAuthHook so),
           "auth_hook_mode" J..= (show . ahType <$> soAuthHook so),
           "jwt_secret" J..= (J.toJSON <$> soJwtSecret so),

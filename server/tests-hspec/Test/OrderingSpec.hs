@@ -19,17 +19,15 @@ import Prelude
 
 spec :: SpecWith State
 spec =
-  Feature.feature
-    Feature.Feature
-      { Feature.backends =
-          [ Feature.Backend
-              { name = "MySQL",
-                setup = mysqlSetup,
-                teardown = mysqlTeardown
-              }
-          ],
-        Feature.tests = tests
-      }
+  Feature.run
+    [ Feature.Context
+        { name = "MySQL",
+          setup = mysqlSetup,
+          teardown = mysqlTeardown,
+          options = Feature.defaultOptions
+        }
+    ]
+    tests
 
 --------------------------------------------------------------------------------
 -- MySQL backend
@@ -58,9 +56,8 @@ VALUES
 |]
 
   -- Track the tables
-  GraphqlEngine.post_
+  GraphqlEngine.postMetadata_
     state
-    "/v1/metadata"
     [yaml|
 type: mysql_track_table
 args:
@@ -70,7 +67,7 @@ args:
     name: author
 |]
 
-mysqlTeardown :: State -> IO ()
+mysqlTeardown :: (State, ()) -> IO ()
 mysqlTeardown _ = do
   Mysql.run_
     [sql|
@@ -84,10 +81,11 @@ DROP TABLE author;
 -- That includes order by {text,id} {desc,asc}
 --
 
-tests :: SpecWith State
-tests = do
+tests :: Feature.Options -> SpecWith State
+tests opts = do
   it "Order by id ascending" $ \state ->
     shouldReturnYaml
+      opts
       ( GraphqlEngine.postGraphql
           state
           [graphql|
@@ -110,6 +108,7 @@ data:
 
   it "Order by id descending" $ \state ->
     shouldReturnYaml
+      opts
       ( GraphqlEngine.postGraphql
           state
           [graphql|
@@ -132,6 +131,7 @@ data:
 
   it "Order by name ascending" $ \state ->
     shouldReturnYaml
+      opts
       ( GraphqlEngine.postGraphql
           state
           [graphql|
@@ -154,6 +154,7 @@ data:
 
   it "Order by name descending" $ \state ->
     shouldReturnYaml
+      opts
       ( GraphqlEngine.postGraphql
           state
           [graphql|

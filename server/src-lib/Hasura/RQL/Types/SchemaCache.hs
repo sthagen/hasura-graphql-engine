@@ -44,11 +44,10 @@ module Hasura.RQL.Types.SchemaCache
     ViewInfo (..),
     isMutable,
     IntrospectionResult (..),
-    ParsedIntrospectionG (..),
-    ParsedIntrospection,
     RemoteSchemaCustomizer (..),
     remoteSchemaCustomizeTypeName,
     remoteSchemaCustomizeFieldName,
+    RemoteSchemaRelationships,
     RemoteSchemaCtx (..),
     rscName,
     rscInfo,
@@ -56,6 +55,7 @@ module Hasura.RQL.Types.SchemaCache
     rscParsed,
     rscRawIntrospectionResult,
     rscPermissions,
+    rscRemoteRelationships,
     RemoteSchemaMap,
     DepMap,
     WithDeps,
@@ -109,6 +109,9 @@ module Hasura.RQL.Types.SchemaCache
     MetadataResourceVersion (..),
     initialResourceVersion,
     getBoolExpDeps,
+    InlinedAllowlist,
+    ParsedIntrospectionG (..),
+    ParsedIntrospection,
   )
 where
 
@@ -136,6 +139,7 @@ import Hasura.Prelude
 import Hasura.RQL.DDL.WebhookTransforms
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.Types.Action
+import Hasura.RQL.Types.Allowlist
 import Hasura.RQL.Types.ApiLimit
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
@@ -150,6 +154,7 @@ import Hasura.RQL.Types.Metadata.Object
 import Hasura.RQL.Types.Network (TlsAllow)
 import Hasura.RQL.Types.QueryCollection
 import Hasura.RQL.Types.Relationships.Local
+import Hasura.RQL.Types.Relationships.Remote
 import Hasura.RQL.Types.RemoteSchema
 import Hasura.RQL.Types.ScheduledTrigger
 import Hasura.RQL.Types.SchemaCacheTypes
@@ -228,6 +233,9 @@ data ParsedIntrospectionG m = ParsedIntrospection
 
 type ParsedIntrospection = ParsedIntrospectionG (P.ParseT Identity)
 
+type RemoteSchemaRelationships =
+  InsOrdHashMap G.Name (InsOrdHashMap RelName (RemoteFieldInfo G.Name))
+
 -- | See 'fetchRemoteSchema'.
 data RemoteSchemaCtx = RemoteSchemaCtx
   { _rscName :: !RemoteSchemaName,
@@ -239,7 +247,8 @@ data RemoteSchemaCtx = RemoteSchemaCtx
     _rscRawIntrospectionResult :: !BL.ByteString,
     -- | FieldParsers with schema customizations applied
     _rscParsed :: ParsedIntrospection,
-    _rscPermissions :: !(M.HashMap RoleName IntrospectionResult)
+    _rscPermissions :: !(M.HashMap RoleName IntrospectionResult),
+    _rscRemoteRelationships :: RemoteSchemaRelationships
   }
 
 $(makeLenses ''RemoteSchemaCtx)
@@ -308,7 +317,7 @@ data SchemaCache = SchemaCache
   { scSources :: !SourceCache,
     scActions :: !ActionCache,
     scRemoteSchemas :: !RemoteSchemaMap,
-    scAllowlist :: !(HS.HashSet GQLQuery),
+    scAllowlist :: !InlinedAllowlist,
     scGQLContext :: !(HashMap RoleName (RoleContext GQLContext)),
     scUnauthenticatedGQLContext :: !GQLContext,
     scRelayContext :: !(HashMap RoleName (RoleContext GQLContext)),

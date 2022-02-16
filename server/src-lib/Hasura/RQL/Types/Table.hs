@@ -55,6 +55,7 @@ module Hasura.RQL.Types.Table
     tcCustomColumnNames,
     tcCustomName,
     tcCustomRootFields,
+    tcComment,
     tciCustomConfig,
     tciDescription,
     tciEnumValues,
@@ -580,7 +581,8 @@ type CustomColumnNames b = HashMap (Column b) G.Name
 data TableConfig b = TableConfig
   { _tcCustomRootFields :: !TableCustomRootFields,
     _tcCustomColumnNames :: !(CustomColumnNames b),
-    _tcCustomName :: !(Maybe G.Name)
+    _tcCustomName :: !(Maybe G.Name),
+    _tcComment :: !Comment
   }
   deriving (Generic)
 
@@ -599,7 +601,7 @@ $(makeLenses ''TableConfig)
 
 emptyTableConfig :: (TableConfig b)
 emptyTableConfig =
-  TableConfig emptyCustomRootFields M.empty Nothing
+  TableConfig emptyCustomRootFields M.empty Nothing Automatic
 
 instance (Backend b) => FromJSON (TableConfig b) where
   parseJSON = withObject "TableConfig" $ \obj ->
@@ -607,6 +609,7 @@ instance (Backend b) => FromJSON (TableConfig b) where
       <$> obj .:? "custom_root_fields" .!= emptyCustomRootFields
       <*> obj .:? "custom_column_names" .!= M.empty
       <*> obj .:? "custom_name"
+      <*> obj .:? "comment" .!= Automatic
 
 data Constraint (b :: BackendType) = Constraint
   { _cName :: !(ConstraintName b),

@@ -20,7 +20,9 @@ where
 import Control.Lens ((.~), (^.), (^?))
 import Data.Aeson qualified as J
 import Data.Aeson.Ordered qualified as AO
+import Data.Attoparsec.Text qualified as AT
 import Data.Bifunctor (bimap, first)
+import Data.Bitraversable
 import Data.ByteString.Lazy qualified as BL
 import Data.CaseInsensitive qualified as CI
 import Data.Environment qualified as Env
@@ -57,6 +59,7 @@ import Hasura.RQL.Types
 import Hasura.RQL.Types.Eventing.Backend (BackendEventTrigger (..))
 import Hasura.SQL.AnyBackend qualified as AB
 import Kriti qualified as K
+import Kriti.Error qualified as K
 import Network.HTTP.Client.Transformable qualified as HTTP
 
 runClearMetadata ::
@@ -420,6 +423,8 @@ purgeMetadataObj = \case
   MOSourceObjId source exists -> AB.dispatchAnyBackend @BackendMetadata exists $ handleSourceObj source
   MORemoteSchema rsn -> dropRemoteSchemaInMetadata rsn
   MORemoteSchemaPermissions rsName role -> dropRemoteSchemaPermissionInMetadata rsName role
+  MORemoteSchemaRemoteRelationship rsName typeName relName ->
+    dropRemoteSchemaRemoteRelationshipInMetadata rsName typeName relName
   MOCustomTypes -> clearCustomTypesInMetadata
   MOAction action -> dropActionInMetadata action -- Nothing
   MOActionPermission action role -> dropActionPermissionInMetadata action role
@@ -475,7 +480,7 @@ runRemoveMetricsConfig = do
   pure successMsg
 
 data TestTransformError
-  = UrlInterpError K.RenderedError
+  = UrlInterpError K.SerializedError
   | RequestInitializationError HTTP.HttpException
   | RequestTransformationError HTTP.Request TransformErrorBundle
 
@@ -485,7 +490,14 @@ runTestWebhookTransform ::
   m EncJSON
 runTestWebhookTransform (TestWebhookTransform env urlE payload mt _ sv) = do
   url <- case urlE of
-    URL url' -> pure url'
+    URL url' ->
+      case AT.parseOnly parseEnvTemplate url' of
+        Left _ -> throwError $ err400 ParseFailed "Invalid Url Template"
+        Right xs ->
+          let lookup' var = maybe (Left var) (Right . T.pack) $ Env.lookupEnv env (T.unpack var)
+              result = traverse (fmap indistinct . bitraverse lookup' pure) xs
+              err e = throwError $ err400 NotFound $ "Missing Env Var: " <> e
+           in either err (pure . fold) result
     EnvVar var ->
       let err = throwError $ err400 NotFound "Missing Env Var"
        in maybe err (pure . T.pack) $ Env.lookupEnv env var
@@ -494,7 +506,7 @@ runTestWebhookTransform (TestWebhookTransform env urlE payload mt _ sv) = do
     let env' = bimap T.pack (J.String . T.pack) <$> Env.toList env
         decodeKritiResult = TE.decodeUtf8 . BL.toStrict . J.encode
 
-    kritiUrlResult <- hoistEither $ first UrlInterpError $ decodeKritiResult <$> K.runKriti (TE.encodeUtf8 $ "\"" <> url <> "\"") env'
+    kritiUrlResult <- hoistEither $ first (UrlInterpError . K.serialize) $ decodeKritiResult <$> K.runKriti ("\"" <> url <> "\"") env'
 
     let unwrappedUrl = T.drop 1 $ T.dropEnd 1 kritiUrlResult
     initReq <- hoistEither $ first RequestInitializationError $ HTTP.mkRequestEither unwrappedUrl
@@ -512,6 +524,15 @@ runTestWebhookTransform (TestWebhookTransform env urlE payload mt _ sv) = do
     -- NOTE: In the following two cases we have failed before producing a valid request.
     Left (UrlInterpError err) -> pure $ encJFromJValue $ J.toJSON err
     Left (RequestInitializationError err) -> pure $ encJFromJValue $ J.String $ "Error: " <> tshow err
+
+parseEnvTemplate :: AT.Parser [Either T.Text T.Text]
+parseEnvTemplate = AT.many1 $ pEnv <|> pLit <|> fmap Right "{"
+  where
+    pEnv = fmap (Left) $ "{{" *> AT.takeWhile1 (/= '}') <* "}}"
+    pLit = fmap Right $ AT.takeWhile1 (/= '{')
+
+indistinct :: Either a a -> a
+indistinct = either id id
 
 packTransformResult :: HTTP.Request -> J.Value -> EncJSON
 packTransformResult req body =

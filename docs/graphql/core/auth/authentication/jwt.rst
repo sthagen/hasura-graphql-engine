@@ -378,6 +378,16 @@ Examples:
    Certain providers require you to verify the ``iss`` claim on the JWT. To do
    that you can set this field to the appropriate value.
 
+.. note::
+
+   A JWT configuration without an issuer will match any issuer field present in
+   an incoming JWT. 
+
+.. note::
+
+   An incoming JWT without an issuer specified will match a configuration
+   even if it specifies an issuer.
+
 
 ``claims_map``
 ^^^^^^^^^^^^^^
@@ -614,6 +624,7 @@ the JWT config only needs to have the public key.
       "
     }
 
+.. _running_with_jwt: 
 
 Running with JWT
 ^^^^^^^^^^^^^^^^
@@ -725,6 +736,7 @@ And use it in the ``key`` field:
     -----END CERTIFICATE-----
     "
         }
+.. _generating_jwt_config:
 
 Generating JWT Config
 ---------------------
