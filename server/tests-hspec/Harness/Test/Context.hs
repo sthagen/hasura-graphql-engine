@@ -1,24 +1,29 @@
 {-# LANGUAGE DeriveAnyClass #-}
 
 -- | Helper functions for easily testing features.
-module Harness.Test.Feature
+module Harness.Test.Context
   ( run,
     runWithLocalState,
     Context (..),
+    ContextName (..),
+    noLocalState,
     Options (..),
+    combineOptions,
     defaultOptions,
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Exception.Safe (Exception, SomeException, catch, mask, throwIO)
 import Data.Foldable (for_)
+import Data.Maybe (fromMaybe)
 import Harness.State (State)
-import Test.Hspec (ActionWith, SpecWith, aroundAllWith, describe)
+import Test.Hspec (ActionWith, HasCallStack, SpecWith, aroundAllWith, describe)
 import Test.Hspec.Core.Spec (Item (..), mapSpecItem)
 import Prelude
 
 --------------------------------------------------------------------------------
--- Feature
+-- Context
 
 -- | Runs the given tests, for each provided 'Context'@ ()@.
 --
@@ -88,8 +93,9 @@ runWithLocalState ::
   (Options -> SpecWith (State, a)) ->
   SpecWith State
 runWithLocalState contexts tests =
-  for_ contexts \context@Context {name, options} ->
-    describe name $ aroundAllWith (contextBracket context) (tests options)
+  for_ contexts \context@Context {name, customOptions} -> do
+    let options = fromMaybe defaultOptions customOptions
+    describe (show name) $ aroundAllWith (contextBracket context) (tests options)
   where
     -- We want to be able to report exceptions happening both during the tests
     -- and at teardown, which is why we use a custom re-implementation of
@@ -100,11 +106,21 @@ runWithLocalState contexts tests =
       ((State, a) -> IO b) ->
       State ->
       IO ()
-    contextBracket Context {setup, teardown} actionWith globalState =
+    contextBracket Context {mkLocalState, setup, teardown} actionWith globalState =
       mask \restore -> do
-        -- Get local test state from the `setup` function.
-        localState <- setup globalState
+        localState <- mkLocalState globalState
         let state = (globalState, localState)
+
+        catch
+          -- Setup for a test
+          (setup state)
+          ( \setupEx ->
+              catch
+                -- On setup error, attempt to run `teardown` and then throw the setup error
+                (teardown state *> throwIO setupEx)
+                -- On teardown error as well, throw both exceptions
+                (throwIO . Exceptions setupEx)
+          )
 
         -- Run tests.
         _ <-
@@ -153,18 +169,22 @@ runWithLocalState contexts tests =
 --   tests    :: SpecWith (State, Server)
 -- @
 data Context a = Context
-  { -- | A string describing the given context.
+  { -- | A name describing the given context.
     --
-    -- e.g. @"PostgreSQL"@ or @"MySQL v1.2"@
-    name :: String,
-    -- | Setup actions associated with this 'Context'; for example:
-    --  * running SQL commands
+    -- e.g. @Postgre@ or @MySQL@
+    name :: ContextName,
+    -- | Setup actions associated with creating a local state for this 'Context'; for example:
     --  * starting remote servers
-    --  * sending metadata commands
     --
     -- If any of those resources need to be threaded throughout the tests
-    -- themselves they should be returned here.
-    setup :: State -> IO a,
+    -- themselves they should be returned here. Otherwise, a ()
+    mkLocalState :: State -> IO a,
+    -- | Setup actions associated with this 'Context'; for example:
+    --  * running SQL commands
+    --  * sending metadata commands
+    --
+    -- Takes the global 'State' and any local state (i.e. @a@) as arguments.
+    setup :: (State, a) -> IO (),
     -- | Cleanup actions associated with this 'Context'.
     --
     -- This function /must/ return any resources created or modified as part of
@@ -172,9 +192,31 @@ data Context a = Context
     --
     -- Takes the global 'State' and any local state (i.e. @a@) as arguments.
     teardown :: (State, a) -> IO (),
-    -- | Options which modify the behavior of a given testing 'Context'.
-    options :: Options
+    -- | Options which modify the behavior of a given testing 'Context'; when
+    -- this field is 'Nothing', tests are given the 'defaultOptions'.
+    customOptions :: Maybe Options
   }
+
+-- | A name describing the given context.
+data ContextName
+  = Postgres
+  | MySQL
+  | SQLServer
+  | BigQuery
+  | Citus
+  | Combine ContextName ContextName
+
+instance Show ContextName where
+  show Postgres = "Postgres"
+  show MySQL = "MySQL"
+  show SQLServer = "SQLServer"
+  show BigQuery = "BigQuery"
+  show Citus = "Citus"
+  show (Combine name1 name2) = show name1 ++ "-" ++ show name2
+
+-- | Default function for 'mkLocalState' when there's no local state.
+noLocalState :: State -> IO ()
+noLocalState _ = pure ()
 
 data Options = Options
   { -- | Whether a given testing 'Context' should treat numeric values as
@@ -183,6 +225,26 @@ data Options = Options
     -- This is primarily a workaround for tests which run BigQuery.
     stringifyNumbers :: Bool
   }
+
+-- | This function can be used to combine two sets of 'Option's when creating
+-- custom composite 'Context's.
+--
+-- NOTE: This function throws an impure exception if the options are
+-- irreconcilable.
+combineOptions :: HasCallStack => Maybe Options -> Maybe Options -> Maybe Options
+combineOptions (Just lhs) (Just rhs) =
+  let -- 'stringifyNumbers' can only be unified if both sides have the same value.
+      stringifyNumbers =
+        if lhsStringify == rhsStringify
+          then lhsStringify
+          else reportInconsistency "stringifyNumbers" lhsStringify rhsStringify
+   in Just Options {..}
+  where
+    reportInconsistency fieldName lhsValue rhsValue =
+      error $ "Could not reconcile '" <> fieldName <> "'\n  lhs value: " <> show lhsValue <> "\n  rhs value: " <> show rhsValue
+    Options {stringifyNumbers = lhsStringify} = lhs
+    Options {stringifyNumbers = rhsStringify} = rhs
+combineOptions mLhs mRhs = mLhs <|> mRhs
 
 defaultOptions :: Options
 defaultOptions =

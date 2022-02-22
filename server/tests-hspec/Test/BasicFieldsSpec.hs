@@ -14,7 +14,7 @@ import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Sql (sql)
 import Harness.Quoter.Yaml (shouldReturnYaml, yaml)
 import Harness.State (State)
-import Harness.Test.Feature qualified as Feature
+import Harness.Test.Context qualified as Context
 import Test.Hspec (SpecWith, it)
 import Prelude
 
@@ -23,39 +23,45 @@ import Prelude
 
 spec :: SpecWith State
 spec =
-  Feature.run
-    [ Feature.Context
-        { name = "MySQL",
+  Context.run
+    [ Context.Context
+        { name = Context.MySQL,
+          mkLocalState = Context.noLocalState,
           setup = mysqlSetup,
           teardown = mysqlTeardown,
-          options = Feature.defaultOptions
+          customOptions = Nothing
         },
-      Feature.Context
-        { name = "PostgreSQL",
+      Context.Context
+        { name = Context.Postgres,
+          mkLocalState = Context.noLocalState,
           setup = postgresSetup,
           teardown = postgresTeardown,
-          options = Feature.defaultOptions
+          customOptions = Nothing
         },
-      Feature.Context
-        { name = "Citus",
+      Context.Context
+        { name = Context.Citus,
+          mkLocalState = Context.noLocalState,
           setup = citusSetup,
           teardown = citusTeardown,
-          options = Feature.defaultOptions
+          customOptions = Nothing
         },
-      Feature.Context
-        { name = "SQLServer",
+      Context.Context
+        { name = Context.SQLServer,
+          mkLocalState = Context.noLocalState,
           setup = sqlserverSetup,
           teardown = sqlserverTeardown,
-          options = Feature.defaultOptions
+          customOptions = Nothing
         },
-      Feature.Context
-        { name = "BigQuery",
+      Context.Context
+        { name = Context.BigQuery,
+          mkLocalState = Context.noLocalState,
           setup = bigquerySetup,
           teardown = bigqueryTeardown,
-          options =
-            Feature.Options
-              { stringifyNumbers = True
-              }
+          customOptions =
+            Just $
+              Context.Options
+                { stringifyNumbers = True
+                }
         }
     ]
     tests
@@ -63,8 +69,8 @@ spec =
 --------------------------------------------------------------------------------
 -- MySQL backend
 
-mysqlSetup :: State -> IO ()
-mysqlSetup state = do
+mysqlSetup :: (State, ()) -> IO ()
+mysqlSetup (state, _) = do
   -- Clear and reconfigure the metadata
   GraphqlEngine.setSource state Mysql.defaultSourceMetadata
 
@@ -108,8 +114,8 @@ DROP TABLE hasura.author;
 --------------------------------------------------------------------------------
 -- PostgreSQL backend
 
-postgresSetup :: State -> IO ()
-postgresSetup state = do
+postgresSetup :: (State, ()) -> IO ()
+postgresSetup (state, _) = do
   -- Clear and reconfigure the metadata
   GraphqlEngine.setSource state Postgres.defaultSourceMetadata
 
@@ -153,8 +159,8 @@ DROP TABLE hasura.author;
 --------------------------------------------------------------------------------
 -- Citus backend
 
-citusSetup :: State -> IO ()
-citusSetup state = do
+citusSetup :: (State, ()) -> IO ()
+citusSetup (state, ()) = do
   -- Clear and reconfigure the metadata
   GraphqlEngine.setSource state Citus.defaultSourceMetadata
 
@@ -198,8 +204,8 @@ DROP TABLE IF EXISTS hasura.author;
 --------------------------------------------------------------------------------
 -- SQL Server backend
 
-sqlserverSetup :: State -> IO ()
-sqlserverSetup state = do
+sqlserverSetup :: (State, ()) -> IO ()
+sqlserverSetup (state, ()) = do
   -- Clear and reconfigure the metadata
   GraphqlEngine.setSource state Sqlserver.defaultSourceMetadata
 
@@ -243,8 +249,8 @@ DROP TABLE hasura.author;
 --------------------------------------------------------------------------------
 -- BigQuery backend
 
-bigquerySetup :: State -> IO ()
-bigquerySetup state = do
+bigquerySetup :: (State, ()) -> IO ()
+bigquerySetup (state, ()) = do
   -- Clear and reconfigure the metadata
   serviceAccount <- BigQuery.getServiceAccount
   projectId <- BigQuery.getProjectId
@@ -312,7 +318,7 @@ DROP TABLE hasura.author;
 --------------------------------------------------------------------------------
 -- Tests
 
-tests :: Feature.Options -> SpecWith State
+tests :: Context.Options -> SpecWith State
 tests opts = do
   it "Author fields" $ \state ->
     shouldReturnYaml

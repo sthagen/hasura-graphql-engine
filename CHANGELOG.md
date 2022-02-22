@@ -5,6 +5,15 @@
 ### Bug fixes and improvements
 (Add entries below in the order of server, console, cli, docs, others)
 
+- server: Webhook Transforms can now delete request/response bodies explicitly.
+- server: Fix truncation of session variables with variable length column types in MSSQL (#8158)
+- server: improve baseline memory consumption for typical workloads
+- server: fix parsing timestamp values in BigQuery backends (fix #8076)
+
+## v2.3.0-beta.2
+
+- server: fix issues working with read-only DBs by reverting the need for storing required SQL functions in a `hdb_lib` schema in the user's DB
+
 ## v2.3.0-beta.1
 
 ### Experimental SQL optimizations
@@ -42,6 +51,7 @@ The optimization can be enabled using the
 - server: fix nullable action response (fix #4405)
 - server: add support for customization of table & computed field GraphQL schema descriptions (fix #7496)
 - server: classify MSSQL exceptions and improve API error responses
+- server: MSSQL generates correct SQL when object relationships are null.
 - console: add support for remote database relationships
 - console: enable support for update permissions for mssql
 - cli: skip tls verfication for all API requests when `insecure-skip-tls-verify` flag is set (fix #4926)

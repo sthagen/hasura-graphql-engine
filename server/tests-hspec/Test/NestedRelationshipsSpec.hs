@@ -12,7 +12,7 @@ import Harness.Quoter.Graphql
 import Harness.Quoter.Sql
 import Harness.Quoter.Yaml
 import Harness.State (State)
-import Harness.Test.Feature qualified as Feature
+import Harness.Test.Context qualified as Context
 import Test.Hspec
 import Prelude
 
@@ -21,12 +21,13 @@ import Prelude
 
 spec :: SpecWith State
 spec =
-  Feature.run
-    [ Feature.Context
-        { name = "MySQL",
+  Context.run
+    [ Context.Context
+        { name = Context.MySQL,
+          mkLocalState = Context.noLocalState,
           setup = mysqlSetup,
           teardown = mysqlTeardown,
-          options = Feature.defaultOptions
+          customOptions = Nothing
         }
     ]
     tests
@@ -34,8 +35,8 @@ spec =
 --------------------------------------------------------------------------------
 -- MySQL backend
 
-mysqlSetup :: State -> IO ()
-mysqlSetup state = do
+mysqlSetup :: (State, ()) -> IO ()
+mysqlSetup (state, _) = do
   -- Clear and reconfigure the metadata
   GraphqlEngine.setSource state Mysql.defaultSourceMetadata
 
@@ -147,7 +148,7 @@ DROP TABLE author;
 --------------------------------------------------------------------------------
 -- Tests
 
-tests :: Feature.Options -> SpecWith State
+tests :: Context.Options -> SpecWith State
 tests opts = do
   it "Nested select on article" $ \state ->
     shouldReturnYaml
