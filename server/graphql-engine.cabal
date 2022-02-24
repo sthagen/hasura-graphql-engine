@@ -325,6 +325,7 @@ library
     build-depends:     ghc-heap-view
 
   exposed-modules:     Control.Arrow.Extended
+                     , Control.Arrow.Interpret
                      , Control.Arrow.Trans
                      , Control.Concurrent.Extended
                      , Control.Lens.Extended
@@ -381,6 +382,7 @@ library
                      , Hasura.Backends.MSSQL.DDL.BoolExp
                      , Hasura.Backends.MSSQL.DDL.RunSQL
                      , Hasura.Backends.MSSQL.DDL.Source
+                     , Hasura.Backends.MSSQL.DDL.Source.Version
                      , Hasura.Backends.MSSQL.Execute.MutationResponse
                      , Hasura.Backends.MSSQL.Execute.Delete
                      , Hasura.Backends.MSSQL.Execute.Insert
@@ -835,6 +837,7 @@ test-suite graphql-engine-tests
     , template-haskell
     , text
     , time
+    , transformers
     , transformers-base
     , unordered-containers
     , utf8-string
@@ -974,6 +977,7 @@ test-suite tests-hspec
  -- Harness
     Harness.Constants
     Harness.Env
+    Harness.Exceptions
     Harness.GraphqlEngine
     Harness.Http
     Harness.RemoteServer
