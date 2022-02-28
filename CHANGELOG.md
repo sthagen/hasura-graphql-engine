@@ -8,10 +8,17 @@
 - server: add custom function for case insensitive lookup in session variable in request transformation
 - server: Webhook Transforms can now delete request/response bodies explicitly.
 - server: Fix truncation of session variables with variable length column types in MSSQL (#8158)
+- server: improve performance of `replace_metadata` for large schemas
 - server: improve baseline memory consumption for typical workloads
 - server: fix parsing timestamp values in BigQuery backends (fix #8076)
+- server: add support for customising the GraphQL schema descriptions of table root fields
 - console: include cron trigger with include in metadata as false on cron trigger manage page
+- console: show an error notification if Hasura CLI migrations fail
 - cli: fix metadata version being set to 3 when doing `hasura init --version 2` (#8148)
+
+## v2.3.0-beta.3
+
+- server: Fix experimental sql optimization read from `HASURA_GRAPHQL_EXPERIMENTAL_FEATURES` or `--experimental-features`
 
 ## v2.2.1
 
