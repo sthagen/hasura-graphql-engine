@@ -126,6 +126,7 @@ library
                      , aeson-casing
                      , attoparsec
                      , attoparsec-iso8601 >= 1.0
+                     , barbies
                      , base
                      , bytestring
                      , containers
@@ -335,6 +336,7 @@ library
                      , Data.HashMap.Strict.Multi
                      , Data.HashMap.Strict.NonEmpty
                      , Data.HashMap.Strict.InsOrd.Extended
+                     , Data.IntMap.Strict.Extended
                      , Data.List.Extended
                      , Data.Parser.CacheControl
                      , Data.Parser.Expires
@@ -380,6 +382,7 @@ library
                      , Hasura.Backends.MSSQL.Connection
                      , Hasura.Backends.MSSQL.DDL
                      , Hasura.Backends.MSSQL.DDL.BoolExp
+                     , Hasura.Backends.MSSQL.DDL.EventTrigger
                      , Hasura.Backends.MSSQL.DDL.RunSQL
                      , Hasura.Backends.MSSQL.DDL.Source
                      , Hasura.Backends.MSSQL.DDL.Source.Version
@@ -598,7 +601,13 @@ library
                      , Hasura.RQL.DDL.RemoteRelationship.Validate
                      , Hasura.RQL.DDL.RemoteSchema
                      , Hasura.RQL.DDL.RemoteSchema.Permission
-                     , Hasura.RQL.DDL.WebhookTransforms
+                     , Hasura.RQL.DDL.Webhook.Transform
+                     , Hasura.RQL.DDL.Webhook.Transform.Body
+                     , Hasura.RQL.DDL.Webhook.Transform.Class
+                     , Hasura.RQL.DDL.Webhook.Transform.Headers
+                     , Hasura.RQL.DDL.Webhook.Transform.Method
+                     , Hasura.RQL.DDL.Webhook.Transform.QueryParams
+                     , Hasura.RQL.DDL.Webhook.Transform.Url
                      , Hasura.RQL.DDL.Schema
                      , Hasura.RQL.DDL.Schema.Cache
                      , Hasura.RQL.DDL.Schema.Cache.Common
@@ -622,6 +631,7 @@ library
                      , Hasura.RQL.DML.Internal
                      , Hasura.RQL.DML.Update
                      , Hasura.RQL.DML.Types
+                     , Hasura.RQL.IR.Action
                      , Hasura.RQL.IR.BoolExp
                      , Hasura.RQL.IR.Conflict
                      , Hasura.RQL.IR.Delete
@@ -872,6 +882,7 @@ test-suite graphql-engine-tests
     Hasura.QuickCheck.Instances
     Hasura.RQL.IR.Generator
     Hasura.RQL.IR.Postgres
+    Hasura.RQL.IR.SelectSpec
     Hasura.RQL.MetadataSpec
     Hasura.RQL.PermissionSpec
     Hasura.RQL.Types.AllowlistSpec

@@ -4,12 +4,24 @@
 
 ### Bug fixes and improvements
 
+- server: Queries present in query collections, such as allow-list, and rest-endpoints are now validated (against the schema)
+- server: Redesigns internal implementation of webhook transforms.
+- server: improve SQL generation for BigQuery backend queries involving `Orderby`.
+- server: fix regression where remote relationships would get exposed over Relay, which is unsupported
+
+## v2.2.2
+
+- server: fix regression where remote relationships would get exposed over Relay, which is unsupported
+- server: fix caching bug with session variables in remote joins
+
 ## v2.4.0-beta.1
 
 ### Bug fixes and improvements
 (Add entries below in the order of server, console, cli, docs, others)
 
+- server: add metadata inconsistency information in `reload_metadata` API call
 - server: add custom function for case insensitive lookup in session variable in request transformation
+- server: Webhook Tranforms can now produce `x-www-url-formencoded` bodies.
 - server: Webhook Transforms can now delete request/response bodies explicitly.
 - server: Fix truncation of session variables with variable length column types in MSSQL (#8158)
 - server: improve performance of `replace_metadata` for large schemas
@@ -17,6 +29,7 @@
 - server: fix parsing timestamp values in BigQuery backends (fix #8076)
 - server: add support for customising the GraphQL schema descriptions of table root fields
 - server: add a `request_headers` field to the `test_webhook_transform` API.
+- server: add support for relationships on nested action fields
 - console: include cron trigger with include in metadata as false on cron trigger manage page
 - console: show an error notification if Hasura CLI migrations fail
 - console: fixed an issue where cron triggers were not removed from the list after deletion

@@ -54,7 +54,8 @@ import Hasura.RQL.DDL.RemoteRelationship
 import Hasura.RQL.DDL.RemoteSchema
 import Hasura.RQL.DDL.ScheduledTrigger
 import Hasura.RQL.DDL.Schema
-import Hasura.RQL.DDL.WebhookTransforms
+import Hasura.RQL.DDL.Webhook.Transform
+import Hasura.RQL.DDL.Webhook.Transform.Class (mkReqTransformCtx)
 import Hasura.RQL.Types
 import Hasura.RQL.Types.Eventing.Backend (BackendEventTrigger (..))
 import Hasura.SQL.AnyBackend qualified as AB
@@ -367,7 +368,12 @@ runReloadMetadata (ReloadMetadata reloadRemoteSchemas reloadSources reloadRecrea
           }
 
   buildSchemaCacheWithOptions (CatalogUpdate $ Just recreateEventTriggersSources) cacheInvalidations metadata
-  pure successMsg
+  inconsObjs <- scInconsistentObjs <$> askSchemaCache
+  pure . encJFromJValue . J.object $
+    [ ("message" :: Text) J..= ("success" :: Text),
+      "is_consistent" J..= null inconsObjs
+    ]
+      <> ["inconsistent_objects" J..= inconsObjs | not (null inconsObjs)]
 
 runDumpInternalState ::
   (QErrM m, CacheRM m) =>
@@ -432,6 +438,7 @@ purgeMetadataObj = \case
   MOEndpoint epName -> dropEndpointInMetadata epName
   MOInheritedRole role -> dropInheritedRoleInMetadata role
   MOHostTlsAllowlist host -> dropHostFromAllowList host
+  MOQueryCollectionsQuery cName lq -> dropListedQueryFromQueryCollections cName lq
   where
     handleSourceObj :: forall b. BackendMetadata b => SourceName -> SourceMetadataObjId b -> MetadataModifier
     handleSourceObj source = \case
@@ -446,6 +453,42 @@ purgeMetadataObj = \case
             MTOTrigger trn -> dropEventTriggerInMetadata trn
             MTOComputedField ccn -> dropComputedFieldInMetadata ccn
             MTORemoteRelationship rn -> dropRemoteRelationshipInMetadata rn
+
+    dropListedQueryFromQueryCollections :: CollectionName -> ListedQuery -> MetadataModifier
+    dropListedQueryFromQueryCollections cName lq = MetadataModifier $ removeAndCleanupMetadata
+      where
+        removeAndCleanupMetadata m =
+          let newQueryCollection = filteredCollection (_metaQueryCollections m)
+              -- QueryCollections = InsOrdHashMap CollectionName CreateCollection
+              filteredCollection :: QueryCollections -> QueryCollections
+              filteredCollection qc = OMap.filter (isNonEmptyCC) $ OMap.adjust (collectionModifier) (cName) qc
+
+              collectionModifier :: CreateCollection -> CreateCollection
+              collectionModifier cc@CreateCollection {..} =
+                cc
+                  { _ccDefinition =
+                      let oldQueries = _cdQueries _ccDefinition
+                       in _ccDefinition
+                            { _cdQueries = filter (/= lq) oldQueries
+                            }
+                  }
+
+              isNonEmptyCC :: CreateCollection -> Bool
+              isNonEmptyCC = not . null . _cdQueries . _ccDefinition
+
+              cleanupAllowList :: MetadataAllowlist -> MetadataAllowlist
+              cleanupAllowList = OMap.filterWithKey (\_ _ -> OMap.member cName newQueryCollection)
+
+              cleanupRESTEndpoints :: Endpoints -> Endpoints
+              cleanupRESTEndpoints endpoints = OMap.filter (not . isFaultyQuery . _edQuery . _ceDefinition) endpoints
+
+              isFaultyQuery :: QueryReference -> Bool
+              isFaultyQuery QueryReference {..} = _qrCollectionName == cName && _qrQueryName == (_lqName lq)
+           in m
+                { _metaQueryCollections = newQueryCollection,
+                  _metaAllowlist = cleanupAllowList (_metaAllowlist m),
+                  _metaRestEndpoints = cleanupRESTEndpoints (_metaRestEndpoints m)
+                }
 
 runGetCatalogState ::
   (MonadMetadataStorageQueryAPI m) => GetCatalogState -> m EncJSON
@@ -488,7 +531,7 @@ runTestWebhookTransform ::
   (QErrM m) =>
   TestWebhookTransform ->
   m EncJSON
-runTestWebhookTransform (TestWebhookTransform env headers urlE payload mt _ sv) = do
+runTestWebhookTransform (TestWebhookTransform env headers urlE payload rt _ sv) = do
   url <- case urlE of
     URL url' -> interpolateFromEnv env url'
     EnvVar var ->
@@ -507,13 +550,14 @@ runTestWebhookTransform (TestWebhookTransform env headers urlE payload mt _ sv) 
     initReq <- hoistEither $ first RequestInitializationError $ HTTP.mkRequestEither unwrappedUrl
 
     let req = initReq & HTTP.body .~ pure (J.encode payload) & HTTP.headers .~ headers'
-        reqTransform = mkRequestTransform mt
-        reqTransformCtx = buildReqTransformCtx unwrappedUrl sv
+        reqTransform = requestFields rt
+        engine = templateEngine rt
+        reqTransformCtx = mkReqTransformCtx unwrappedUrl sv engine
     hoistEither $ first (RequestTransformationError req) $ applyRequestTransform reqTransformCtx reqTransform req
 
   case result of
     Right transformed ->
-      let body = J.toJSON $ J.decode @J.Value =<< (transformed ^. HTTP.body)
+      let body = decodeBody (transformed ^. HTTP.body)
        in pure $ packTransformResult transformed body
     Left (RequestTransformationError req err) -> pure $ packTransformResult req (J.toJSON err)
     -- NOTE: In the following two cases we have failed before producing a valid request.
@@ -529,6 +573,21 @@ interpolateFromEnv env url =
           result = traverse (fmap indistinct . bitraverse lookup' pure) xs
           err e = throwError $ err400 NotFound $ "Missing Env Var: " <> e
        in either err (pure . fold) result
+
+decodeBody :: Maybe BL.ByteString -> J.Value
+decodeBody Nothing = J.Null
+decodeBody (Just bs) = fromMaybe J.Null $ jsonToValue bs <|> formUrlEncodedToValue bs
+
+-- | Attempt to encode a 'ByteString' as an Aeson 'Value'
+jsonToValue :: BL.ByteString -> Maybe J.Value
+jsonToValue bs = J.decode bs
+
+-- | Quote a 'ByteString' then attempt to encode it as a JSON
+-- String. This is necessary for 'x-www-url-formencoded' bodies. They
+-- are a list of key/value pairs encoded as a raw 'ByteString' with no
+-- quoting whereas JSON Strings must be quoted.
+formUrlEncodedToValue :: BL.ByteString -> Maybe J.Value
+formUrlEncodedToValue bs = J.decode ("\"" <> bs <> "\"")
 
 parseEnvTemplate :: AT.Parser [Either T.Text T.Text]
 parseEnvTemplate = AT.many1 $ pEnv <|> pLit <|> fmap Right "{"

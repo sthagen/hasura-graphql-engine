@@ -24,10 +24,7 @@
 --     @UnpreparedValue b@ for their respective backend @b@, and most backends will then transform
 --     their AST, cutting all such remote branches, and therefore using @Const Void@ for @r@.
 module Hasura.RQL.IR.Select
-  ( ActionFieldG (..),
-    ActionFieldsG,
-    ActionFields,
-    AggregateField (..),
+  ( AggregateField (..),
     AggregateFields,
     AggregateOp (..),
     AnnAggregateSelect,
@@ -70,7 +67,6 @@ module Hasura.RQL.IR.Select
     ConnectionSplitKind (..),
     EdgeField (..),
     EdgeFields,
-    Fields,
     FunctionArgExp,
     FunctionArgsExpG (..),
     FunctionArgsExpTableRow,
@@ -100,6 +96,7 @@ module Hasura.RQL.IR.Select
     asnFrom,
     asnPerm,
     asnStrfyNum,
+    bifoldMapAnnSelectG,
     emptyFunctionArgsExp,
     functionArgsWithTableRowAndSession,
     insertFunctionArg,
@@ -128,6 +125,7 @@ module Hasura.RQL.IR.Select
 where
 
 import Control.Lens.TH (makeLenses, makePrisms)
+import Data.Bifoldable
 import Data.HashMap.Strict qualified as HM
 import Data.Int (Int64)
 import Data.Kind (Type)
@@ -146,7 +144,6 @@ import Hasura.RQL.Types.Instances ()
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.Relationships.Remote
 import Hasura.SQL.Backend
-import Language.GraphQL.Draft.Syntax qualified as G
 
 -- Root selection
 
@@ -157,9 +154,16 @@ data QueryDB (b :: BackendType) (r :: Type) v
   | QDBConnection (ConnectionSelect b r v)
   deriving stock (Generic, Functor, Foldable, Traversable)
 
+instance Backend b => Bifoldable (QueryDB b) where
+  bifoldMap f g = \case
+    QDBMultipleRows annSel -> bifoldMapAnnSelectG f g annSel
+    QDBSingleRow annSel -> bifoldMapAnnSelectG f g annSel
+    QDBAggregation annSel -> bifoldMapAnnSelectG f g annSel
+    QDBConnection connSel -> bifoldMap f g connSel
+
 -- Select
 
-data AnnSelectG (b :: BackendType) (r :: Type) (f :: Type -> Type) (v :: Type) = AnnSelectG
+data AnnSelectG (b :: BackendType) (f :: Type -> Type) (v :: Type) = AnnSelectG
   { _asnFields :: Fields (f v),
     _asnFrom :: SelectFromG b v,
     _asnPerm :: TablePermG b v,
@@ -174,7 +178,7 @@ deriving stock instance
     Eq v,
     Eq (f v)
   ) =>
-  Eq (AnnSelectG b r f v)
+  Eq (AnnSelectG b f v)
 
 deriving stock instance
   ( Backend b,
@@ -182,15 +186,25 @@ deriving stock instance
     Show v,
     Show (f v)
   ) =>
-  Show (AnnSelectG b r f v)
+  Show (AnnSelectG b f v)
 
-type AnnSimpleSelectG b r v = AnnSelectG b r (AnnFieldG b r) v
+type AnnSimpleSelectG b r v = AnnSelectG b (AnnFieldG b r) v
 
-type AnnAggregateSelectG b r v = AnnSelectG b r (TableAggregateFieldG b r) v
+type AnnAggregateSelectG b r v = AnnSelectG b (TableAggregateFieldG b r) v
 
 type AnnSimpleSelect b = AnnSimpleSelectG b Void (SQLExpression b)
 
 type AnnAggregateSelect b = AnnAggregateSelectG b Void (SQLExpression b)
+
+-- | We can't write a Bifoldable instance for AnnSelectG because the types don't line up.
+-- Instead, we provide this function which can be used to help define Bifoldable instances of other types
+-- containing AnnSelectG values.
+bifoldMapAnnSelectG :: (Backend b, Bifoldable (f b), Monoid m) => (r -> m) -> (v -> m) -> AnnSelectG b (f b r) v -> m
+bifoldMapAnnSelectG f g AnnSelectG {..} =
+  foldMap (foldMap $ bifoldMap f g) _asnFields
+    <> foldMap g _asnFrom
+    <> foldMap g _asnPerm
+    <> foldMap g _asnArgs
 
 -- Relay select
 
@@ -199,7 +213,7 @@ data ConnectionSelect (b :: BackendType) (r :: Type) v = ConnectionSelect
     _csPrimaryKeyColumns :: PrimaryKeyColumns b,
     _csSplit :: Maybe (NE.NonEmpty (ConnectionSplit b v)),
     _csSlice :: Maybe ConnectionSlice,
-    _csSelect :: (AnnSelectG b r (ConnectionField b r) v)
+    _csSelect :: (AnnSelectG b (ConnectionField b r) v)
   }
   deriving stock (Functor, Foldable, Traversable)
 
@@ -218,6 +232,11 @@ deriving stock instance
     Show r
   ) =>
   Show (ConnectionSelect b r v)
+
+instance Backend b => Bifoldable (ConnectionSelect b) where
+  bifoldMap f g ConnectionSelect {..} =
+    foldMap (foldMap $ foldMap g) _csSplit
+      <> bifoldMapAnnSelectG f g _csSelect
 
 data ConnectionSplit (b :: BackendType) v = ConnectionSplit
   { _csKind :: ConnectionSplitKind,
@@ -402,10 +421,6 @@ type AnnotatedOrderByItem b = AnnotatedOrderByItemG b (SQLExpression b)
 
 -- Fields
 
--- The field name here is the GraphQL alias, i.e, the name with which the field
--- should appear in the response
-type Fields a = [(FieldName, a)]
-
 -- | captures a remote relationship's selection and the necessary context
 data RemoteRelationshipSelect b r = RemoteRelationshipSelect
   { -- | The fields on the table that are required for the join condition
@@ -445,6 +460,16 @@ deriving stock instance
     Show r
   ) =>
   Show (AnnFieldG b r v)
+
+instance Backend b => Bifoldable (AnnFieldG b) where
+  bifoldMap f g = \case
+    AFColumn col -> foldMap g col
+    AFObjectRelation objRel -> foldMap (bifoldMap f g) objRel
+    AFArrayRelation arrRel -> bifoldMap f g arrRel
+    AFComputedField _ _ cf -> bifoldMap f g cf
+    AFRemote r -> foldMap f r
+    AFNodeId {} -> mempty
+    AFExpression {} -> mempty
 
 type AnnField b = AnnFieldG b Void (SQLExpression b)
 
@@ -488,6 +513,12 @@ deriving stock instance
     Show r
   ) =>
   Show (TableAggregateFieldG b r v)
+
+instance Backend b => Bifoldable (TableAggregateFieldG b) where
+  bifoldMap f g = \case
+    TAFAgg {} -> mempty
+    TAFNodes _ fields -> foldMap (foldMap $ bifoldMap f g) fields
+    TAFExp {} -> mempty
 
 data AggregateField (b :: BackendType)
   = AFCount (CountType b)
@@ -545,6 +576,12 @@ deriving stock instance
   ) =>
   Show (ConnectionField b r v)
 
+instance Backend b => Bifoldable (ConnectionField b) where
+  bifoldMap f g = \case
+    ConnectionTypename {} -> mempty
+    ConnectionPageInfo {} -> mempty
+    ConnectionEdges edgeFields -> foldMap (foldMap $ bifoldMap f g) edgeFields
+
 data PageInfoField
   = PageInfoTypename Text
   | PageInfoHasNextPage
@@ -574,6 +611,12 @@ deriving stock instance
     Show r
   ) =>
   Show (EdgeField b r v)
+
+instance Backend b => Bifoldable (EdgeField b) where
+  bifoldMap f g = \case
+    EdgeTypename {} -> mempty
+    EdgeCursor -> mempty
+    EdgeNode annFields -> foldMap (foldMap $ bifoldMap f g) annFields
 
 type ConnectionFields b r v = Fields (ConnectionField b r v)
 
@@ -664,6 +707,11 @@ deriving stock instance
   ) =>
   Show (ComputedFieldSelect b r v)
 
+instance Backend b => Bifoldable (ComputedFieldSelect b) where
+  bifoldMap f g = \case
+    CFSScalar cfsSelect caseBoolExp -> foldMap g cfsSelect <> foldMap (foldMap $ foldMap g) caseBoolExp
+    CFSTable _ simpleSelect -> bifoldMapAnnSelectG f g simpleSelect
+
 -- Local relationship
 
 data AnnRelationSelectG (b :: BackendType) a = AnnRelationSelectG
@@ -708,6 +756,10 @@ deriving stock instance
   ) =>
   Show (AnnObjectSelectG b r v)
 
+instance Backend b => Bifoldable (AnnObjectSelectG b) where
+  bifoldMap f g AnnObjectSelectG {..} =
+    foldMap (foldMap $ bifoldMap f g) _aosFields <> foldMap (foldMap g) _aosTableFilter
+
 type AnnObjectSelect b r = AnnObjectSelectG b r (SQLExpression b)
 
 type ObjectRelationSelectG b r v = AnnRelationSelectG b (AnnObjectSelectG b r v)
@@ -735,6 +787,12 @@ deriving stock instance
     Show r
   ) =>
   Show (ArraySelectG b r v)
+
+instance Backend b => Bifoldable (ArraySelectG b) where
+  bifoldMap f g = \case
+    ASSimple arrayRelationSelect -> foldMap (bifoldMapAnnSelectG f g) arrayRelationSelect
+    ASAggregate arrayAggregateSelect -> foldMap (bifoldMapAnnSelectG f g) arrayAggregateSelect
+    ASConnection arrayConnectionSelect -> foldMap (bifoldMap f g) arrayConnectionSelect
 
 type ArraySelect b = ArraySelectG b Void (SQLExpression b)
 
@@ -898,36 +956,6 @@ insertFunctionArg argName idx value (FunctionArgsExp positional named) =
         HM.insert (getFuncArgNameTxt argName) value named
   where
     insertAt i a = toList . Seq.insertAt i a . Seq.fromList
-
--- Actions
-
-data ActionFieldG (b :: BackendType) (r :: Type) v
-  = ACFScalar G.Name
-  | ACFObjectRelation (ObjectRelationSelectG b r v)
-  | ACFArrayRelation (ArraySelectG b r v)
-  | ACFExpression Text
-  | ACFNestedObject G.Name !(ActionFieldsG b r v)
-  deriving (Functor, Foldable, Traversable)
-
-deriving instance
-  ( Backend b,
-    Eq (BooleanOperators b v),
-    Eq v,
-    Eq r
-  ) =>
-  Eq (ActionFieldG b r v)
-
-deriving instance
-  ( Backend b,
-    Show (BooleanOperators b v),
-    Show v,
-    Show r
-  ) =>
-  Show (ActionFieldG b r v)
-
-type ActionFieldsG b r v = Fields (ActionFieldG b r v)
-
-type ActionFields b = ActionFieldsG b Void (SQLExpression b)
 
 -- | The "distinct" input field inside "count" aggregate field
 --

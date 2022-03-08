@@ -30,7 +30,7 @@ import Data.Dependent.Map qualified as DMap
 import Data.Either (isLeft)
 import Data.Environment qualified as Env
 import Data.HashMap.Strict.Extended qualified as M
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict.InsOrd.Extended qualified as OMap
 import Data.HashSet qualified as HS
 import Data.Proxy
 import Data.Set qualified as S
@@ -281,6 +281,9 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
       endpointObject :: EndpointMetadata q -> MetadataObject
       endpointObject md = MetadataObject (endpointObjId md) (toJSON $ OMap.lookup (_ceName md) $ _metaRestEndpoints metadata)
 
+      listedQueryObjects :: (CollectionName, ListedQuery) -> MetadataObject
+      listedQueryObjects (cName, lq) = MetadataObject (MOQueryCollectionsQuery cName lq) (toJSON lq)
+
       --  Cases of urls that generate invalid segments:
 
       hasInvalidSegments :: EndpointMetadata query -> Bool
@@ -299,8 +302,11 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
       ambiguousF' ep = MetadataObject (endpointObjId ep) (toJSON ep)
       ambiguousF mds = AmbiguousRestEndpoints (commaSeparated $ map _ceUrl mds) (map ambiguousF' mds)
       ambiguousRestEndpoints = map (ambiguousF . S.elems . snd) $ ambiguousPathsGrouped endpoints
+
       maybeRS = getSchemaIntrospection gqlContext
-      inconsistentRestQueries = getInconsistentRestQueries maybeRS endpoints endpointObject
+      queryCollections = _boQueryCollections resolvedOutputs
+      allowLists = HS.toList . iaGlobal . _boAllowlist $ resolvedOutputs
+      inconsistentQueryCollections = getInconsistentQueryCollections maybeRS queryCollections listedQueryObjects endpoints allowLists
 
   returnA
     -<
@@ -328,12 +334,13 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
               <> duplicateRestVariables
               <> invalidRestSegments
               <> ambiguousRestEndpoints
-              <> inconsistentRestQueries,
+              <> inconsistentQueryCollections,
           scApiLimits = _boApiLimits resolvedOutputs,
           scMetricsConfig = _boMetricsConfig resolvedOutputs,
           scMetadataResourceVersion = Nothing,
           scSetGraphqlIntrospectionOptions = _metaSetGraphqlIntrospectionOptions metadata,
-          scTlsAllowlist = _boTlsAllowlist resolvedOutputs
+          scTlsAllowlist = _boTlsAllowlist resolvedOutputs,
+          scQueryCollections = _boQueryCollections resolvedOutputs
         }
   where
     getSourceConfigIfNeeded ::
@@ -778,8 +785,8 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
                       returnA
                         -<
                           ( remoteSchemaCtx
-                              { _rscPermissions = M.mapMaybe id $ M.fromList resolvedPermissions,
-                                _rscRemoteRelationships = OMap.mapMaybe id <$> OMap.fromList resolvedRelationships
+                              { _rscPermissions = M.catMaybes $ M.fromList resolvedPermissions,
+                                _rscRemoteRelationships = OMap.catMaybes <$> OMap.fromList resolvedRelationships
                               },
                             metadataObj
                           )
@@ -833,7 +840,8 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
               _boApiLimits = apiLimits,
               _boMetricsConfig = metricsConfig,
               _boRoles = mapFromL _rRoleName $ _unOrderedRoles orderedRoles,
-              _boTlsAllowlist = (networkTlsAllowlist networkConfig)
+              _boTlsAllowlist = (networkTlsAllowlist networkConfig),
+              _boQueryCollections = collections
             }
 
     mkEndpointMetadataObject (name, createEndpoint) =
@@ -1027,8 +1035,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
                   modifyErrA
                     ( do
                         (info, dependencies) <- bindErrorA -< buildEventTriggerInfo @b env source table eventTriggerConf
-                        let tableColumns = M.mapMaybe (^? _FIColumn) (_tciFieldInfoMap tableInfo)
-                        recreateTriggerIfNeeded -< (table, M.elems tableColumns, triggerName, etcDefinition eventTriggerConf, sourceConfig, recreateEventTriggers <> reloadMetadataRecreateEventTrigger)
+                        recreateTriggerIfNeeded -< (table, tableInfo, triggerName, etcDefinition eventTriggerConf, sourceConfig, recreateEventTriggers <> reloadMetadataRecreateEventTrigger)
                         recordDependencies -< (metadataObject, schemaObjectId, dependencies)
                         returnA -< info
                     )
@@ -1043,7 +1050,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
           Inc.cache
             proc
               ( tableName,
-                tableColumns,
+                tableInfo,
                 triggerName,
                 triggerDefinition,
                 sourceConfig,
@@ -1052,6 +1059,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
             -> do
               bindA
                 -< do
+                  let tableColumns = M.elems $ M.mapMaybe (^? _FIColumn) (_tciFieldInfoMap tableInfo)
                   buildReason <- ask
                   serverConfigCtx <- askServerConfigCtx
                   let isCatalogUpdate =
@@ -1072,6 +1080,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
                         tableColumns
                         triggerName
                         triggerDefinition
+                        (_tciPrimaryKey tableInfo)
 
     buildCronTriggers ::
       ( ArrowChoice arr,

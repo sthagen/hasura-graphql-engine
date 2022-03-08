@@ -6,6 +6,8 @@ module Data.List.Extended
     getOverlapWith,
     hasNoDuplicates,
     longestCommonPrefix,
+    appendToNonEmpty,
+    singleton,
     module L,
   )
 where
@@ -52,3 +54,11 @@ longestCommonPrefix [] = []
 longestCommonPrefix (x : xs) = foldr prefix x xs
   where
     prefix l1 l2 = map fst $ takeWhile (uncurry (==)) $ zip l1 l2
+
+appendToNonEmpty :: NE.NonEmpty a -> [a] -> NE.NonEmpty a
+appendToNonEmpty (neHead NE.:| neList) list =
+  neHead NE.:| (neList <> list)
+
+-- | As of base-4.15.0.0 (GHC > 9) singleton now exists in Data.List so we should be able to remove this when we upgrade.
+singleton :: a -> [a]
+singleton = pure
