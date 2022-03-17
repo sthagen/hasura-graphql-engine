@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Hasura.RQL.Types.EventTrigger
   ( SubscribeOpSpec (..),
     SubscribeColumns (..),
@@ -63,7 +65,9 @@ newtype TriggerName = TriggerName {unTriggerName :: NonEmptyText}
 triggerNameToTxt :: TriggerName -> Text
 triggerNameToTxt = unNonEmptyText . unTriggerName
 
-data Ops = INSERT | UPDATE | DELETE | MANUAL deriving (Show)
+data Ops = INSERT | UPDATE | DELETE | MANUAL deriving (Show, Eq, Generic)
+
+instance Hashable Ops
 
 data SubscribeColumns (b :: BackendType) = SubCStar | SubCArray [Column b]
   deriving (Generic)

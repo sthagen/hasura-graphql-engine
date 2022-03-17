@@ -67,8 +67,6 @@ common common-all
     DeriveLift
     DeriveTraversable
     DerivingVia
-    EmptyCase
-    ExistentialQuantification
     FlexibleContexts
     FlexibleInstances
     FunctionalDependencies
@@ -82,19 +80,15 @@ common common-all
     NamedFieldPuns
     NoImplicitPrelude
     OverloadedStrings
-    QuantifiedConstraints
-    QuasiQuotes
     RankNTypes
     RecordWildCards
     RoleAnnotations
     ScopedTypeVariables
     StandaloneDeriving
     StrictData
-    TemplateHaskell
     TupleSections
     TypeApplications
     TypeFamilies
-    TypeFamilyDependencies
     TypeOperators
 
 common common-exe
@@ -165,6 +159,9 @@ library
                      , safe-exceptions
                      , scientific
                      , semialign
+                     , servant
+                     , servant-client
+                     , servant-client-core
                      , some
                      , split
                      , template-haskell
@@ -181,6 +178,7 @@ library
                      , vector
                      , vector-instances
                      , wai
+                     , witch
                      , hashable-time
 
                      -- Encoder related
@@ -386,11 +384,18 @@ library
                      , Hasura.Backends.MSSQL.DDL.RunSQL
                      , Hasura.Backends.MSSQL.DDL.Source
                      , Hasura.Backends.MSSQL.DDL.Source.Version
-                     , Hasura.Backends.MSSQL.Execute.MutationResponse
                      , Hasura.Backends.MSSQL.Execute.Delete
                      , Hasura.Backends.MSSQL.Execute.Insert
                      , Hasura.Backends.MSSQL.Execute.Update
                      , Hasura.Backends.MSSQL.FromIr
+                     , Hasura.Backends.MSSQL.FromIr.Constants
+                     , Hasura.Backends.MSSQL.FromIr.Delete
+                     , Hasura.Backends.MSSQL.FromIr.Expression
+                     , Hasura.Backends.MSSQL.FromIr.Insert
+                     , Hasura.Backends.MSSQL.FromIr.MutationResponse
+                     , Hasura.Backends.MSSQL.FromIr.Query
+                     , Hasura.Backends.MSSQL.FromIr.SelectIntoTempTable
+                     , Hasura.Backends.MSSQL.FromIr.Update
                      , Hasura.Backends.MSSQL.Instances.API
                      , Hasura.Backends.MSSQL.Instances.Execute
                      , Hasura.Backends.MSSQL.Instances.Metadata
@@ -410,6 +415,8 @@ library
                      , Hasura.Backends.MSSQL.Types.Update
 
                      , Hasura.Backends.Postgres.Connection
+                     , Hasura.Backends.Postgres.Connection.MonadTx
+                     , Hasura.Backends.Postgres.Connection.Settings
                      , Hasura.Backends.Postgres.DDL
                      , Hasura.Backends.Postgres.DDL.BoolExp
                      , Hasura.Backends.Postgres.DDL.ComputedField
@@ -477,6 +484,7 @@ library
                      , Hasura.Backends.DataWrapper.Adapter.Metadata
                      , Hasura.Backends.DataWrapper.Adapter.Schema
                      , Hasura.Backends.DataWrapper.Adapter.Transport
+                     , Hasura.Backends.DataWrapper.Agent.Schema
                      , Hasura.Backends.DataWrapper.IR.Column
                      , Hasura.Backends.DataWrapper.IR.Expression
                      , Hasura.Backends.DataWrapper.IR.Function
@@ -488,6 +496,15 @@ library
                      , Hasura.Backends.DataWrapper.IR.Table
                      , Hasura.Backends.DataWrapper.Schema.Column
                      , Hasura.Backends.DataWrapper.Schema.Table
+                     , Hasura.Backends.DataWrapper.API
+                     , Hasura.Backends.DataWrapper.API.V0.API
+                     , Hasura.Backends.DataWrapper.API.V0.Column
+                     , Hasura.Backends.DataWrapper.API.V0.Expression
+                     , Hasura.Backends.DataWrapper.API.V0.OrderBy
+                     , Hasura.Backends.DataWrapper.API.V0.Query
+                     , Hasura.Backends.DataWrapper.API.V0.Scalar.Type
+                     , Hasura.Backends.DataWrapper.API.V0.Scalar.Value
+                     , Hasura.Backends.DataWrapper.API.V0.Table
 
                      -- Exposed for benchmark:
                      , Hasura.Cache.Bounded
@@ -536,6 +553,7 @@ library
                      , Hasura.Server.Middleware
                      , Hasura.Server.Cors
                      , Hasura.Server.CheckUpdates
+                     , Hasura.Server.SchemaCacheRef
                      , Hasura.Server.SchemaUpdate
                      , Hasura.Server.Migrate.Version
                      , Hasura.Server.Migrate.Internal
@@ -607,6 +625,7 @@ library
                      , Hasura.RQL.DDL.Webhook.Transform.Headers
                      , Hasura.RQL.DDL.Webhook.Transform.Method
                      , Hasura.RQL.DDL.Webhook.Transform.QueryParams
+                     , Hasura.RQL.DDL.Webhook.Transform.Validation
                      , Hasura.RQL.DDL.Webhook.Transform.Url
                      , Hasura.RQL.DDL.Schema
                      , Hasura.RQL.DDL.Schema.Cache
@@ -665,6 +684,7 @@ library
                      , Hasura.GraphQL.Execute.RemoteJoin.Collect
                      , Hasura.GraphQL.Execute.RemoteJoin.Join
                      , Hasura.GraphQL.Execute.RemoteJoin.RemoteSchema
+                     , Hasura.GraphQL.Execute.RemoteJoin.Source
                      , Hasura.GraphQL.Execute.Resolve
                      , Hasura.GraphQL.Execute.Types
                      , Hasura.GraphQL.Explain
@@ -861,6 +881,7 @@ test-suite graphql-engine-tests
   hs-source-dirs: src-test
   main-is: Main.hs
   other-modules:
+    Control.Concurrent.ExtendedSpec
     Data.HashMap.Strict.ExtendedSpec
     Data.NonNegativeIntSpec
     Data.Parser.CacheControlSpec
@@ -1008,6 +1029,7 @@ test-suite tests-hspec
  -- Harness.Test
     Harness.Test.Context
     Harness.Test.Schema
+    Harness.Test.BackendType
 
  -- Harness.Quoter
     Harness.Quoter.Graphql
@@ -1017,6 +1039,7 @@ test-suite tests-hspec
  -- Test
     Test.ArrayRelationshipsSpec
     Test.BasicFieldsSpec
+    Test.ColumnPresetsSpec
     Test.DirectivesSpec
     Test.HelloWorldSpec
     Test.LimitOffsetSpec

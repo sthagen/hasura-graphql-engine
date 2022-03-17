@@ -21,6 +21,7 @@ module Hasura.RQL.DDL.Schema.Cache
 where
 
 import Control.Arrow.Extended
+import Control.Concurrent.Extended (forConcurrentlyEIO)
 import Control.Lens hiding ((.=))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Retry qualified as Retry
@@ -65,6 +66,7 @@ import Hasura.RQL.DDL.Schema.Cache.Permission
 import Hasura.RQL.DDL.Schema.Function
 import Hasura.RQL.DDL.Schema.Table
 import Hasura.RQL.Types hiding (fmFunction, tmTable)
+import Hasura.RQL.Types.Endpoint
 import Hasura.RQL.Types.Eventing.Backend
 import Hasura.RQL.Types.Roles.Internal (CheckPermission (..))
 import Hasura.SQL.AnyBackend qualified as AB
@@ -250,27 +252,19 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
   (resolvedOutputs, dependencyInconsistentObjects, resolvedDependencies) <-
     resolveDependencies -< (outputs, unresolvedDependencies)
 
-  -- Step 3: Build the GraphQL schema.
-  (gqlContext, gqlContextUnauth, inconsistentRemoteSchemas) <-
+  -- Steps 3 and 4: Build the regular and relay GraphQL schemas in parallel
+  [(gqlContext, gqlContextUnauth, inconsistentRemoteSchemas), (relayContext, relayContextUnauth, _)] <-
     bindA
-      -<
-        buildGQLContext
-          QueryHasura
-          (_boSources resolvedOutputs)
-          (_boRemoteSchemas resolvedOutputs)
-          (_boActions resolvedOutputs)
-          (_boCustomTypes resolvedOutputs)
-
-  -- Step 4: Build the relay GraphQL schema
-  (relayContext, relayContextUnauth, _) <-
-    bindA
-      -<
-        buildGQLContext
-          QueryRelay
-          (_boSources resolvedOutputs)
-          (_boRemoteSchemas resolvedOutputs)
-          (_boActions resolvedOutputs)
-          (_boCustomTypes resolvedOutputs)
+      -< do
+        cxt <- askServerConfigCtx
+        forConcurrentlyEIO 1 [QueryHasura, QueryRelay] $ \queryType -> do
+          buildGQLContext
+            cxt
+            queryType
+            (_boSources resolvedOutputs)
+            (_boRemoteSchemas resolvedOutputs)
+            (_boActions resolvedOutputs)
+            (_boCustomTypes resolvedOutputs)
 
   let duplicateVariables :: EndpointMetadata a -> Bool
       duplicateVariables m = any ((> 1) . length) $ group $ sort $ catMaybes $ splitPath Just (const Nothing) (_ceUrl m)
@@ -385,7 +379,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
           metadataObj = MetadataObject (MOSource sourceName) $ toJSON sourceName
           logAndResolveDatabaseMetadata :: SourceConfig b -> SourceTypeCustomization -> m (Either QErr (ResolvedSource b))
           logAndResolveDatabaseMetadata scConfig sType = do
-            resSource <- resolveDatabaseMetadata scConfig sType
+            resSource <- resolveDatabaseMetadata sourceMetadata scConfig sType
             for_ resSource $ liftIO . unLogger logger
             pure resSource
 
@@ -1035,7 +1029,16 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
                   modifyErrA
                     ( do
                         (info, dependencies) <- bindErrorA -< buildEventTriggerInfo @b env source table eventTriggerConf
-                        recreateTriggerIfNeeded -< (table, tableInfo, triggerName, etcDefinition eventTriggerConf, sourceConfig, recreateEventTriggers <> reloadMetadataRecreateEventTrigger)
+                        recreateTriggerIfNeeded
+                          -<
+                            ( table,
+                              (_tciFieldInfoMap tableInfo),
+                              triggerName,
+                              etcDefinition eventTriggerConf,
+                              sourceConfig,
+                              (_tciPrimaryKey tableInfo),
+                              recreateEventTriggers <> reloadMetadataRecreateEventTrigger
+                            )
                         recordDependencies -< (metadataObject, schemaObjectId, dependencies)
                         returnA -< info
                     )
@@ -1050,16 +1053,17 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
           Inc.cache
             proc
               ( tableName,
-                tableInfo,
+                tableFieldInfoMap,
                 triggerName,
                 triggerDefinition,
                 sourceConfig,
+                primaryKey,
                 recreateEventTriggers
                 )
             -> do
               bindA
                 -< do
-                  let tableColumns = M.elems $ M.mapMaybe (^? _FIColumn) (_tciFieldInfoMap tableInfo)
+                  let tableColumns = M.elems $ M.mapMaybe (^? _FIColumn) tableFieldInfoMap
                   buildReason <- ask
                   serverConfigCtx <- askServerConfigCtx
                   let isCatalogUpdate =
@@ -1080,7 +1084,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
                         tableColumns
                         triggerName
                         triggerDefinition
-                        (_tciPrimaryKey tableInfo)
+                        primaryKey
 
     buildCronTriggers ::
       ( ArrowChoice arr,

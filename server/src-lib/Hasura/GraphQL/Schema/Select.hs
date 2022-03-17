@@ -1,4 +1,5 @@
 {-# LANGUAGE ApplicativeDo #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ViewPatterns #-}
 
 -- | Generate table selection schema both for ordinary Hasura-type and
@@ -58,12 +59,6 @@ import Hasura.GraphQL.Parser
   )
 import Hasura.GraphQL.Parser qualified as P
 import Hasura.GraphQL.Parser.Class
-  ( MonadParse (parseErrorWith, withPath),
-    MonadSchema (..),
-    MonadTableInfo,
-    askTableInfo,
-    parseError,
-  )
 import Hasura.GraphQL.Parser.Internal.Parser qualified as P
 import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.BoolExp
@@ -1100,9 +1095,19 @@ fieldSelection sourceName table tableInfo maybePkeyColumns = \case
   FIComputedField computedFieldInfo ->
     maybeToList <$> computedField sourceName computedFieldInfo table tableInfo
   FIRemoteRelationship remoteFieldInfo -> do
-    relationshipFields <- fromMaybe [] <$> remoteRelationshipField remoteFieldInfo
-    let lhsFields = _rfiLHS remoteFieldInfo
-    pure $ map (fmap (IR.AFRemote . IR.RemoteRelationshipSelect lhsFields)) relationshipFields
+    queryType <- asks $ qcQueryType . getter
+    case (queryType, _rfiRHS remoteFieldInfo) of
+      (ET.QueryRelay, RFISchema _) ->
+        -- Remote schemas aren't currently supported in Relay, and we therefore
+        -- cannot include remote relationships to them while building a
+        -- Relay-specific schema: attempting to do so would raise an error, as
+        -- 'remoteRelationshipField' would attempt to look into the
+        -- 'QueryContext' for information about the targeted schema.
+        pure []
+      _ -> do
+        relationshipFields <- fromMaybe [] <$> remoteRelationshipField remoteFieldInfo
+        let lhsFields = _rfiLHS remoteFieldInfo
+        pure $ map (fmap (IR.AFRemote . IR.RemoteRelationshipSelect lhsFields)) relationshipFields
 
 {- Note [Permission filter deduplication]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1394,7 +1399,7 @@ computedFieldPG sourceName ComputedFieldInfo {..} parentTable tableInfo = runMay
 -- | The custom SQL functions' input "args" field parser
 -- > function_name(args: function_args)
 customSQLFunctionArgs ::
-  (BackendSchema b, MonadSchema n m, MonadTableInfo r m, Has P.MkTypename r) =>
+  MonadBuildSchema b r m n =>
   FunctionInfo b ->
   G.Name ->
   G.Name ->
@@ -1421,12 +1426,8 @@ customSQLFunctionArgs FunctionInfo {..} functionName functionArgsName =
 --   table row argument in the case of computed fields), the args object will
 --   be omitted.
 functionArgs ::
-  forall b m n r.
-  ( BackendSchema b,
-    MonadSchema n m,
-    MonadTableInfo r m,
-    Has P.MkTypename r
-  ) =>
+  forall b r m n.
+  MonadBuildSchema b r m n =>
   FunctionTrackedAs b ->
   Seq.Seq (FunctionInputArgument b) ->
   m (InputFieldsParser n (IR.FunctionArgsExpTableRow (UnpreparedValue b)))

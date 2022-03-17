@@ -1,3 +1,6 @@
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
+
 module Hasura.GraphQL.Execute.Action
   ( fetchActionLogResponses,
     runActionExecution,
@@ -29,7 +32,6 @@ import Data.CaseInsensitive qualified as CI
 import Data.Environment qualified as Env
 import Data.Has
 import Data.HashMap.Strict qualified as Map
-import Data.IORef
 import Data.Set (Set)
 import Data.TByteString qualified as TBS
 import Data.Text.Extended
@@ -52,7 +54,6 @@ import Hasura.Logging qualified as L
 import Hasura.Metadata.Class
 import Hasura.Prelude
 import Hasura.RQL.DDL.Headers
-import Hasura.RQL.DDL.Schema.Cache
 import Hasura.RQL.DDL.Webhook.Transform
 import Hasura.RQL.DDL.Webhook.Transform.Class (mkReqTransformCtx)
 import Hasura.RQL.IR.Action qualified as RA
@@ -141,9 +142,9 @@ resolveActionExecution env logger _userInfo AnnActionExecution {..} ActionExecCo
           _aaeResponseTransform
 
 -- | Build action response from the Webhook JSON response when there are no relationships defined
-makeActionResponseNoRelations :: RA.ActionFieldsG Void -> ActionWebhookResponse -> AO.Value
+makeActionResponseNoRelations :: RA.ActionFields -> ActionWebhookResponse -> AO.Value
 makeActionResponseNoRelations annFields webhookResponse =
-  let mkResponseObject :: RA.ActionFieldsG Void -> HashMap Text J.Value -> AO.Value
+  let mkResponseObject :: RA.ActionFields -> HashMap Text J.Value -> AO.Value
       mkResponseObject fields obj =
         AO.object $
           flip mapMaybe fields $ \(fieldName, annField) ->
@@ -331,17 +332,17 @@ asyncActionsProcessor ::
   ) =>
   Env.Environment ->
   L.Logger L.Hasura ->
-  IORef (RebuildableSchemaCache, SchemaCacheVer) ->
+  IO SchemaCache ->
   STM.TVar (Set LockedActionEventId) ->
   HTTP.Manager ->
   Milliseconds ->
   Maybe GH.GQLQueryText ->
   m (Forever m)
-asyncActionsProcessor env logger cacheRef lockedActionEvents httpManager sleepTime gqlQueryText =
+asyncActionsProcessor env logger getSCFromRef' lockedActionEvents httpManager sleepTime gqlQueryText =
   return $
     Forever () $
       const $ do
-        actionCache <- scActions . lastBuiltSchemaCache . fst <$> liftIO (readIORef cacheRef)
+        actionCache <- scActions <$> liftIO getSCFromRef'
         let asyncActions =
               Map.filter ((== ActionMutation ActionAsynchronous) . (^. aiDefinition . adType)) actionCache
         unless (Map.null asyncActions) $ do
@@ -605,7 +606,7 @@ processOutputSelectionSet ::
   RS.ArgumentExp v ->
   GraphQLType ->
   [(PGCol, PGScalarType)] ->
-  RA.ActionFieldsG Void ->
+  RA.ActionFields ->
   StringifyNumbers ->
   RS.AnnSimpleSelectG ('Postgres 'Vanilla) Void v
 processOutputSelectionSet tableRowInput actionOutputType definitionList actionFields =

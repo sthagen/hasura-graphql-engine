@@ -1,9 +1,18 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Hasura.RQL.IR.Update
   ( AnnotatedUpdate,
     AnnotatedUpdateG (..),
+    auTable,
+    auWhere,
+    auCheck,
+    auBackend,
+    auOutput,
+    auAllCols,
   )
 where
 
+import Control.Lens.TH (makeLenses)
 import Data.Kind (Type)
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
@@ -27,3 +36,5 @@ data AnnotatedUpdateG (b :: BackendType) (r :: Type) v = AnnotatedUpdateG
   deriving (Functor, Foldable, Traversable)
 
 type AnnotatedUpdate b = AnnotatedUpdateG b Void (SQLExpression b)
+
+$(makeLenses ''AnnotatedUpdateG)

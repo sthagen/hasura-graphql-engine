@@ -1,3 +1,6 @@
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ViewPatterns #-}
+
 {-# OPTIONS -Wno-redundant-constraints #-}
 
 -- | CitusQL helpers. Pretty much the same as postgres. Could refactor
@@ -17,7 +20,6 @@ module Harness.Backend.Citus
 where
 
 import Control.Concurrent
-import Control.Exception
 import Control.Monad.Reader
 import Data.Aeson (Value)
 import Data.Bool (bool)
@@ -28,11 +30,12 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Extended (commaSeparated)
 import Database.PostgreSQL.Simple qualified as Postgres
-import GHC.Stack
 import Harness.Constants as Constants
+import Harness.Exceptions
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
 import Harness.State (State)
+import Harness.Test.Context (BackendType (Citus), defaultSource)
 import Harness.Test.Schema qualified as Schema
 import System.Process.Typed
 import Prelude
@@ -94,7 +97,7 @@ configuration:
   |]
 
 -- | Serialize Table into a Citus-SQL statement, as needed, and execute it on the Citus backend
-createTable :: Schema.Table -> IO ()
+createTable :: HasCallStack => Schema.Table -> IO ()
 createTable Schema.Table {tableName, tableColumns, tablePrimaryKey = pk, tableReferences} = do
   run_ $
     T.unpack $
@@ -108,121 +111,120 @@ createTable Schema.Table {tableName, tableColumns, tablePrimaryKey = pk, tableRe
               <> (mkReference <$> tableReferences),
           ");"
         ]
-  where
-    scalarType :: Schema.ScalarType -> Text
-    scalarType = \case
-      Schema.TInt -> "SERIAL"
-      Schema.TStr -> "VARCHAR"
-    mkColumn :: Schema.Column -> Text
-    mkColumn Schema.Column {columnName, columnType, columnNullable, columnDefault} =
-      T.unwords
-        [ columnName,
-          scalarType columnType,
-          bool "NOT NULL" "DEFAULT NULL" columnNullable,
-          maybe "" ("DEFAULT " <>) columnDefault
-        ]
-    mkPrimaryKey :: [Text] -> Text
-    mkPrimaryKey key =
-      T.unwords
-        [ "PRIMARY KEY",
-          "(",
-          commaSeparated key,
-          ")"
-        ]
-    mkReference :: Schema.Reference -> Text
-    mkReference Schema.Reference {referenceLocalColumn, referenceTargetTable, referenceTargetColumn} =
-      T.unwords
-        [ "CONSTRAINT FOREIGN KEY",
-          referenceLocalColumn,
-          "REFERENCES",
-          referenceTargetTable,
-          "(",
-          referenceTargetColumn,
-          ")",
-          "ON DELETE CASCADE",
-          "ON UPDATE CASCADE"
-        ]
+
+scalarType :: HasCallStack => Schema.ScalarType -> Text
+scalarType = \case
+  Schema.TInt -> "SERIAL"
+  Schema.TStr -> "VARCHAR"
+  Schema.TUTCTime -> "TIMESTAMP"
+  Schema.TBool -> "BOOLEAN"
+  t -> error $ "Unexpected scalar type used for Citus: " <> show t
+
+mkColumn :: Schema.Column -> Text
+mkColumn Schema.Column {columnName, columnType, columnNullable, columnDefault} =
+  T.unwords
+    [ columnName,
+      scalarType columnType,
+      bool "NOT NULL" "DEFAULT NULL" columnNullable,
+      maybe "" ("DEFAULT " <>) columnDefault
+    ]
+
+mkPrimaryKey :: [Text] -> Text
+mkPrimaryKey key =
+  T.unwords
+    [ "PRIMARY KEY",
+      "(",
+      commaSeparated key,
+      ")"
+    ]
+
+mkReference :: Schema.Reference -> Text
+mkReference Schema.Reference {referenceLocalColumn, referenceTargetTable, referenceTargetColumn} =
+  T.unwords
+    [ "CONSTRAINT FOREIGN KEY",
+      "(",
+      referenceLocalColumn,
+      ")",
+      "REFERENCES",
+      referenceTargetTable,
+      "(",
+      referenceTargetColumn,
+      ")",
+      "ON DELETE CASCADE",
+      "ON UPDATE CASCADE"
+    ]
 
 -- | Serialize tableData into a Citus-SQL insert statement and execute it.
-insertTable :: Schema.Table -> IO ()
-insertTable Schema.Table {tableName, tableColumns, tableData} =
-  run_ $
-    T.unpack $
-      T.unwords
-        [ "INSERT INTO",
-          T.pack Constants.citusDb <> "." <> tableName,
-          "(",
-          commaSeparated (Schema.columnName <$> tableColumns),
-          ")",
-          "VALUES",
-          commaSeparated $ mkRow <$> tableData,
-          ";"
-        ]
-  where
-    mkRow :: [Schema.ScalarValue] -> Text
-    mkRow row =
-      T.unwords
-        [ "(",
-          commaSeparated $ Schema.serialize <$> row,
-          ")"
-        ]
+insertTable :: HasCallStack => Schema.Table -> IO ()
+insertTable Schema.Table {tableName, tableColumns, tableData}
+  | null tableData = pure ()
+  | otherwise = do
+    run_ $
+      T.unpack $
+        T.unwords
+          [ "INSERT INTO",
+            T.pack Constants.citusDb <> "." <> tableName,
+            "(",
+            commaSeparated (Schema.columnName <$> tableColumns),
+            ")",
+            "VALUES",
+            commaSeparated $ mkRow <$> tableData,
+            ";"
+          ]
 
--- | Post an http request to start tracking the table
-trackTable :: State -> Schema.Table -> IO ()
-trackTable state Schema.Table {tableName} = do
-  let schemaName = T.pack Constants.citusDb
-  GraphqlEngine.postMetadata_ state $
-    [yaml|
-type: citus_track_table
-args:
-  source: citus
-  table:
-    schema: *schemaName
-    name: *tableName
-|]
+mkRow :: [Schema.ScalarValue] -> Text
+mkRow row =
+  T.unwords
+    [ "(",
+      commaSeparated $ Schema.serialize <$> row,
+      ")"
+    ]
 
 -- | Serialize Table into a Citus-SQL DROP statement and execute it
-dropTable :: Schema.Table -> IO ()
+dropTable :: HasCallStack => Schema.Table -> IO ()
 dropTable Schema.Table {tableName} = do
   run_ $
     T.unpack $
       T.unwords
-        [ "DROP TABLE IF EXISTS",
+        [ "DROP TABLE", -- we don't want @IF EXISTS@ here, because we don't want this to fail silently
           T.pack Constants.citusDb <> "." <> tableName,
           ";"
         ]
 
+-- | Post an http request to start tracking the table
+trackTable :: HasCallStack => State -> Schema.Table -> IO ()
+trackTable state table =
+  Schema.trackTable Citus (defaultSource Citus) table state
+
 -- | Post an http request to stop tracking the table
-untrackTable :: State -> Schema.Table -> IO ()
-untrackTable state Schema.Table {tableName} = do
-  let schemaName = T.pack Constants.citusDb
-  GraphqlEngine.postMetadata_ state $
-    [yaml|
-type: citus_untrack_table
-args:
-  source: citus
-  table:
-    schema: *schemaName
-    name: *tableName
-|]
+untrackTable :: HasCallStack => State -> Schema.Table -> IO ()
+untrackTable state table =
+  Schema.untrackTable Citus (defaultSource Citus) table state
 
 -- | Setup the schema in the most expected way.
 -- NOTE: Certain test modules may warrant having their own local version.
-setup :: [Schema.Table] -> (State, ()) -> IO ()
+setup :: HasCallStack => [Schema.Table] -> (State, ()) -> IO ()
 setup tables (state, _) = do
   -- Clear and reconfigure the metadata
   GraphqlEngine.setSource state defaultSourceMetadata
-
   -- Setup and track tables
   for_ tables $ \table -> do
     createTable table
     insertTable table
     trackTable state table
+  -- Setup relationships
+  for_ tables $ \table -> do
+    Schema.trackObjectRelationships Citus table state
+    Schema.trackArrayRelationships Citus table state
 
 -- | Teardown the schema and tracking in the most expected way.
 -- NOTE: Certain test modules may warrant having their own version.
-teardown :: [Schema.Table] -> (State, ()) -> IO ()
-teardown tables (state, _) =
-  for_ tables $ \table -> do
-    untrackTable state table
-    dropTable table
+teardown :: HasCallStack => [Schema.Table] -> (State, ()) -> IO ()
+teardown tables (state, _) = do
+  for_ (reverse tables) $ \table ->
+    finally
+      (Schema.untrackRelationships Citus table state)
+      ( finally
+          (untrackTable state table)
+          (dropTable table)
+      )

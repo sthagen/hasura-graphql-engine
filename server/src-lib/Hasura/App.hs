@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Hasura.App
@@ -19,8 +21,8 @@ module Hasura.App
     newShutdownLatch,
     notifySchemaCacheSyncTx,
     parseArgs,
-    printErrExit,
-    printErrJExit,
+    throwErrExit,
+    throwErrJExit,
     printJSON,
     printYaml,
     readTlsAllowlist,
@@ -59,7 +61,6 @@ import Data.ByteString.Lazy.Char8 qualified as BLC
 import Data.Environment qualified as Env
 import Data.FileEmbed (makeRelativeToProject)
 import Data.HashMap.Strict qualified as HM
-import Data.IORef (readIORef)
 import Data.Text qualified as T
 import Data.Time.Clock (UTCTime)
 import Data.Time.Clock qualified as Clock
@@ -107,6 +108,12 @@ import Hasura.Server.Limits
 import Hasura.Server.Logging
 import Hasura.Server.Metrics (ServerMetrics (..))
 import Hasura.Server.Migrate (migrateCatalog)
+import Hasura.Server.SchemaCacheRef
+  ( SchemaCacheRef,
+    getSchemaCache,
+    initialiseSchemaCacheRef,
+    logInconsistentMetadata,
+  )
 import Hasura.Server.SchemaUpdate
 import Hasura.Server.Telemetry
 import Hasura.Server.Types
@@ -150,11 +157,11 @@ data ExitException = ExitException
 
 instance Exception ExitException
 
-printErrExit :: (MonadIO m) => forall a. ExitCode -> String -> m a
-printErrExit reason = liftIO . throwIO . ExitException reason . BC.pack
+throwErrExit :: (MonadIO m) => forall a. ExitCode -> String -> m a
+throwErrExit reason = liftIO . throwIO . ExitException reason . BC.pack
 
-printErrJExit :: (A.ToJSON a, MonadIO m) => forall b. ExitCode -> a -> m b
-printErrJExit reason = liftIO . throwIO . ExitException reason . BLC.toStrict . A.encode
+throwErrJExit :: (A.ToJSON a, MonadIO m) => forall b. ExitCode -> a -> m b
+throwErrJExit reason = liftIO . throwIO . ExitException reason . BLC.toStrict . A.encode
 
 parseHGECommand :: EnabledLogTypes impl => Parser (RawHGECommand impl)
 parseHGECommand =
@@ -198,7 +205,7 @@ parseArgs = do
   rawHGEOpts <- execParser opts
   env <- getEnvironment
   let eitherOpts = runWithEnv env $ mkHGEOptions rawHGEOpts
-  onLeft eitherOpts $ printErrExit InvalidEnvironmentVariableOptionsError
+  onLeft eitherOpts $ throwErrExit InvalidEnvironmentVariableOptionsError
   where
     opts =
       info
@@ -231,9 +238,7 @@ data GlobalCtx = GlobalCtx
   }
 
 readTlsAllowlist :: SchemaCacheRef -> IO [TlsAllow]
-readTlsAllowlist scRef = do
-  (rbsc, _) <- readIORef (_scrCache scRef)
-  pure $ scTlsAllowlist $ lastBuiltSchemaCache rbsc
+readTlsAllowlist scRef = scTlsAllowlist <$> getSchemaCache scRef
 
 initGlobalCtx ::
   (MonadIO m) =>
@@ -257,7 +262,7 @@ initGlobalCtx env metadataDbUrl defaultPgConnInfo = do
 
   case (metadataDbUrl, dbUrlConf) of
     (Nothing, Nothing) ->
-      printErrExit
+      throwErrExit
         InvalidDatabaseConnectionParamsError
         "Fatal Error: Either of --metadata-database-url or --database-url option expected"
     -- If no metadata storage specified consider use default database as
@@ -330,7 +335,7 @@ resolvePostgresConnInfo ::
 resolvePostgresConnInfo env dbUrlConf maybeRetries = do
   dbUrlText <-
     runExcept (resolveUrlConf env dbUrlConf) `onLeft` \err ->
-      liftIO (printErrExit InvalidDatabaseConnectionParamsError (BLC.unpack $ A.encode err))
+      liftIO (throwErrJExit InvalidDatabaseConnectionParamsError err)
   pure $ Q.ConnInfo retries $ Q.CDDatabaseURI $ txtToBs dbUrlText
   where
     retries = fromMaybe 1 maybeRetries
@@ -341,8 +346,9 @@ initialiseServeCtx ::
   Env.Environment ->
   GlobalCtx ->
   ServeOptions Hasura ->
+  ServerMetrics ->
   ManagedT m ServeCtx
-initialiseServeCtx env GlobalCtx {..} so@ServeOptions {..} = do
+initialiseServeCtx env GlobalCtx {..} so@ServeOptions {..} serverMetrics = do
   instanceId <- liftIO generateInstanceId
   latch <- liftIO newShutdownLatch
   loggers@(Loggers loggerCtx logger pgLogger) <- mkLoggers soEnabledLogTypes soLogLevel
@@ -380,7 +386,7 @@ initialiseServeCtx env GlobalCtx {..} so@ServeOptions {..} = do
           soReadOnlyMode
 
   schemaCacheHttpManager <- liftIO $ HTTP.newManager HTTP.tlsManagerSettings
-  (rebuildableSchemaCache, _) <-
+  rebuildableSchemaCache <-
     lift . flip onException (flushLogger loggerCtx) $
       migrateCatalogSchema
         env
@@ -402,7 +408,7 @@ initialiseServeCtx env GlobalCtx {..} so@ServeOptions {..} = do
       unLogger logger $ mkGenericStrLog LevelInfo "schema-sync" ("Schema sync enabled. Polling at " <> show i)
       void $ startSchemaSyncListenerThread logger metadataDbPool instanceId i metaVersionRef
 
-  schemaCacheRef <- initialiseCache rebuildableSchemaCache
+  schemaCacheRef <- initialiseSchemaCacheRef serverMetrics rebuildableSchemaCache
 
   srvMgr <- liftIO $ mkHttpManager (readTlsAllowlist schemaCacheRef) mempty
 
@@ -440,7 +446,7 @@ migrateCatalogSchema ::
   ServerConfigCtx ->
   SourceResolver ('Postgres 'Vanilla) ->
   SourceResolver ('MSSQL) ->
-  m (RebuildableSchemaCache, UTCTime)
+  m RebuildableSchemaCache
 migrateCatalogSchema
   env
   logger
@@ -450,11 +456,11 @@ migrateCatalogSchema
   serverConfigCtx
   pgSourceResolver
   mssqlSourceResolver = do
-    currentTime <- liftIO Clock.getCurrentTime
     initialiseResult <- runExceptT $ do
       -- TODO: should we allow the migration to happen during maintenance mode?
       -- Allowing this can be a sanity check, to see if the hdb_catalog in the
       -- DB has been set correctly
+      currentTime <- liftIO Clock.getCurrentTime
       (migrationResult, metadata) <-
         Q.runTx pool (Q.Serializable, Just Q.ReadWrite) $
           migrateCatalog
@@ -478,15 +484,9 @@ migrateCatalogSchema
               slKind = "catalog_migrate",
               slInfo = A.toJSON err
             }
-        liftIO (printErrExit DatabaseMigrationError (BLC.unpack $ A.encode err))
+        liftIO (throwErrJExit DatabaseMigrationError err)
     unLogger logger migrationResult
-    pure (schemaCache, currentTime)
-
--- | Run a transaction and if an error is encountered, log the error and abort the program
-runTxIO :: Q.PGPool -> Q.TxMode -> Q.TxE QErr a -> IO a
-runTxIO pool isoLevel tx = do
-  eVal <- liftIO $ runExceptT $ Q.runTx pool isoLevel tx
-  onLeft eVal (printErrJExit DatabaseMigrationError)
+    pure schemaCache
 
 -- | A latch for the graceful shutdown of a server process.
 newtype ShutdownLatch = ShutdownLatch {unShutdownLatch :: C.MVar ()}
@@ -671,7 +671,7 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
         _scHttpManager
         logger
 
-  authMode <- onLeft authModeRes (printErrExit AuthConfigurationError . T.unpack)
+  authMode <- onLeft authModeRes (throwErrExit AuthConfigurationError . T.unpack)
 
   HasuraApp app cacheRef actionSubState stopWsServer <-
     lift $
@@ -718,12 +718,12 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
           soReadOnlyMode
 
   -- Log Warning if deprecated environment variables are used
-  sources <- scSources <$> liftIO (getSCFromRef cacheRef)
+  sources <- scSources <$> liftIO (getSchemaCache cacheRef)
   liftIO $ logDeprecatedEnvVars logger env sources
 
   -- log inconsistent schema objects
-  inconsObjs <- scInconsistentObjs <$> liftIO (getSCFromRef cacheRef)
-  liftIO $ logInconsObjs logger inconsObjs
+  inconsObjs <- scInconsistentObjs <$> liftIO (getSchemaCache cacheRef)
+  liftIO $ logInconsistentMetadata logger inconsObjs
 
   -- NOTE: `newLogTVar` is being used to make sure that the metadata logger runs only once
   --       while logging errors or any `inconsistent_metadata` logs.
@@ -762,7 +762,7 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
       -- start a background thread to create new cron events
       _cronEventsThread <-
         C.forkManagedT "runCronEventsGenerator" logger $
-          runCronEventsGenerator logger (getSCFromRef cacheRef)
+          runCronEventsGenerator logger (getSchemaCache cacheRef)
 
       startScheduledEventsPollerThread logger eventLogBehavior lockedEventsCtx cacheRef
     EventingDisabled ->
@@ -774,20 +774,21 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
       liftIO $ checkForUpdates loggerCtx _scHttpManager
 
   -- start a background thread for telemetry
-  dbUidE <- runMetadataStorageT getDatabaseUid
   _telemetryThread <-
     if soEnableTelemetry
       then do
         lift . unLogger logger $ mkGenericStrLog LevelInfo "telemetry" telemetryNotice
 
-        (dbId, pgVersion) <-
-          liftIO $
-            runTxIO _scMetadataDbPool (Q.ReadCommitted, Nothing) $
-              (,) <$> liftEither dbUidE <*> getPgVersion
+        dbUid <-
+          runMetadataStorageT getDatabaseUid
+            >>= (`onLeft` throwErrJExit DatabaseMigrationError)
+        pgVersion <-
+          (liftIO $ runExceptT $ Q.runTx _scMetadataDbPool (Q.ReadCommitted, Nothing) $ getPgVersion)
+            >>= (`onLeft` throwErrJExit DatabaseMigrationError)
 
         telemetryThread <-
           C.forkManagedT "runTelemetry" logger $
-            liftIO $ runTelemetry logger _scHttpManager (getSCFromRef cacheRef) dbId _scInstanceId pgVersion
+            liftIO $ runTelemetry logger _scHttpManager (getSchemaCache cacheRef) dbUid _scInstanceId pgVersion
         return $ Just telemetryThread
       else return Nothing
 
@@ -805,7 +806,7 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
     prepareScheduledEvents (Logger logger) = do
       liftIO $ logger $ mkGenericStrLog LevelInfo "scheduled_triggers" "preparing data"
       res <- runMetadataStorageT unlockAllLockedScheduledEvents
-      onLeft res $ printErrJExit EventSubSystemError
+      onLeft res $ throwErrJExit EventSubSystemError
 
     getProcessingScheduledEventsCount :: LockedEventsCtx -> IO Int
     getProcessingScheduledEventsCount LockedEventsCtx {..} = do
@@ -915,7 +916,7 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
               logger
               eventLogBehavior
               _scHttpManager
-              (getSCFromRef cacheRef)
+              (getSchemaCache cacheRef)
               eventEngineCtx
               lockedEventsCtx
               serverMetrics
@@ -946,7 +947,7 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
               $ asyncActionsProcessor
                 env
                 logger
-                (_scrCache cacheRef)
+                (getSchemaCache cacheRef)
                 (leActionEvents lockedEventsCtx)
                 _scHttpManager
                 sleepTime
@@ -984,7 +985,7 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
             logger
             eventLogBehavior
             _scHttpManager
-            (getSCFromRef cacheRef)
+            (getSchemaCache cacheRef)
             lockedEventsCtx
 
 instance (Monad m) => Tracing.HasReporter (PGMetadataStorageAppT m)

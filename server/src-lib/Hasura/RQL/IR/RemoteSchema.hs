@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 -- | Representation for queries going to remote schemas. Due to the existence of
 -- remote relationships from remote schemas, we can't simply reuse the GraphQL
 -- document AST we define in graphql-parser-hs, and instead redefine a custom
@@ -6,6 +8,8 @@ module Hasura.RQL.IR.RemoteSchema
   ( -- AST
     SelectionSet (..),
     DeduplicatedSelectionSet (..),
+    dssCommonFields,
+    dssMemberSelectionSets,
     ObjectSelectionSet,
     mkInterfaceSelectionSet,
     mkUnionSelectionSet,
@@ -13,6 +17,11 @@ module Hasura.RQL.IR.RemoteSchema
     _FieldGraphQL,
     _FieldRemote,
     GraphQLField (..),
+    fAlias,
+    fName,
+    fArguments,
+    fDirectives,
+    fSelectionSet,
     mkGraphQLField,
     -- entry points
     RemoteSchemaRootField (..),
@@ -25,7 +34,7 @@ module Hasura.RQL.IR.RemoteSchema
   )
 where
 
-import Control.Lens.TH (makePrisms)
+import Control.Lens.TH (makeLenses, makePrisms)
 import Data.HashMap.Strict qualified as Map
 import Data.HashMap.Strict.InsOrd.Extended qualified as OMap
 import Data.HashSet qualified as Set
@@ -61,9 +70,9 @@ data SelectionSet r var
 -- fields as possible on the abstract type.
 data DeduplicatedSelectionSet r var = DeduplicatedSelectionSet
   { -- | Fields that aren't explicitly defined for member types
-    _atssCommonFields :: !(Set.HashSet G.Name),
+    _dssCommonFields :: !(Set.HashSet G.Name),
     -- | SelectionSets of individual member types
-    _atssMemberSelectionSets :: !(Map.HashMap G.Name (ObjectSelectionSet r var))
+    _dssMemberSelectionSets :: !(Map.HashMap G.Name (ObjectSelectionSet r var))
   }
   deriving (Show, Eq, Functor, Foldable, Traversable, Generic)
 
@@ -160,10 +169,10 @@ data RemoteFieldArgument = RemoteFieldArgument
   }
   deriving (Eq, Show)
 
-data RemoteSchemaSelect = RemoteSchemaSelect
+data RemoteSchemaSelect r = RemoteSchemaSelect
   { _rselArgs :: [RemoteFieldArgument],
     _rselResultCustomizer :: ResultCustomizer,
-    _rselSelection :: SelectionSet Void RemoteSchemaVariable,
+    _rselSelection :: SelectionSet r RemoteSchemaVariable,
     _rselFieldCall :: NonEmpty FieldCall,
     _rselRemoteSchema :: RemoteSchemaInfo
   }
@@ -330,6 +339,8 @@ reduceAbstractTypeSelectionSet (DeduplicatedSelectionSet baseMemberFields select
         map (second (OMap.fromList . drop (OMap.size baseSelectionSet) . OMap.toList)) $ Map.toList selectionSets
 
 -------------------------------------------------------------------------------
--- Remote schema entry points
+-- TH lens generation
 
 $(makePrisms ''Field)
+$(makeLenses ''GraphQLField)
+$(makeLenses ''DeduplicatedSelectionSet)

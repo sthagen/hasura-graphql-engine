@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Hasura.RQL.DDL.EventTrigger
   ( CreateEventTriggerQuery,
     runCreateEventTriggerQuery,
@@ -12,15 +14,30 @@ module Hasura.RQL.DDL.EventTrigger
     getHeaderInfosFromConf,
     getWebhookInfoFromConf,
     buildEventTriggerInfo,
+    cetqSource,
+    cetqName,
+    cetqTable,
+    cetqInsert,
+    cetqUpdate,
+    cetqDelete,
+    cetqEnableManual,
+    cetqRetryConf,
+    cetqWebhook,
+    cetqWebhookFromEnv,
+    cetqHeaders,
+    cetqReplace,
+    cetqRequestTransform,
+    cetqResponseTrasnform,
   )
 where
 
-import Control.Lens ((.~))
+import Control.Lens (makeLenses, (.~))
 import Data.Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Environment qualified as Env
 import Data.HashMap.Strict qualified as HM
 import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashSet qualified as Set
 import Data.Text qualified as T
 import Data.Text.Extended
 import Hasura.Base.Error
@@ -51,6 +68,8 @@ data CreateEventTriggerQuery (b :: BackendType) = CreateEventTriggerQuery
     _cetqRequestTransform :: !(Maybe RequestTransform),
     _cetqResponseTrasnform :: !(Maybe MetadataResponseTransform)
   }
+
+$(makeLenses ''CreateEventTriggerQuery)
 
 instance Backend b => FromJSON (CreateEventTriggerQuery b) where
   parseJSON = withObject "CreateEventTriggerQuery" \o -> do
@@ -130,7 +149,7 @@ resolveEventTriggerQuery ::
   forall b m.
   (Backend b, UserInfoM m, QErrM m, CacheRM m) =>
   CreateEventTriggerQuery b ->
-  m (TableCoreInfo b, Bool, EventTriggerConf b)
+  m (Bool, EventTriggerConf b)
 resolveEventTriggerQuery (CreateEventTriggerQuery source name qt insert update delete enableManual retryConf webhook webhookFromEnv mheaders replace reqTransform respTransform) = do
   ti <- askTableCoreInfo source qt
   -- can only replace for same table
@@ -143,20 +162,31 @@ resolveEventTriggerQuery (CreateEventTriggerQuery source name qt insert update d
   assertCols ti delete
 
   let rconf = fromMaybe defaultRetryConf retryConf
-  return (ti, replace, EventTriggerConf name (TriggerOpsDef insert update delete enableManual) webhook webhookFromEnv rconf mheaders reqTransform respTransform)
+  return (replace, EventTriggerConf name (TriggerOpsDef insert update delete enableManual) webhook webhookFromEnv rconf mheaders reqTransform respTransform)
   where
     assertCols :: TableCoreInfo b -> Maybe (SubscribeOpSpec b) -> m ()
     assertCols ti opSpec = onJust opSpec \sos -> case sosColumns sos of
       SubCStar -> return ()
       SubCArray columns -> forM_ columns (assertColumnExists @b (_tciFieldInfoMap ti) "")
 
+droppedTriggerOps :: TriggerOpsDef b -> TriggerOpsDef b -> HashSet Ops
+droppedTriggerOps oldEventTriggerOps newEventTriggerOps =
+  Set.fromList $
+    catMaybes $
+      [ (bool Nothing (Just INSERT) (isDroppedOp (tdInsert oldEventTriggerOps) (tdInsert newEventTriggerOps))),
+        (bool Nothing (Just UPDATE) (isDroppedOp (tdUpdate oldEventTriggerOps) (tdUpdate newEventTriggerOps))),
+        (bool Nothing (Just DELETE) (isDroppedOp (tdDelete oldEventTriggerOps) (tdDelete newEventTriggerOps)))
+      ]
+  where
+    isDroppedOp old new = isJust old && isNothing new
+
 createEventTriggerQueryMetadata ::
   forall b m.
-  (BackendMetadata b, QErrM m, UserInfoM m, CacheRWM m, MetadataM m) =>
+  (BackendMetadata b, QErrM m, UserInfoM m, CacheRWM m, MetadataM m, BackendEventTrigger b, MonadIO m) =>
   CreateEventTriggerQuery b ->
-  m (TableCoreInfo b, EventTriggerConf b)
+  m ()
 createEventTriggerQueryMetadata q = do
-  (tableCoreInfo, replace, triggerConf) <- resolveEventTriggerQuery q
+  (replace, triggerConf) <- resolveEventTriggerQuery q
   let table = _cetqTable q
       source = _cetqSource q
       triggerName = etcName triggerConf
@@ -165,21 +195,26 @@ createEventTriggerQueryMetadata q = do
           AB.mkAnyBackend $
             SMOTableObj @b table $
               MTOTrigger triggerName
+  sourceInfo <- askSourceInfo @b source
+  when replace $ do
+    existingEventTriggerOps <- etiOpsDef <$> askEventTriggerInfo @b source triggerName
+    let droppedOps = droppedTriggerOps existingEventTriggerOps (etcDefinition triggerConf)
+    dropDanglingSQLTrigger @b (_siConfiguration sourceInfo) triggerName droppedOps
+
   buildSchemaCacheFor metadataObj $
     MetadataModifier $
       tableMetadataSetter @b source table . tmEventTriggers
         %~ if replace
           then ix triggerName .~ triggerConf
           else OMap.insert triggerName triggerConf
-  pure (tableCoreInfo, triggerConf)
 
 runCreateEventTriggerQuery ::
   forall b m.
-  (BackendMetadata b, QErrM m, UserInfoM m, CacheRWM m, MetadataM m) =>
+  (BackendMetadata b, BackendEventTrigger b, QErrM m, UserInfoM m, CacheRWM m, MetadataM m, MonadIO m) =>
   CreateEventTriggerQuery b ->
   m EncJSON
 runCreateEventTriggerQuery q = do
-  void $ createEventTriggerQueryMetadata @b q
+  createEventTriggerQueryMetadata @b q
   pure successMsg
 
 runDeleteEventTriggerQuery ::

@@ -16,7 +16,7 @@ module Harness.Constants
     mysqlLivenessCheckIntervalMicroseconds,
     mysqlPassword,
     mysqlUser,
-    mysqlDatabase,
+    mysqlDb,
     mysqlHost,
     mysqlPort,
     mysqlConnectInfo,
@@ -25,8 +25,7 @@ module Harness.Constants
     sqlserverLivenessCheckIntervalMicroseconds,
     sqlserverConnectInfo,
     sqlserverDb,
-    bigqueryServiceAccountFileVar,
-    bigqueryServiceAccountVar,
+    bigqueryServiceKeyVar,
     bigqueryProjectIdVar,
     bigqueryDataset,
     httpHealthCheckAttempts,
@@ -174,8 +173,8 @@ mysqlPassword = "hasura"
 mysqlUser :: String
 mysqlUser = "hasura"
 
-mysqlDatabase :: String
-mysqlDatabase = "hasura"
+mysqlDb :: String
+mysqlDb = "hasura"
 
 mysqlHost :: String
 mysqlHost = "127.0.0.1"
@@ -188,16 +187,13 @@ mysqlConnectInfo =
   Mysql.defaultConnectInfo
     { Mysql.connectUser = mysqlUser,
       Mysql.connectPassword = mysqlPassword,
-      Mysql.connectDatabase = mysqlDatabase,
+      Mysql.connectDatabase = mysqlDb,
       Mysql.connectHost = mysqlHost,
       Mysql.connectPort = mysqlPort
     }
 
-bigqueryServiceAccountFileVar :: String
-bigqueryServiceAccountFileVar = "HASURA_BIGQUERY_SERVICE_ACCOUNT_FILE"
-
-bigqueryServiceAccountVar :: String
-bigqueryServiceAccountVar = "HASURA_BIGQUERY_SERVICE_ACCOUNT"
+bigqueryServiceKeyVar :: String
+bigqueryServiceKeyVar = "HASURA_BIGQUERY_SERVICE_KEY"
 
 bigqueryProjectIdVar :: String
 bigqueryProjectIdVar = "HASURA_BIGQUERY_PROJECT_ID"

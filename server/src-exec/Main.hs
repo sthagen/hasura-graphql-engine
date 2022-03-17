@@ -1,4 +1,7 @@
-module Main (main) where
+module Main
+  ( main,
+  )
+where
 
 import Control.Concurrent.Extended qualified as C
 import Control.Exception
@@ -27,16 +30,13 @@ import System.Metrics qualified as EKG
 import System.Posix.Signals qualified as Signals
 
 main :: IO ()
-main = do
-  tryExit $ do
-    args <- parseArgs
-    env <- Env.getEnvironment
-    runApp env args
-  where
-    tryExit io =
-      try io >>= \case
-        Left (ExitException _code msg) -> BC.putStrLn msg >> Sys.exitFailure
-        Right r -> return r
+main =
+  catch
+    do
+      args <- parseArgs
+      env <- Env.getEnvironment
+      runApp env args
+    (\(ExitException _code msg) -> BC.putStrLn msg >> Sys.exitFailure)
 
 runApp :: Env.Environment -> HGEOptions Hasura -> IO ()
 runApp env (HGEOptionsG rci metadataDbUrl hgeCmd) = do
@@ -62,7 +62,7 @@ runApp env (HGEOptionsG rci metadataDbUrl hgeCmd) = do
       -- It'd be nice if we didn't have to call runManagedT twice here, but
       -- there is a data dependency problem since the call to runPGMetadataStorageApp
       -- below depends on serveCtx.
-      runManagedT (initialiseServeCtx env globalCtx serveOptions) $ \serveCtx -> do
+      runManagedT (initialiseServeCtx env globalCtx serveOptions serverMetrics) $ \serveCtx -> do
         -- Catches the SIGTERM signal and initiates a graceful shutdown.
         -- Graceful shutdown for regular HTTP requests is already implemented in
         -- Warp, and is triggered by invoking the 'closeSocket' callback.
@@ -89,11 +89,11 @@ runApp env (HGEOptionsG rci metadataDbUrl hgeCmd) = do
           runHGEServer (const $ pure ()) env serveOptions serveCtx initTime Nothing serverMetrics ekgStore
     HCExport -> do
       res <- runTxWithMinimalPool _gcMetadataDbConnInfo fetchMetadataFromCatalog
-      either (printErrJExit MetadataExportError) printJSON res
+      either (throwErrJExit MetadataExportError) printJSON res
     HCClean -> do
       res <- runTxWithMinimalPool _gcMetadataDbConnInfo dropHdbCatalogSchema
       let cleanSuccessMsg = "successfully cleaned graphql-engine related data"
-      either (printErrJExit MetadataCleanError) (const $ liftIO $ putStrLn cleanSuccessMsg) res
+      either (throwErrJExit MetadataCleanError) (const $ liftIO $ putStrLn cleanSuccessMsg) res
     HCDowngrade opts -> do
       let defaultSourceConfig =
             maybeDefaultPgConnInfo <&> \(dbUrlConf, _) ->
@@ -106,7 +106,7 @@ runApp env (HGEOptionsG rci metadataDbUrl hgeCmd) = do
                       Nothing
                in PostgresConnConfiguration pgSourceConnInfo Nothing
       res <- runTxWithMinimalPool _gcMetadataDbConnInfo $ downgradeCatalog defaultSourceConfig opts initTime
-      either (printErrJExit DowngradeProcessError) (liftIO . print) res
+      either (throwErrJExit DowngradeProcessError) (liftIO . print) res
     HCVersion -> liftIO $ putStrLn $ "Hasura GraphQL Engine: " ++ convertText currentVersion
   where
     runTxWithMinimalPool connInfo tx = lowerManagedT $ do

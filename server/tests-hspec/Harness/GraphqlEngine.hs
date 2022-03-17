@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
 
 -- | Helpers for talking to graphql engine.
@@ -217,7 +218,7 @@ runApp serveOptions = do
         serverMetrics <-
           liftIO $ createServerMetrics $ EKG.subset ServerSubset store
         pure (EKG.subset EKG.emptyOf store, serverMetrics)
-    runManagedT (App.initialiseServeCtx env globalCtx serveOptions) $ \serveCtx ->
+    runManagedT (App.initialiseServeCtx env globalCtx serveOptions serverMetrics) $ \serveCtx ->
       do
         let Loggers _ _logger pgLogger = _scLoggers serveCtx
         flip App.runPGMetadataStorageAppT (_scMetadataDbPool serveCtx, pgLogger)
