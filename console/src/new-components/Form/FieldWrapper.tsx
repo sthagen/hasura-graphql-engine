@@ -5,6 +5,7 @@ import { FieldError } from 'react-hook-form';
 import { FaExclamationCircle } from 'react-icons/fa';
 
 type FieldWrapperProps = {
+  id?: string;
   labelIcon?: React.ReactElement;
   label?: string;
   className?: string;
@@ -12,6 +13,7 @@ type FieldWrapperProps = {
   error?: FieldError | undefined;
   description?: string;
   tooltip?: string;
+  dataTest?: string;
 };
 
 export type FieldWrapperPassThroughProps = Omit<
@@ -21,6 +23,7 @@ export type FieldWrapperPassThroughProps = Omit<
 
 export const FieldWrapper = (props: FieldWrapperProps) => {
   const {
+    id,
     labelIcon,
     label,
     className,
@@ -31,7 +34,10 @@ export const FieldWrapper = (props: FieldWrapperProps) => {
   } = props;
   return (
     <div>
-      <label className={clsx('block text-gray-600 mb-xs', className)}>
+      <label
+        htmlFor={id}
+        className={clsx('block text-gray-600 mb-xs', className)}
+      >
         <span className="flex items-center">
           <span className="font-semibold">
             {labelIcon

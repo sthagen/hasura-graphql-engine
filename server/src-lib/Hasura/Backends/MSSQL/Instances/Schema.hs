@@ -205,7 +205,7 @@ msMkRelationshipParser ::
   MonadBuildSchema 'MSSQL r m n =>
   SourceName ->
   RelInfo 'MSSQL ->
-  m (Maybe (InputFieldsParser n (Maybe (IR.AnnotatedInsert 'MSSQL (UnpreparedValue 'MSSQL)))))
+  m (Maybe (InputFieldsParser n (Maybe (IR.AnnotatedInsertField 'MSSQL (UnpreparedValue 'MSSQL)))))
 msMkRelationshipParser _sourceName _relationshipInfo = do
   -- When we support nested inserts, we also need to ensure we limit ourselves
   -- to inserting into tables whch supports inserts:
@@ -265,11 +265,10 @@ msColumnParser columnType (G.Nullability isNullable) =
                   valueToJSON (P.toGraphQLType schemaType)
                     >=> either (parseErrorWith ParseFailed . qeError) pure . (MSSQL.parseScalarValue scalarType)
               }
-    ColumnEnumReference (EnumReference tableName enumValues) ->
+    ColumnEnumReference enumRef@(EnumReference _ enumValues _) ->
       case nonEmpty (Map.toList enumValues) of
         Just enumValuesList -> do
-          tableGQLName <- tableGraphQLName @'MSSQL tableName `onLeft` throwError
-          enumName <- P.mkTypename $ tableGQLName <> $$(G.litName "_enum")
+          enumName <- mkEnumTypeName enumRef
           pure $ possiblyNullable MSSQL.VarcharType $ P.enum enumName Nothing (mkEnumValue <$> enumValuesList)
         Nothing -> throw400 ValidationFailed "empty enum values"
   where

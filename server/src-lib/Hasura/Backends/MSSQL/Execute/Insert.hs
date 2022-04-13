@@ -39,7 +39,7 @@ executeInsert ::
   UserInfo ->
   StringifyNumbers ->
   SourceConfig 'MSSQL ->
-  AnnInsert 'MSSQL Void (UnpreparedValue 'MSSQL) ->
+  AnnotatedInsert 'MSSQL Void (UnpreparedValue 'MSSQL) ->
   m (ExceptT QErr IO EncJSON)
 executeInsert userInfo stringifyNum sourceConfig annInsert = do
   -- Convert the leaf values from @'UnpreparedValue' to sql @'Expression'
@@ -123,8 +123,13 @@ executeInsert userInfo stringifyNum sourceConfig annInsert = do
 -- c. Evaluate the check constraint using @CASE@ expression. We use @SUM@ aggregation to check if any inserted row has failed the check constraint.
 --
 --   > <check_constraint_select> :=
---   >   SELECT SUM(CASE WHEN <check_boolean_expression> THEN 0 ELSE 1 END)
---   >   FROM [with_alias]
+--   >   SELECT SUM([check_sub_query].[check_evaluation])
+--   >   FROM
+--   >     ( SELECT
+--   >         (CASE WHEN <check_boolean_expression> THEN 0 ELSE 1 END) AS [check_evaluation]
+--   >       FROM
+--   >         [with_alias]
+--   >     ) AS [check_sub_query]
 --
 -- d. The final select statement look like
 --
@@ -132,9 +137,9 @@ executeInsert userInfo stringifyNum sourceConfig annInsert = do
 --    > SELECT (<mutation_output_select>) AS [mutation_response], (<check_constraint_select>) AS [check_constraint_select]
 --
 --    When executed, the above statement returns a single row with mutation response as a string value and check constraint result as an integer value.
-buildInsertTx :: TSQL.TableName -> Text -> StringifyNumbers -> AnnInsert 'MSSQL Void Expression -> Tx.TxET QErr IO EncJSON
+buildInsertTx :: TSQL.TableName -> Text -> StringifyNumbers -> AnnotatedInsert 'MSSQL Void Expression -> Tx.TxET QErr IO EncJSON
 buildInsertTx tableName withAlias stringifyNum insert = do
-  let tableColumns = _aiTableCols $ _aiData insert
+  let tableColumns = _aiTableColumns $ _aiData insert
       ifMatchedField = _biIfMatched . _aiBackendInsert . _aiData $ insert
 
   -- Create #inserted temporary table
@@ -180,12 +185,12 @@ buildInsertTx tableName withAlias stringifyNum insert = do
 --      which will be used to build a "response" for the user.
 --
 --   Should be used as part of a bigger transaction in 'buildInsertTx'.
-buildUpsertTx :: TSQL.TableName -> AnnInsert 'MSSQL Void Expression -> IfMatched Expression -> Tx.TxET QErr IO ()
+buildUpsertTx :: TSQL.TableName -> AnnotatedInsert 'MSSQL Void Expression -> IfMatched Expression -> Tx.TxET QErr IO ()
 buildUpsertTx tableName insert ifMatched = do
-  let presets = _aiDefVals $ _aiData insert
+  let presets = _aiDefaultValues $ _aiData insert
       insertColumnNames =
-        concatMap (map fst . getInsertColumns) (_aiInsObj $ _aiData insert) <> HM.keys presets
-      allTableColumns = _aiTableCols $ _aiData insert
+        concatMap (map fst . getInsertColumns) (_aiInsertObject $ _aiData insert) <> HM.keys presets
+      allTableColumns = _aiTableColumns $ _aiData insert
       insertColumns = filter (\c -> ciColumn c `elem` insertColumnNames) allTableColumns
       createValuesTempTableQuery =
         toQueryFlat $
@@ -203,7 +208,7 @@ buildUpsertTx tableName insert ifMatched = do
   Tx.unitQueryE mutationMSSQLTxErrorHandler insertValuesIntoTempTableQuery
 
   -- Run the MERGE query and store the mutated rows in #inserted temporary table
-  merge <- runFromIr (toMerge tableName (_aiInsObj $ _aiData insert) allTableColumns ifMatched)
+  merge <- runFromIr (toMerge tableName (_aiInsertObject $ _aiData insert) allTableColumns ifMatched)
   let mergeQuery = toQueryFlat $ TQ.fromMerge merge
   Tx.unitQueryE mutationMSSQLTxErrorHandler mergeQuery
 
@@ -211,13 +216,13 @@ buildUpsertTx tableName insert ifMatched = do
   Tx.unitQueryE defaultMSSQLTxErrorHandler $ toQueryFlat $ dropTempTableQuery tempTableNameValues
 
 -- | Builds a response to the user using the values in the temporary table named #inserted.
-buildInsertResponseTx :: StringifyNumbers -> Text -> AnnInsert 'MSSQL Void Expression -> Tx.TxET QErr IO (Text, Int)
+buildInsertResponseTx :: StringifyNumbers -> Text -> AnnotatedInsert 'MSSQL Void Expression -> Tx.TxET QErr IO (Text, Int)
 buildInsertResponseTx stringifyNum withAlias insert = do
   -- Generate a SQL SELECT statement which outputs the mutation response using the #inserted
   mutationOutputSelect <- runFromIr $ mkMutationOutputSelect stringifyNum withAlias $ _aiOutput insert
 
   -- The check constraint is translated to boolean expression
-  let checkCondition = fst $ _aiCheckCond $ _aiData insert
+  let checkCondition = fst $ _aiCheckCondition $ _aiData insert
   checkBoolExp <- runFromIr $ runReaderT (fromGBoolExp checkCondition) (EntityAlias withAlias)
 
   let withSelect =

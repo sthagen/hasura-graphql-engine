@@ -6,6 +6,7 @@ module Hasura.Prelude
     alphabet,
     alphaNumerics,
     onNothing,
+    onNothingM,
     onJust,
     withJust,
     onLeft,
@@ -36,6 +37,7 @@ module Hasura.Prelude
     -- * Map-related utilities
     mapFromL,
     oMapFromL,
+    bimapHash,
 
     -- * Measuring and working with moments and durations
     withElapsedTime,
@@ -151,6 +153,9 @@ alphaNumerics = alphabet ++ "0123456789"
 
 onNothing :: Applicative m => Maybe a -> m a -> m a
 onNothing m act = maybe act pure m
+
+onNothingM :: Monad m => m (Maybe a) -> m a -> m a
+onNothingM m act = m >>= (`onNothing` act)
 
 onJust :: Applicative m => Maybe a -> (a -> m ()) -> m ()
 onJust m action = maybe (pure ()) action m
@@ -304,3 +309,12 @@ ltraceM lbl x = Debug.traceM (lbl <> ": " <> TL.unpack (PS.pShow x))
 -- [0,1,2,3,4,5,7,9]
 hashNub :: (Hashable a, Eq a) => [a] -> [a]
 hashNub = HSet.toList . HSet.fromList
+
+-- | 'bimapHash' is the map obtained by applying @f@ to each key and @g@ to each value.
+--
+-- The size of the result may be smaller if f maps two or more
+-- distinct keys to the same new key. In this case there is no
+-- guarantee which of the associated values is chosen for the
+-- conflicting key.
+bimapHash :: (Eq a, Eq a', Hashable a, Hashable a') => (a -> a') -> (b -> b') -> HashMap a b -> HashMap a' b'
+bimapHash f g = Map.mapKeys f . fmap g

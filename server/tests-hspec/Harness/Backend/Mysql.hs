@@ -19,23 +19,25 @@ module Harness.Backend.Mysql
 where
 
 import Control.Concurrent
-import Control.Exception
 import Control.Monad.Reader
 import Data.Aeson (Value)
 import Data.Bool (bool)
 import Data.Foldable (for_)
 import Data.String
-import Data.Text (Text)
+import Data.Text (Text, pack, replace)
 import Data.Text qualified as T
 import Data.Text.Extended (commaSeparated)
+import Data.Time (defaultTimeLocale, formatTime)
 import Database.MySQL.Simple as Mysql
-import GHC.Stack
 import Harness.Constants as Constants
+import Harness.Exceptions
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
 import Harness.State (State)
 import Harness.Test.Context (BackendType (MySQL), defaultBackendTypeString, defaultSource)
+import Harness.Test.Schema (BackendScalarType (..), BackendScalarValue (..), ScalarValue (..), formatBackendScalarValue)
 import Harness.Test.Schema qualified as Schema
+import Hasura.Prelude (tshow)
 import System.Process.Typed
 import Prelude
 
@@ -118,7 +120,7 @@ scalarType = \case
   Schema.TStr -> "TEXT"
   Schema.TUTCTime -> "DATETIME"
   Schema.TBool -> "BIT"
-  t -> error $ "Unexpected scalar type used for MySQL: " <> show t
+  Schema.TCustomType txt -> Schema.getBackendScalarType txt bstMysql
 
 mkColumn :: Schema.Column -> Text
 mkColumn Schema.Column {columnName, columnType, columnNullable, columnDefault} =
@@ -172,11 +174,21 @@ insertTable Schema.Table {tableName, tableColumns, tableData}
             ";"
           ]
 
+-- | 'ScalarValue' serializer for Mysql
+serialize :: ScalarValue -> Text
+serialize = \case
+  VInt i -> tshow i
+  VStr s -> "'" <> replace "'" "\'" s <> "'"
+  VUTCTime t -> pack $ formatTime defaultTimeLocale "'%F %T'" t
+  VBool b -> tshow @Int $ if b then 1 else 0
+  VNull -> "NULL"
+  VCustomValue bsv -> "'" <> formatBackendScalarValue bsv bsvMysql <> "'"
+
 mkRow :: [Schema.ScalarValue] -> Text
 mkRow row =
   T.unwords
     [ "(",
-      commaSeparated $ Schema.serialize <$> row,
+      commaSeparated $ serialize <$> row,
       ")"
     ]
 
@@ -221,7 +233,7 @@ setup tables (state, _) = do
 -- NOTE: Certain test modules may warrant having their own version.
 teardown :: [Schema.Table] -> (State, ()) -> IO ()
 teardown tables (state, _) = do
-  for_ (reverse tables) $ \table ->
+  forFinally_ (reverse tables) $ \table ->
     finally
       (Schema.untrackRelationships MySQL table state)
       ( finally

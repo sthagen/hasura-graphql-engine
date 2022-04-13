@@ -12,11 +12,16 @@ import {
   isListType,
   isNonNullType,
 } from 'graphql';
-import { isEmpty, isFloat, isNumber } from '@/components/Common/utils/jsUtils';
+import {
+  isEmpty,
+  isFloat,
+  isJsonString,
+  isNumber,
+} from '@/components/Common/utils/jsUtils';
 import {
   AllowedRootFields,
   ArgValue,
-  HasuraColumn,
+  HasuraRsFields,
   RelationshipFields,
   TreeNode,
   RemoteRelationship,
@@ -39,7 +44,7 @@ export const getFieldData = (nodeData: AntdTreeNode): RelationshipFields => ({
 });
 
 export const defaultArgValue: ArgValue = {
-  kind: 'column',
+  kind: 'field',
   value: '',
   type: 'String',
 };
@@ -100,7 +105,7 @@ const buildArgElement = ({
   parentKey,
   relationshipFields,
   setRelationshipFields,
-  columns,
+  fieldOptions,
   depth,
 }: {
   arg: GraphQLArgument | GraphQLInputField;
@@ -109,7 +114,7 @@ const buildArgElement = ({
   setRelationshipFields: React.Dispatch<
     React.SetStateAction<RelationshipFields[]>
   >;
-  columns: HasuraColumn;
+  fieldOptions: HasuraRsFields;
   depth: number;
 }): TreeNode => {
   const { type: argType }: { type: GraphQLType } = getUnderlyingType(arg.type);
@@ -132,7 +137,7 @@ const buildArgElement = ({
               parentKey: argKey,
               relationshipFields,
               setRelationshipFields,
-              columns,
+              fieldOptions,
               depth: depth + 1,
             })
           ),
@@ -148,9 +153,10 @@ const buildArgElement = ({
         argKey={argKey}
         relationshipFields={relationshipFields}
         setRelationshipFields={setRelationshipFields}
-        columns={columns}
+        fields={fieldOptions}
         showForm={isActive && checkable}
         argValue={argValue || defaultArgValue}
+        argType={argType}
       />
     ),
     key: argKey,
@@ -171,7 +177,7 @@ interface BuildFieldElementArgs {
   >;
   depth: number;
   isSubfield: boolean;
-  columns: HasuraColumn;
+  fieldOptions: HasuraRsFields;
 }
 
 const buildFieldElement = ({
@@ -179,7 +185,7 @@ const buildFieldElement = ({
   parentKey,
   relationshipFields,
   setRelationshipFields,
-  columns,
+  fieldOptions,
   depth,
   isSubfield,
 }: BuildFieldElementArgs): TreeNode => {
@@ -214,7 +220,7 @@ const buildFieldElement = ({
             parentKey: `${fieldKey}.arguments`,
             relationshipFields,
             setRelationshipFields,
-            columns,
+            fieldOptions,
             depth: depth + 1,
           })
         ),
@@ -238,7 +244,7 @@ const buildFieldElement = ({
               parentKey: `${fieldKey}.field`,
               relationshipFields,
               setRelationshipFields,
-              columns,
+              fieldOptions,
               depth: depth + 1,
               isSubfield: true,
             })
@@ -272,14 +278,14 @@ interface BuildTreeArgs {
     React.SetStateAction<RelationshipFields[]>
   >;
   rootFields: AllowedRootFields;
-  columns: HasuraColumn;
+  fields: HasuraRsFields;
 }
 
 export const buildTree = ({
   schema,
   relationshipFields,
   setRelationshipFields,
-  columns,
+  fields: fieldOptions,
   rootFields,
 }: BuildTreeArgs): TreeNode[] => {
   const treeData: TreeNode[] = [];
@@ -300,7 +306,7 @@ export const buildTree = ({
             parentKey: `${fieldKey}.field`,
             relationshipFields,
             setRelationshipFields,
-            columns,
+            fieldOptions,
             depth: 0,
             isSubfield: false,
           })
@@ -325,7 +331,7 @@ export const buildTree = ({
             parentKey: `${fieldKey}.field`,
             relationshipFields,
             setRelationshipFields,
-            columns,
+            fieldOptions,
             depth: 0,
             isSubfield: false,
           })
@@ -350,7 +356,7 @@ export const buildTree = ({
             parentKey: `${fieldKey}.field`,
             relationshipFields,
             setRelationshipFields,
-            columns,
+            fieldOptions,
             depth: 0,
             isSubfield: false,
           })
@@ -383,7 +389,12 @@ const getRemoteFieldObject = (
 
       // if leaf, push arg value
       if (ukSplit[i][depth + 1] === '__argVal') {
-        obj[uniqueField] = ukSplit[i][depth + 2];
+        const value = ukSplit[i][depth + 2];
+        if (value.startsWith('__SCALAR__'))
+          obj[uniqueField] = isJsonString(value.substring(10))
+            ? JSON.parse(value.substring(10))
+            : '';
+        else obj[uniqueField] = value;
       } else {
         obj[uniqueField] = {
           ...getRemoteFieldObject(newUkSplit, depth + 1, maxDepth),
@@ -416,7 +427,7 @@ const getKeysWithArgValues = (relationshipFields: RelationshipFields[]) =>
     if (field.type === 'arg') {
       if (field.argValue && field.argValue?.kind === 'static')
         return `${field.key}.__argVal.${field.argValue?.value}`;
-      else if (field.argValue && field.argValue?.kind === 'column')
+      else if (field.argValue && field.argValue?.kind === 'field')
         return `${field.key}.__argVal.$${field.argValue?.value}`;
       return `${field.key}.__argVal.$`;
     }
@@ -455,7 +466,7 @@ export const parseArgValue = (
     const isStatic = !argValue.startsWith('$');
     return {
       value: isStatic ? argValue.toString() : argValue.substr(1),
-      kind: isStatic ? 'static' : 'column',
+      kind: isStatic ? 'static' : 'field',
       type: 'String',
     };
   }
@@ -547,7 +558,8 @@ const serialiseRemoteField = (
 export const parseServerRelationship = (
   serverRelationship: RemoteRelationship
 ): RelationshipFields[] => {
-  const remoteFields = serverRelationship?.definition?.remote_field;
+  const remoteFields =
+    serverRelationship?.definition?.to_remote_schema.remote_field;
   if (!remoteFields || isEmpty(remoteFields)) {
     return [];
   }

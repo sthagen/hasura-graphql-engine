@@ -1,12 +1,12 @@
 import React, { useMemo } from 'react';
-import 'antd/lib/tree/style/index.css';
 import { Tree as AntTree } from 'antd';
 import { GraphQLSchema } from 'graphql';
 import { EventDataNode } from 'antd/lib/tree';
+import './index.css';
 import {
   AllowedRootFields,
   AntdTreeNode,
-  HasuraColumn,
+  HasuraRsFields,
   RelationshipFields,
   TreeNode,
 } from '../../types';
@@ -28,10 +28,7 @@ export interface RemoteSchemaTreeProps {
   setRelationshipFields: React.Dispatch<
     React.SetStateAction<RelationshipFields[]>
   >;
-  /**
-   * Columns array from the current table.
-   */
-  columns: HasuraColumn;
+  fields: HasuraRsFields;
 }
 
 export const RemoteSchemaTree = ({
@@ -39,7 +36,7 @@ export const RemoteSchemaTree = ({
   relationshipFields,
   rootFields,
   setRelationshipFields,
-  columns,
+  fields,
 }: RemoteSchemaTreeProps) => {
   const tree: TreeNode[] = useMemo(
     () =>
@@ -47,10 +44,10 @@ export const RemoteSchemaTree = ({
         schema,
         relationshipFields,
         setRelationshipFields,
-        columns,
+        fields,
         rootFields,
       }),
-    [relationshipFields, schema, rootFields, columns]
+    [relationshipFields, schema, rootFields, fields]
   );
 
   const expandedKeys = useMemo(() => getExpandedKeys(relationshipFields), [
@@ -145,20 +142,18 @@ export const RemoteSchemaTree = ({
   };
 
   return (
-    <div className="py-2 px-1 rounded-md border border-gray-300 bg-white">
-      <AntTree
-        checkable
-        checkStrictly
-        blockNode
-        selectable={false}
-        onCheck={onCheck}
-        onExpand={onExpand}
-        treeData={tree}
-        expandedKeys={expandedKeys}
-        checkedKeys={checkedKeys}
-        // disable animation onExpand to improve performance
-        motion={null}
-      />
-    </div>
+    <AntTree
+      checkable
+      checkStrictly
+      blockNode
+      selectable={false}
+      onCheck={onCheck}
+      onExpand={onExpand}
+      treeData={tree}
+      expandedKeys={expandedKeys}
+      checkedKeys={checkedKeys}
+      // disable animation onExpand to improve performance
+      motion={null}
+    />
   );
 };
