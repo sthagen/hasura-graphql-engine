@@ -749,6 +749,7 @@ library
                      , Hasura.GraphQL.Parser.Class.Parse
                      , Hasura.GraphQL.Parser.Collect
                      , Hasura.GraphQL.Parser.Column
+                     , Hasura.GraphQL.Parser.Constants
                      , Hasura.GraphQL.Parser.Directives
                      , Hasura.GraphQL.Parser.Internal.Convert
                      , Hasura.GraphQL.Parser.Internal.Input
@@ -1062,7 +1063,7 @@ test-suite tests-hspec
     Harness.GraphqlEngine
     Harness.Http
     Harness.RemoteServer
-    Harness.State
+    Harness.TestEnvironment
 
  -- Harness.Backend
     Harness.Backend.BigQuery
@@ -1102,6 +1103,7 @@ test-suite tests-hspec
     Test.RemoteRelationship.XToDBObjectRelationshipSpec
     Test.RemoteRelationship.XToRemoteSchemaRelationshipSpec
     Test.RequestHeadersSpec
+    Test.SerializationSpec
     Test.ServiceLivenessSpec
     Test.ViewsSpec
     Test.WhereSpec

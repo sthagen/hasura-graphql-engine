@@ -4,6 +4,31 @@
 
 ### Bug fixes and improvements
 
+- server: add support for MSSQL event triggers (#7228)
+- server: update pg_dump to be compatible with postgres 14 (#7676)
+- server: fix parsing remote relationship json definition from 1.x server catalog on migration (fix #7906)
+- server: Don't drop nested typed null fields in actions (fix #8237)
+- server: fixes remote relationships on actions (fix #8399)
+- console: add remote database relationships for views
+- cli: fix performance regression in `migrate status` command (fix #8398)
+
+## v2.5.1
+
+### Bug fixes and improvements
+- server: fixes remote relationships on actions (fix #8399)
+- server: validate top level fragments in GQL query
+- cli: fix performance regression in `migrate status` command (fix #8398)
+
+## v2.6.0-beta.2
+
+### Bug fixes and improvements
+- server: fix parsing remote relationship json definition from 1.x server catalog on migration (fix #7906)
+- server: Don't drop nested typed null fields in actions (fix #8237)
+- server: fixes remote relationships on actions (fix #8399)
+- server: update pg_dump to be compatible with postgres 14 (#7676)
+- console: add remote database relationships for views
+- cli: fix performance regression in `migrate status` command (fix #8398)
+
 ## v2.6.0-beta.1
 
 ### Breaking changes
@@ -13,6 +38,7 @@
 
 ### Bug fixes and improvements
 
+- server: Fix BigQuery overflow issue when using Decimal/BigDecimal data type.
 - server: remove 'query' and 'raw-query' field from logs for metadata queries by default. Use `HASURA_GRAPHQL_ENABLE_METADATA_QUERY_LOGGING` to renable those fields.
 - server: `clear_metadata` now correctly archives event triggers and the drop source API drops indirect dependencies created by remote relationships when the dependent source is dropped.
 - server: fix inserting values into columns with case sensitive enum types for PostgreSQL/Citus backends (fix #4014)

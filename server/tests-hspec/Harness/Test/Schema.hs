@@ -9,13 +9,16 @@ module Harness.Test.Schema
     ScalarValue (..),
     BackendScalarType (..),
     BackendScalarValue (..),
+    BackendScalarValueType (..),
+    quotedValue,
+    unquotedValue,
+    backendScalarValue,
     column,
     columnNull,
     defaultBackendScalarType,
     getBackendScalarType,
     defaultBackendScalarValue,
-    getBackendScalarValue,
-    formatBackendScalarValue,
+    formatBackendScalarValueType,
     parseUTCTimeOrError,
     trackTable,
     untrackTable,
@@ -32,8 +35,8 @@ import Data.Time.Format (parseTimeOrError)
 import Harness.Exceptions
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
-import Harness.State (State)
 import Harness.Test.Context (BackendType, defaultBackendTypeString, defaultSchema, defaultSource)
+import Harness.TestEnvironment (TestEnvironment)
 import Prelude
 
 -- | Generic type to use to specify schema tables for all backends.
@@ -114,6 +117,28 @@ getBackendScalarType bst fn =
     Just scalarType -> scalarType
     Nothing -> error $ "getBackendScalarType: BackendScalarType is Nothing, passed " <> show bst
 
+-- | This type represents how the serialization of a value should
+-- happen for a particular item. 'Quoted' text indicates that the text
+-- will be enclosed with double quotes whereas 'Unqouted' text will have
+-- none.
+--
+-- Usually, texts (or strings) should be represented as quoted and
+-- numbers might not require any quotes. Although, consult the
+-- particular database backend for the exact behavior. This type has
+-- been introduced to allow flexibility while construting values for
+-- the columns.
+data BackendScalarValueType = Quoted Text | Unquoted Text deriving (Show, Eq)
+
+quotedValue :: Text -> BackendScalarValueType
+quotedValue = Quoted
+
+unquotedValue :: Text -> BackendScalarValueType
+unquotedValue = Unquoted
+
+formatBackendScalarValueType :: BackendScalarValueType -> Text
+formatBackendScalarValueType (Quoted text) = "'" <> text <> "'"
+formatBackendScalarValueType (Unquoted text) = text
+
 -- | Generic type to represent ScalarValue for multiple backends. This
 -- type can be used to encapsulate the column values for different
 -- backends by providing explicit data for individual backend. This provides
@@ -127,11 +152,11 @@ getBackendScalarType bst fn =
 -- for Microsoft's SQL server backend. This type provides flexibility
 -- to provide such options.
 data BackendScalarValue = BackendScalarValue
-  { bsvMysql :: Maybe Text,
-    bsvCitus :: Maybe Text,
-    bsvPostgres :: Maybe Text,
-    bsvBigQuery :: Maybe Text,
-    bsvMssql :: Maybe Text
+  { bsvMysql :: Maybe BackendScalarValueType,
+    bsvCitus :: Maybe BackendScalarValueType,
+    bsvPostgres :: Maybe BackendScalarValueType,
+    bsvBigQuery :: Maybe BackendScalarValueType,
+    bsvMssql :: Maybe BackendScalarValueType
   }
   deriving (Show, Eq)
 
@@ -146,12 +171,6 @@ defaultBackendScalarValue =
       bsvBigQuery = Nothing,
       bsvMssql = Nothing
     }
-
--- | Access specific backend scalar value out of 'BackendScalarValue'
-getBackendScalarValue :: BackendScalarValue -> (BackendScalarValue -> Maybe Text) -> Text
-getBackendScalarValue bsv fn = case fn bsv of
-  Nothing -> error $ "getBackendScalarValue: BackendScalarValue is Nothing, passed " <> show bsv
-  Just scalarValue -> scalarValue
 
 -- | Generic scalar type for all backends, for simplicity.
 -- Ideally, we would be wiring in @'Backend@ specific scalar types here to make
@@ -176,9 +195,9 @@ data ScalarValue
   | VCustomValue BackendScalarValue
   deriving (Show, Eq)
 
-formatBackendScalarValue :: BackendScalarValue -> (BackendScalarValue -> Maybe Text) -> Text
-formatBackendScalarValue bsv fn = case fn bsv of
-  Nothing -> error $ "formatBackendScalarValue: Retrieved value is Nothing, passed " <> show bsv
+backendScalarValue :: BackendScalarValue -> (BackendScalarValue -> Maybe BackendScalarValueType) -> BackendScalarValueType
+backendScalarValue bsv fn = case fn bsv of
+  Nothing -> error $ "backendScalarValue: Retrieved value is Nothing, passed " <> show bsv
   Just scalarValue -> scalarValue
 
 -- | Helper function to construct 'Column's with common defaults
@@ -194,13 +213,13 @@ parseUTCTimeOrError :: String -> ScalarValue
 parseUTCTimeOrError = VUTCTime . parseTimeOrError True defaultTimeLocale "%F %T"
 
 -- | Unified track table
-trackTable :: HasCallStack => BackendType -> String -> Table -> State -> IO ()
-trackTable backend source Table {tableName} state = do
+trackTable :: HasCallStack => BackendType -> String -> Table -> TestEnvironment -> IO ()
+trackTable backend source Table {tableName} testEnvironment = do
   let backendType = defaultBackendTypeString backend
       schema = defaultSchema backend
       requestType = backendType <> "_track_table"
   GraphqlEngine.postMetadata_
-    state
+    testEnvironment
     [yaml|
 type: *requestType
 args:
@@ -211,13 +230,13 @@ args:
 |]
 
 -- | Unified untrack table
-untrackTable :: HasCallStack => BackendType -> String -> Table -> State -> IO ()
-untrackTable backend source Table {tableName} state = do
+untrackTable :: HasCallStack => BackendType -> String -> Table -> TestEnvironment -> IO ()
+untrackTable backend source Table {tableName} testEnvironment = do
   let backendType = defaultBackendTypeString backend
       schema = defaultSchema backend
   let requestType = backendType <> "_untrack_table"
   GraphqlEngine.postMetadata_
-    state
+    testEnvironment
     [yaml|
 type: *requestType
 args:
@@ -232,15 +251,15 @@ mkObjectRelationshipName :: Reference -> Text
 mkObjectRelationshipName Reference {referenceLocalColumn, referenceTargetTable} = referenceTargetTable <> "_by_" <> referenceLocalColumn
 
 -- | Unified track object relationships
-trackObjectRelationships :: HasCallStack => BackendType -> Table -> State -> IO ()
-trackObjectRelationships backend Table {tableName, tableReferences} state = do
+trackObjectRelationships :: HasCallStack => BackendType -> Table -> TestEnvironment -> IO ()
+trackObjectRelationships backend Table {tableName, tableReferences} testEnvironment = do
   let source = defaultSource backend
       schema = defaultSchema backend
       requestType = source <> "_create_object_relationship"
   for_ tableReferences $ \ref@Reference {referenceLocalColumn} -> do
     let relationshipName = mkObjectRelationshipName ref
     GraphqlEngine.postMetadata_
-      state
+      testEnvironment
       [yaml|
 type: *requestType
 args:
@@ -258,15 +277,15 @@ mkArrayRelationshipName :: Text -> Text -> Text
 mkArrayRelationshipName tableName referenceLocalColumn = tableName <> "s_by_" <> referenceLocalColumn
 
 -- | Unified track array relationships
-trackArrayRelationships :: HasCallStack => BackendType -> Table -> State -> IO ()
-trackArrayRelationships backend Table {tableName, tableReferences} state = do
+trackArrayRelationships :: HasCallStack => BackendType -> Table -> TestEnvironment -> IO ()
+trackArrayRelationships backend Table {tableName, tableReferences} testEnvironment = do
   let source = defaultSource backend
       schema = defaultSchema backend
       requestType = source <> "_create_array_relationship"
   for_ tableReferences $ \Reference {referenceLocalColumn, referenceTargetTable} -> do
     let relationshipName = mkArrayRelationshipName tableName referenceLocalColumn
     GraphqlEngine.postMetadata_
-      state
+      testEnvironment
       [yaml|
 type: *requestType
 args:
@@ -284,8 +303,8 @@ args:
 |]
 
 -- | Unified untrack relationships
-untrackRelationships :: HasCallStack => BackendType -> Table -> State -> IO ()
-untrackRelationships backend Table {tableName, tableReferences} state = do
+untrackRelationships :: HasCallStack => BackendType -> Table -> TestEnvironment -> IO ()
+untrackRelationships backend Table {tableName, tableReferences} testEnvironment = do
   let source = defaultSource backend
       schema = defaultSchema backend
       requestType = source <> "_drop_relationship"
@@ -294,7 +313,7 @@ untrackRelationships backend Table {tableName, tableReferences} state = do
         objectRelationshipName = mkObjectRelationshipName ref
     -- drop array relationships
     GraphqlEngine.postMetadata_
-      state
+      testEnvironment
       [yaml|
 type: *requestType
 args:
@@ -306,7 +325,7 @@ args:
 |]
     -- drop object relationships
     GraphqlEngine.postMetadata_
-      state
+      testEnvironment
       [yaml|
 type: *requestType
 args:

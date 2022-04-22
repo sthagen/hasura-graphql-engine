@@ -53,6 +53,21 @@ class TestActionsSyncWebsocket:
     def test_create_users_success(self, hge_ctx, transport):
         check_query_f(hge_ctx, self.dir() + '/create_users_success.yaml', transport)
 
+@pytest.mark.parametrize("transport", ['http', 'websocket'])
+@pytest.mark.usefixtures(
+    "graphql_service",
+    "actions_fixture",
+    'per_class_tests_db_state'
+)
+class TestActionsRelationshipsBasic:
+
+    @classmethod
+    def dir(cls):
+        return 'queries/actions/relationships/basic'
+
+    def test_query_with_relationships(self, hge_ctx, transport):
+        check_query_f(hge_ctx, self.dir() + '/query_with_relationships.yaml', transport)
+
 @use_action_fixtures
 class TestActionsSync:
 
@@ -90,6 +105,32 @@ class TestActionsSync:
     def test_object_response_action_transformed_output(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + '/object_response_action_transformed_output.yaml')
 
+    def test_expecting_object_response_with_nested_null(self, hge_ctx):
+       check_query_f(hge_ctx, self.dir() + '/expecting_object_response_with_nested_null.yaml')
+
+    def test_expecting_object_response_with_nested_null_wrong_field(self, hge_ctx):
+        query_obj = {
+            "query": """
+                query {
+                    typed_nested_null_wrong_field {
+                        id
+                        child {
+                        id
+                        }
+                    }
+                }
+            """
+        }
+        headers = {}
+        admin_secret = hge_ctx.hge_key
+        if admin_secret is not None:
+            headers['X-Hasura-Admin-Secret'] = admin_secret
+        code, resp, _ = hge_ctx.anyq('/v1/graphql', query_obj, headers)
+        assert code == 200, resp
+
+        error_message = resp['errors'][0]['message']
+
+        assert error_message == 'expecting not null value for field "id"', error_message
 
     # Webhook response validation tests. See https://github.com/hasura/graphql-engine/issues/3977
     def test_mirror_action_not_null(self, hge_ctx):

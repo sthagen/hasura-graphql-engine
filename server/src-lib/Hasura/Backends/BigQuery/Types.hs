@@ -6,14 +6,14 @@ module Hasura.Backends.BigQuery.Types
     Aliased (..),
     ArrayAgg (..),
     Base64,
-    BigDecimal,
+    BigDecimal (..),
     BooleanOperators (..),
     Cardinality (..),
     ColumnName (ColumnName),
     Countable (..),
     Date (..),
     Datetime (..),
-    Decimal,
+    Decimal (..),
     EntityAlias (..),
     Expression (..),
     FieldName (..),
@@ -49,7 +49,6 @@ module Hasura.Backends.BigQuery.Types
     WindowFunction (..),
     aggregateProjectionsFieldOrigin,
     doubleToBigDecimal,
-    doubleToDecimal,
     doubleToFloat64,
     getGQLTableName,
     intToInt64,
@@ -59,6 +58,7 @@ module Hasura.Backends.BigQuery.Types
     parseScalarValue,
     projectionAlias,
     scalarTypeGraphQLName,
+    scientificToText,
   )
 where
 
@@ -75,6 +75,9 @@ import Data.Scientific
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.Extended
+import Data.Text.Lazy (toStrict)
+import Data.Text.Lazy.Builder (toLazyText)
+import Data.Text.Lazy.Builder.Scientific (formatScientificBuilder)
 import Data.Vector (Vector)
 import Data.Vector.Instances ()
 import Hasura.Base.Error
@@ -702,20 +705,29 @@ int64Expr = ValueExpression . IntegerValue . intToInt64
 newtype Decimal = Decimal Text
   deriving (Show, Eq, Ord, Generic, Data, Cacheable, NFData, Hashable, Lift)
 
-instance FromJSON Decimal where parseJSON = liberalDecimalParser Decimal
+instance FromJSON Decimal where
+  parseJSON (J.Number num) = pure $ Decimal $ scientificToText num
+  parseJSON (J.String num) = pure $ Decimal num
+  parseJSON _ = fail "parseJSON: FromJSON Decimal failure"
 
-instance ToJSON Decimal where toJSON = liberalDecimalPrinter
+instance ToJSON Decimal where
+  toJSON (Decimal x) = J.toJSON x
 
-doubleToDecimal :: Double -> Decimal
-doubleToDecimal = Decimal . T.decodeUtf8 . L.toStrict . J.encode
+-- | Convert 'Scientific' to 'Text'
+scientificToText :: Scientific -> Text
+scientificToText num = toStrict $ toLazyText $ formatScientificBuilder Fixed Nothing num
 
 -- | BigQuery's conception of a \"big\" fixed precision decimal.
 newtype BigDecimal = BigDecimal Text
   deriving (Show, Eq, Ord, Generic, Data, Cacheable, NFData, Hashable, Lift)
 
-instance FromJSON BigDecimal where parseJSON = liberalDecimalParser BigDecimal
+instance FromJSON BigDecimal where
+  parseJSON (J.Number num) = pure $ BigDecimal $ scientificToText num
+  parseJSON (J.String num) = pure $ BigDecimal num
+  parseJSON _ = fail "parseJSON: FromJSON BigDecimal failure"
 
-instance ToJSON BigDecimal where toJSON = liberalDecimalPrinter
+instance ToJSON BigDecimal where
+  toJSON (BigDecimal x) = J.toJSON x
 
 doubleToBigDecimal :: Double -> BigDecimal
 doubleToBigDecimal = BigDecimal . T.decodeUtf8 . L.toStrict . J.encode

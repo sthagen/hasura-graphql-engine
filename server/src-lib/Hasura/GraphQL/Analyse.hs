@@ -1,5 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 -- | Tools to analyze the structure of a GraphQL request.
 module Hasura.GraphQL.Analyse
   ( -- * Query structure
@@ -18,6 +16,7 @@ import Control.Monad.Writer (Writer, runWriter)
 import Data.HashMap.Strict qualified as Map
 import Data.Sequence ((|>))
 import Data.Text qualified as T
+import Hasura.GraphQL.Parser.Constants qualified as G
 import Hasura.Prelude
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -184,32 +183,35 @@ analyzeObjectSelectionSet ::
   G.SelectionSet G.FragmentSpread G.Name ->
   Analysis Selection
 analyzeObjectSelectionSet (G.ObjectTypeDefinition {..}) selectionSet = do
-  mconcat . catMaybes <$> for selectionSet \case
-    -- TODO: implement fragments
-    G.SelectionFragmentSpread _ ->
-      pure Nothing
-    G.SelectionInlineFragment _ ->
-      pure Nothing
-    G.SelectionField (G.Field {..}) ->
-      withField _fName $ withCatchAndRecord do
-        -- attempt to find that field in the object's definition
-        G.FieldDefinition {..} <-
-          findDefinition _fName
-            `onNothing` throwDiagnosis (ObjectFieldNotFound _otdName _fName)
-        -- attempt to find its type in the schema
-        let baseType = G.getBaseType _fldType
-        typeDefinition <-
-          lookupType baseType
-            `onNothingM` throwDiagnosis (TypeNotFound baseType)
-        -- recursively processthe selection set
-        subSelection <- analyzeSelectionSet typeDefinition _fSelectionSet
-        -- TODO: should we check arguments?
-        pure $
-          Selection $
-            Map.singleton
-              (fromMaybe _fName _fAlias)
-              (FieldInfo _fldType typeDefinition subSelection)
+  mconcat . catMaybes <$> for selectionSet analyzeObjectSelection
   where
+    analyzeObjectSelection :: G.Selection G.FragmentSpread G.Name -> Analysis (Maybe Selection)
+    analyzeObjectSelection = \case
+      -- TODO: implement fragments
+      G.SelectionFragmentSpread _ -> do
+        pure Nothing
+      G.SelectionInlineFragment inlineFrag -> do
+        -- analyze the inline fragment's selection set
+        mconcat <$> for (G._ifSelectionSet inlineFrag) analyzeObjectSelection
+      G.SelectionField (G.Field {..}) ->
+        withField _fName $ withCatchAndRecord do
+          -- attempt to find that field in the object's definition
+          G.FieldDefinition {..} <-
+            findDefinition _fName
+              `onNothing` throwDiagnosis (ObjectFieldNotFound _otdName _fName)
+          -- attempt to find its type in the schema
+          let baseType = G.getBaseType _fldType
+          typeDefinition <-
+            lookupType baseType
+              `onNothingM` throwDiagnosis (TypeNotFound baseType)
+          -- recursively processthe selection set
+          subSelection <- analyzeSelectionSet typeDefinition _fSelectionSet
+          -- TODO: should we check arguments?
+          pure $
+            Selection $
+              Map.singleton
+                (fromMaybe _fName _fAlias)
+                (FieldInfo _fldType typeDefinition subSelection)
     -- Additional hidden fields that are allowed despite not being listed in the
     -- schema.
     systemFields :: [G.FieldDefinition G.InputValueDefinition]
@@ -339,24 +341,24 @@ render (AnalysisError path diagnosis) =
 -- Special type names
 
 queryRootName :: G.Name
-queryRootName = $$(G.litName "query_root")
+queryRootName = G._query_root
 
 mutationRootName :: G.Name
-mutationRootName = $$(G.litName "mutation_root")
+mutationRootName = G._mutation_root
 
 subscriptionRootName :: G.Name
-subscriptionRootName = $$(G.litName "subscription_root")
+subscriptionRootName = G._subscription_root
 
 -- Reserved fields
 
 typenameField :: G.FieldDefinition G.InputValueDefinition
-typenameField = mkReservedField $$(G.litName "__typename") $$(G.litName "String")
+typenameField = mkReservedField G.___typename G._String
 
 schemaField :: G.FieldDefinition G.InputValueDefinition
-schemaField = mkReservedField $$(G.litName "__schema") $$(G.litName "__Schema")
+schemaField = mkReservedField G.___schema G.___Schema
 
 typeField :: G.FieldDefinition G.InputValueDefinition
-typeField = mkReservedField $$(G.litName "__type") $$(G.litName "__Type")
+typeField = mkReservedField G.___type G.___Type
 
 mkReservedField :: G.Name -> G.Name -> G.FieldDefinition G.InputValueDefinition
 mkReservedField fieldName typeName =

@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 
 module Hasura.GraphQL.Schema.Action
   ( actionExecute,
@@ -25,6 +25,7 @@ import Hasura.GraphQL.Parser
   )
 import Hasura.GraphQL.Parser qualified as P
 import Hasura.GraphQL.Parser.Class
+import Hasura.GraphQL.Parser.Constants qualified as G
 import Hasura.GraphQL.Parser.Internal.Parser qualified as P
 import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.Common
@@ -145,19 +146,19 @@ actionAsyncQuery objectTypes actionInfo = runMaybeT do
         let idField = P.selection_ idFieldName (Just idFieldDescription) actionIdParser $> AsyncId
             createdAtField =
               P.selection_
-                $$(G.litName "created_at")
+                G._created_at
                 (Just "the time at which this action was created")
                 createdAtFieldParser
                 $> AsyncCreatedAt
             errorsField =
               P.selection_
-                $$(G.litName "errors")
+                G._errors
                 (Just "errors related to the invocation")
                 errorsFieldParser
                 $> AsyncErrors
             outputField =
               P.subselection_
-                $$(G.litName "output")
+                G._output
                 (Just "the output fields of this action")
                 actionOutputParser
                 <&> AsyncOutput
@@ -190,7 +191,7 @@ actionAsyncQuery objectTypes actionInfo = runMaybeT do
           }
   where
     ActionInfo actionName (outputType, outputObject) definition permissions forwardClientHeaders comment = actionInfo
-    idFieldName = $$(G.litName "id")
+    idFieldName = G._id
     idFieldDescription = "the unique id of an action"
 
 -- | Async action's unique id
@@ -252,9 +253,14 @@ actionOutputFields outputType annotatedObject objectTypes = do
     relationshipFieldParser (TypeRelationship relationshipName relType sourceName tableInfo fieldMapping) = runMaybeT do
       sourceInfo <- MaybeT $ asks $ (unsafeSourceInfo @('Postgres 'Vanilla) <=< Map.lookup sourceName) . getter
       relName <- hoistMaybe $ RelName <$> mkNonEmptyText (toTxt relationshipName)
-      let lhsJoinFields = Map.fromList $ do
-            (k, v) <- Map.toList fieldMapping
-            pure (FieldName $ G.unName $ unObjectFieldName k, ciName v)
+
+      --  `lhsJoinFields` is a map of `x: y`
+      --  where 'x' is the 'reference name' of a join field, i.e, how a join
+      --         field is referenced in the remote relationships definition
+      --  while 'y' is the join field.
+      --  In case of custom types, they are pretty much the same.
+      --  In case of databases, 'y' could be a computed field with session variables etc.
+      let lhsJoinFields = Map.fromList [(FieldName $ G.unName k, k) | ObjectFieldName k <- Map.keys fieldMapping]
           joinMapping = Map.fromList $ do
             (k, v) <- Map.toList fieldMapping
             let scalarType = case ciType v of
