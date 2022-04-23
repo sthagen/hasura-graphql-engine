@@ -41,7 +41,7 @@ import Hasura.Backends.Postgres.Translate.Select (PostgresAnnotatedFieldJSON)
 import Hasura.Backends.Postgres.Translate.Select qualified as DS
 import Hasura.Backends.Postgres.Types.Update
 import Hasura.Base.Error (QErr)
-import Hasura.EncJSON (EncJSON, encJFromJValue)
+import Hasura.EncJSON (EncJSON, encJFromBS, encJFromJValue)
 import Hasura.GraphQL.Execute.Backend
   ( BackendExecute (..),
     DBStepInfo (..),
@@ -59,7 +59,10 @@ import Hasura.GraphQL.Namespace
   ( RootFieldAlias (..),
     RootFieldMap,
   )
-import Hasura.GraphQL.Parser (UnpreparedValue (..))
+import Hasura.GraphQL.Namespace qualified as G
+import Hasura.GraphQL.Parser
+  ( UnpreparedValue (..),
+  )
 import Hasura.Prelude
 import Hasura.QueryTags
   ( QueryTagsComment (..),
@@ -75,18 +78,19 @@ import Hasura.RQL.IR.Update qualified as IR
 import Hasura.RQL.Types
   ( Backend (..),
     BackendType (Postgres),
-    FieldName,
-    JsonAggSelect (..),
-    SourceName,
-    getFieldNameTxt,
+    ColumnInfo (..),
     liftTx,
   )
 import Hasura.RQL.Types.Column
-  ( ColumnInfo (..),
-    ColumnType (..),
+  ( ColumnType (..),
     ColumnValue (..),
   )
-import Hasura.RQL.Types.Common (StringifyNumbers)
+import Hasura.RQL.Types.Common
+  ( FieldName (..),
+    JsonAggSelect (..),
+    SourceName,
+    StringifyNumbers,
+  )
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.Session (UserInfo (..))
 import Hasura.Tracing qualified as Tracing
@@ -309,7 +313,7 @@ pgDBLiveQuerySubscriptionPlan ::
 pgDBLiveQuerySubscriptionPlan userInfo _sourceName sourceConfig namespace unpreparedAST = do
   (preparedAST, PGL.QueryParametersInfo {..}) <-
     flip runStateT mempty $
-      for unpreparedAST $ traverse (PGL.resolveMultiplexedValue $ _uiSession userInfo)
+      for unpreparedAST $ traverse (PGL.resolveMultiplexedValue (_uiSession userInfo))
   subscriptionQueryTagsComment <- ask
   let multiplexedQuery = PGL.mkMultiplexedQuery $ OMap.mapKeys _rfaAlias preparedAST
       multiplexedQueryWithQueryTags =
@@ -351,7 +355,7 @@ pgDBStreamingSubscriptionPlan userInfo _sourceName sourceConfig (rootFieldAlias,
     flip runStateT mempty $
       traverse (PGL.resolveMultiplexedValue (_uiSession userInfo)) unpreparedAST
   subscriptionQueryTagsComment <- ask
-  let multiplexedQuery = PGL.mkStreamingMultiplexedQuery (_rfaAlias rootFieldAlias, preparedAST)
+  let multiplexedQuery = PGL.mkStreamingMultiplexedQuery (G._rfaAlias rootFieldAlias, preparedAST)
       multiplexedQueryWithQueryTags =
         multiplexedQuery {PGL.unMultiplexedQuery = appendSQLWithQueryTags (PGL.unMultiplexedQuery multiplexedQuery) subscriptionQueryTagsComment}
       roleName = _uiRole userInfo
@@ -393,7 +397,18 @@ mkCurPlanTx userInfo ps@(PreparedSql q prepMap) =
       -- WARNING: this quietly assumes the intmap keys are contiguous
       prepArgs = fst <$> IntMap.elems args
    in (,Just ps) $
-        Tracing.trace "Postgres" $ liftTx $ DS.asSingleRowJsonResp q prepArgs
+        Tracing.trace "Postgres" $ liftTx $ asSingleRowJsonResp q prepArgs
+
+-- | This function is generally used on the result of 'selectQuerySQL',
+-- 'selectAggregateQuerySQL' or 'connectionSelectSQL' to run said query and get
+-- back the resulting JSON.
+asSingleRowJsonResp ::
+  Q.Query ->
+  [Q.PrepArg] ->
+  Q.TxE QErr EncJSON
+asSingleRowJsonResp query args =
+  encJFromBS . runIdentity . Q.getRow
+    <$> Q.rawQE dmlTxErrorHandler query args True
 
 -- convert a query from an intermediate representation to... another
 irToRootFieldPlan ::

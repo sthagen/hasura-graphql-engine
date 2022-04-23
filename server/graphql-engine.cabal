@@ -202,7 +202,6 @@ library
                      , mtl
                      , openapi3
                      , optparse-applicative
-                     , optparse-generic
                      , parsec
                      , pg-client
                      , postgresql-binary
@@ -225,6 +224,7 @@ library
                      , text-builder >= 0.6
                      , these
                      , time >= 1.9
+                     , time-compat
                      , transformers
                      , transformers-base
                      , unordered-containers >= 0.2.12
@@ -506,6 +506,18 @@ library
                      , Hasura.Backends.Postgres.Translate.Mutation
                      , Hasura.Backends.Postgres.Translate.Returning
                      , Hasura.Backends.Postgres.Translate.Select
+                     , Hasura.Backends.Postgres.Translate.Select.Aggregate
+                     , Hasura.Backends.Postgres.Translate.Select.AnnotatedFieldJSON
+                     , Hasura.Backends.Postgres.Translate.Select.Connection
+                     , Hasura.Backends.Postgres.Translate.Select.Internal.Aliases
+                     , Hasura.Backends.Postgres.Translate.Select.Internal.Extractor
+                     , Hasura.Backends.Postgres.Translate.Select.Internal.GenerateSelect
+                     , Hasura.Backends.Postgres.Translate.Select.Internal.Helpers
+                     , Hasura.Backends.Postgres.Translate.Select.Internal.JoinTree
+                     , Hasura.Backends.Postgres.Translate.Select.Internal.OrderBy
+                     , Hasura.Backends.Postgres.Translate.Select.Internal.Process
+                     , Hasura.Backends.Postgres.Translate.Select.Simple
+                     , Hasura.Backends.Postgres.Translate.Select.Streaming
                      , Hasura.Backends.Postgres.Translate.Types
                      , Hasura.Backends.Postgres.Translate.Update
                      , Hasura.Backends.Postgres.Types.BoolExp
@@ -775,6 +787,7 @@ library
                      , Hasura.GraphQL.Schema.Remote
                      , Hasura.GraphQL.Schema.RemoteRelationship
                      , Hasura.GraphQL.Schema.Select
+                     , Hasura.GraphQL.Schema.SubscriptionStream
                      , Hasura.GraphQL.Schema.Table
                      , Hasura.GraphQL.Schema.Update
                      , Hasura.GraphQL.Transport.Backend
@@ -909,6 +922,7 @@ test-suite graphql-engine-tests
     Data.Parser.CacheControlSpec
     Data.Parser.JSONPathSpec
     Data.Parser.URLTemplateSpec
+    Data.Parser.RemoteRelationshipSpec
     Data.Text.RawString
     Data.TimeSpec
     Data.TrieSpec
@@ -1104,6 +1118,7 @@ test-suite tests-hspec
     Test.RemoteRelationship.XToRemoteSchemaRelationshipSpec
     Test.RequestHeadersSpec
     Test.SerializationSpec
+    Test.SelectSpec
     Test.ServiceLivenessSpec
     Test.ViewsSpec
     Test.WhereSpec
