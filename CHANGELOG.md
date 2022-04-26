@@ -10,6 +10,7 @@
 - server: Don't drop nested typed null fields in actions (fix #8237)
 - server: fixes remote relationships on actions (fix #8399)
 - console: add remote database relationships for views
+- cli: avoid exporting hasura-specific schemas during hasura init (#8352)
 - cli: fix performance regression in `migrate status` command (fix #8398)
 
 ## v2.5.1
@@ -194,6 +195,55 @@ the right-hand side for now.
      </tbody>
   </table>
 
+### Streaming subscriptions
+
+Streaming subscriptions can be used to subscribe only to the data which has been changed in the
+query. The streaming is done on the basis of a cursor, which is chosen by the user.
+
+Request payload:
+
+```
+subscription GetUserLatestMessages ($user_id: uuid!) {
+  messages_stream (cursor: {initial_value: {id: 0}, ordering: ASC}, batch_size: 1, where: {user_id: {_eq: $user_id}} ) {
+    id
+    from
+    to
+  }
+}
+```
+
+The above subscription streams the messages of the user corresponding to the ``user_id`` in batches of 1 message per batch.
+
+Suppose there are two messages to be streamed, then the server will send two responses as following:
+
+Response 1:
+
+```
+{
+  "data": [
+    {
+      "id": 1,
+      "from": 155234,
+      "to": 155523
+    }
+    ]
+}
+```
+
+Response 2:
+
+```
+{
+  "data": [
+    {
+      "id": 5,
+      "from": 178234,
+      "to": 187523
+    }
+    ]
+}
+```
+
 ### Bug fixes and improvements
 
 - server: improve error messages in BigQuery upstream API exceptions
@@ -340,6 +390,7 @@ The optimization can be enabled using the
 - server: fix issues working with read-only DBs by reverting the need for storing required SQL functions in a `hdb_lib` schema in the user's DB
 
 ## v2.3.0-beta.1
+
 
 ### Experimental SQL optimizations
 Row-level permissions are applied by a translation into SQL `WHERE` clauses. If
