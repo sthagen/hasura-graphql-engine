@@ -1,5 +1,5 @@
 ---
-sidebar_label: Remote database relationships
+sidebar_label: To remote database
 sidebar_position: 1
 description: Adding remote database relationships with Postgres tables in Hasura
 keywords:
@@ -16,17 +16,24 @@ import TabItem from '@theme/TabItem';
 import Thumbnail from "@site/src/components/Thumbnail";
 import GraphiQLIDE from "@site/src/components/GraphiQLIDE";
 
-# Postgres: Remote database relationships
+# Postgres: Database to remote database relationships
 
 ## Introduction
 
-Remote database relationships (a.k.a remote source relationships) extend the concept of joining data between tables within a single database to joining data across tables between separate databases.
+Remote database relationships (a.k.a remote source relationships) extend the
+concept of joining data between tables within a single database to joining data
+across tables between separate databases.
 
-After you've established relationships between types in your source database and types in your target database, you can "join" them with GraphQL queries.
+After you've established relationships between types in your source database and
+types in your target database, you can "join" them with GraphQL queries.
+
+Because Hasura is meant to be a GraphQL server that you can expose
+directly to your apps, Hasura also handles security and authorization
+while providing remote joins.
 
 :::tip Supported from
 
-Remote database relationships are supported from versions `v2.1.0` and above.
+Remote database relationships for Postgres are supported from versions `v2.1.0` and above.
 
 :::
 
@@ -45,13 +52,13 @@ The following fields can be defined for a remote schema relationship:
 
 - **Relationship type**: Either `object` or `array` - similar to normal relationships. Hasura supports both many-to-one (object) and one-to-many (array) relationships.
 - **Relationship Name**: A name for the relationship.
-- **Reference Source**: The name of the target database (that is, the target side of the join)
+- **Reference Source**: The name of the target database (that is, the target side of the join).
 - **Reference Table**: The table in the target database source that should be joined with the source table
 - **Field Mapping**: A mapping between fields in the source table and their corresponding fields in the target table, just as a foreign key relationship would be defined by such mapping within a single database.
 
-For example, say we have a table `orders(id int, order_user_id int)` in the source database and a table `users(id int, name text)` in the target database.
+For example, say we have a table `order(id int, user_id int)` in the source database and a table `user(id int, name text)` in the target database.
 
-We can create an object remote database relationship `order_user` joining the `orders` table to the `users` table using the `orders.order_user_id` and `users.id` fields.
+We can create an object remote database relationship `user` joining the `order` table to the `user` table using the `order.user_id` and `user.id` fields.
 
 <Tabs className="api-tabs">
 <TabItem value="console" label="Console">
@@ -73,19 +80,19 @@ Update the `metadata > databases > [db-name] > tables > [public_orders].yaml` fi
 
 ```yaml {4-14}
 table:
-  name: orders
+  name: order
   schema: public
 remote_relationships:
-- name: order_user
+- name: user
   definition:
     to_source:
       relationship_type: object
       source: pg2
       table:
-        name: users
+        name: user
         schema: public
       field_mapping:
-        order_user_id: id
+        user_id: id
 ```
 
 Apply the metadata:
@@ -109,10 +116,10 @@ X-Hasura-Role: admin
 {
   "type": "pg_create_remote_relationship",
   "args": {
-    "name": "order_user",
+    "name": "user",
     "source": "pg1",
     "table": {
-      "name": "orders",
+      "name": "order",
       "schema": "public"
     },
     "definition": {
@@ -120,11 +127,11 @@ X-Hasura-Role: admin
         "relationship_type": "object",
         "source": "pg2",
         "table": {
-          "name": "users",
+          "name": "user",
           "schema": "public"
         },
         "field_mapping": {
-          "order_user_id": "id"
+          "user_id": "id"
         }
       }
     }
@@ -141,10 +148,10 @@ Run the following query in the GraphiQL editor to test your remote database rela
 
 <GraphiQLIDE
   query={`query {
-  orders {
+  order {
     id
-    order_user_id
-    order_user {
+    user_id
+    user {
       id
       name
     }
@@ -152,35 +159,35 @@ Run the following query in the GraphiQL editor to test your remote database rela
 }`}
   response={`{
   "data": {
-    "orders": [
+    "order": [
       {
         "id": 1,
-        "order_user_id": 1,
-        "order_user": {
-          "user_id": 1,
+        "user_id": 1,
+        "user": {
+          "id": 1,
           "name": "Torvalds"
         }
       },
       {
         "id": 2,
-        "order_user_id": 2,
-        "order_user": {
+        "user_id": 2,
+        "user": {
           "id": 2,
           "name": "Zuckerberg"
         }
       },
       {
         "id": 3,
-        "order_user_id": 1,
-        "order_user": {
+        "user_id": 1,
+        "user": {
           "id": 1,
           "name": "Torvalds"
         }
       },
       {
         "id": 4,
-        "order_user_id": 3,
-        "order_user": {
+        "user_id": 3,
+        "user": {
           "id": 3,
           "name": "Gates"
         }

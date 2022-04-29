@@ -35,14 +35,23 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Data.Time.Clock (UTCTime)
 import Database.PG.Query qualified as Q
+import Hasura.Backends.Postgres.Connection.MonadTx
+import Hasura.Backends.Postgres.Execute.Types
 import Hasura.Backends.Postgres.SQL.Types
 import Hasura.Base.Error
 import Hasura.Logging (Hasura, LogLevel (..), ToEngineLog (..))
 import Hasura.Prelude
 import Hasura.RQL.DDL.Schema
 import Hasura.RQL.DDL.Schema.LegacyCatalog
-import Hasura.RQL.Types
+import Hasura.RQL.Types.ApiLimit
+import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.CustomTypes
+import Hasura.RQL.Types.Metadata
+import Hasura.RQL.Types.Network
+import Hasura.RQL.Types.SourceCustomization
 import Hasura.SQL.AnyBackend qualified as AB
+import Hasura.SQL.Backend
 import Hasura.Server.Init (DowngradeOptions (..), databaseUrlEnv)
 import Hasura.Server.Logging (StartupLog (..))
 import Hasura.Server.Migrate.Internal
@@ -98,7 +107,7 @@ migrateCatalog ::
     MonadBaseControl IO m
   ) =>
   Maybe (SourceConnConfiguration ('Postgres 'Vanilla)) ->
-  MaintenanceMode ->
+  MaintenanceMode () ->
   UTCTime ->
   m (MigrationResult, Metadata)
 migrateCatalog maybeDefaultSourceConfig maintenanceMode migrationTime = do
@@ -107,7 +116,7 @@ migrateCatalog maybeDefaultSourceConfig maintenanceMode migrationTime = do
   metadataTableExists <- doesTableExist (SchemaName "hdb_catalog") (TableName "hdb_metadata")
   migrationResult <-
     if
-        | maintenanceMode == MaintenanceModeEnabled -> do
+        | maintenanceMode == (MaintenanceModeEnabled ()) -> do
           if
               | not catalogSchemaExists ->
                 throw500 "unexpected: hdb_catalog schema not found in maintenance mode"
@@ -142,7 +151,7 @@ migrateCatalog maybeDefaultSourceConfig maintenanceMode migrationTime = do
               -- insert metadata with default source
               let defaultSourceMetadata =
                     AB.mkAnyBackend $
-                      SourceMetadata @('Postgres 'Vanilla) defaultSource mempty mempty defaultSourceConfig Nothing emptySourceCustomization
+                      SourceMetadata @('Postgres 'Vanilla) defaultSource PostgresVanillaKind mempty mempty defaultSourceConfig Nothing emptySourceCustomization
                   sources = OMap.singleton defaultSource defaultSourceMetadata
                in emptyMetadata {_metaSources = sources}
 
@@ -250,7 +259,7 @@ migrations ::
   (MonadIO m, MonadTx m) =>
   Maybe (SourceConnConfiguration ('Postgres 'Vanilla)) ->
   Bool ->
-  MaintenanceMode ->
+  MaintenanceMode () ->
   [(Float, MigrationPair m)]
 migrations maybeDefaultSourceConfig dryRun maintenanceMode =
   -- We need to build the list of migrations at compile-time so that we can compile the SQL
@@ -300,7 +309,7 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
       | otherwise = multiQ
 
     from42To43 = do
-      when (maintenanceMode == MaintenanceModeEnabled) $
+      when (maintenanceMode == MaintenanceModeEnabled ()) $
         throw500 "cannot migrate to catalog version 43 in maintenance mode"
       let query = $(makeRelativeToProject "src-rsr/migrations/42_to_43.sql" >>= Q.sqlFromFile)
       if dryRun
@@ -316,7 +325,7 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
                 let MetadataNoSources {..} = metadataV2
                     defaultSourceMetadata =
                       AB.mkAnyBackend $
-                        SourceMetadata defaultSource _mnsTables _mnsFunctions defaultSourceConfig Nothing emptySourceCustomization
+                        SourceMetadata defaultSource PostgresVanillaKind _mnsTables _mnsFunctions defaultSourceConfig Nothing emptySourceCustomization
                  in Metadata
                       (OMap.singleton defaultSource defaultSourceMetadata)
                       _mnsRemoteSchemas
@@ -331,6 +340,7 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
                       mempty
                       mempty
                       emptyNetwork
+                      mempty
           liftTx $ insertMetadataInCatalog metadataV3
 
     from43To42 = do

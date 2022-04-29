@@ -27,6 +27,7 @@ import Database.ODBC.SQLServer qualified as ODBC
 import Hasura.Backends.MSSQL.Connection
 import Hasura.Backends.MSSQL.Execute.Delete
 import Hasura.Backends.MSSQL.Execute.Insert
+import Hasura.Backends.MSSQL.Execute.QueryTags
 import Hasura.Backends.MSSQL.Execute.Update
 import Hasura.Backends.MSSQL.FromIr.Constants (jsonFieldName)
 import Hasura.Backends.MSSQL.Plan
@@ -41,11 +42,13 @@ import Hasura.GraphQL.Execute.Subscription.Plan
 import Hasura.GraphQL.Namespace (RootFieldAlias (..), RootFieldMap)
 import Hasura.GraphQL.Parser
 import Hasura.Prelude
+import Hasura.QueryTags (QueryTagsComment)
 import Hasura.RQL.IR
-import Hasura.RQL.Types
-import Hasura.RQL.Types qualified as RQLTypes
+import Hasura.RQL.Types.Backend as RQLTypes
 import Hasura.RQL.Types.Column qualified as RQLColumn
+import Hasura.RQL.Types.Common as RQLTypes
 import Hasura.SQL.AnyBackend qualified as AB
+import Hasura.SQL.Backend
 import Hasura.Session
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -66,16 +69,21 @@ instance BackendExecute 'MSSQL where
 
 -- * Multiplexed query
 
-newtype MultiplexedQuery' = MultiplexedQuery' Reselect
+data MultiplexedQuery' = MultiplexedQuery'
+  { reselect :: Reselect,
+    subscriptionQueryTagsComment :: QueryTagsComment
+  }
 
 instance T.ToTxt MultiplexedQuery' where
-  toTxt (MultiplexedQuery' reselect) = T.toTxt $ toQueryPretty $ fromReselect reselect
+  toTxt (MultiplexedQuery' reselect queryTags) =
+    T.toTxt $ toQueryPretty (fromReselect reselect) `withQueryTags` queryTags
 
 -- * Query
 
 msDBQueryPlan ::
   forall m.
-  ( MonadError QErr m
+  ( MonadError QErr m,
+    MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
   SourceName ->
@@ -83,11 +91,12 @@ msDBQueryPlan ::
   QueryDB 'MSSQL Void (UnpreparedValue 'MSSQL) ->
   m (DBStepInfo 'MSSQL)
 msDBQueryPlan userInfo sourceName sourceConfig qrf = do
-  -- TODO (naveen): Append Query Tags to the query
   let sessionVariables = _uiSession userInfo
   statement <- planQuery sessionVariables qrf
-  let printer = fromSelect statement
-      queryString = ODBC.renderQuery $ toQueryPretty printer
+  queryTags <- ask
+  -- Append Query tags comment to the select statement
+  let printer = fromSelect statement `withQueryTagsPrinter` queryTags
+      queryString = ODBC.renderQuery (toQueryPretty printer)
   pure $ DBStepInfo @'MSSQL sourceName sourceConfig (Just queryString) (runSelectQuery printer)
   where
     runSelectQuery :: Printer -> ExceptT QErr IO EncJSON
@@ -141,7 +150,7 @@ msDBSubscriptionExplain ::
   SubscriptionQueryPlan 'MSSQL (MultiplexedQuery 'MSSQL) ->
   m SubscriptionQueryPlanExplanation
 msDBSubscriptionExplain (SubscriptionQueryPlan plan sourceConfig variables _) = do
-  let (MultiplexedQuery' reselect) = _plqpQuery plan
+  let (MultiplexedQuery' reselect _queryTags) = _plqpQuery plan
       query = toQueryPretty $ fromSelect $ multiplexRootReselect [(dummyCohortId, variables)] reselect
       mssqlExecCtx = (_mscExecCtx sourceConfig)
   explainInfo <- liftEitherM $ runExceptT $ (mssqlRunReadOnly mssqlExecCtx) (runShowplan query)
@@ -225,7 +234,8 @@ multiplexRootReselect variables rootReselect =
 
 msDBMutationPlan ::
   forall m.
-  ( MonadError QErr m
+  ( MonadError QErr m,
+    MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
   StringifyNumbers ->
@@ -248,7 +258,8 @@ msDBLiveQuerySubscriptionPlan ::
   forall m.
   ( MonadError QErr m,
     MonadIO m,
-    MonadBaseControl IO m
+    MonadBaseControl IO m,
+    MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
   SourceName ->
@@ -259,8 +270,8 @@ msDBLiveQuerySubscriptionPlan ::
 msDBLiveQuerySubscriptionPlan UserInfo {_uiSession, _uiRole} _sourceName sourceConfig namespace rootFields = do
   (reselect, prepareState) <- planSubscription (OMap.mapKeys _rfaAlias rootFields) _uiSession
   cohortVariables <- prepareStateCohortVariables sourceConfig _uiSession prepareState
-  let parameterizedPlan = ParameterizedSubscriptionQueryPlan _uiRole $ MultiplexedQuery' reselect
-
+  queryTags <- ask
+  let parameterizedPlan = ParameterizedSubscriptionQueryPlan _uiRole $ (MultiplexedQuery' reselect queryTags)
   pure $
     SubscriptionQueryPlan parameterizedPlan sourceConfig cohortVariables namespace
 

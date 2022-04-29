@@ -43,12 +43,28 @@ import Hasura.RQL.DDL.ScheduledTrigger
 import Hasura.RQL.DDL.Schema
 import Hasura.RQL.DDL.Schema.Source
 import Hasura.RQL.DDL.Webhook.Transform.Validation
-import Hasura.RQL.Types
+import Hasura.RQL.Types.Action
+import Hasura.RQL.Types.Allowlist
+import Hasura.RQL.Types.ApiLimit
+import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.Endpoint
 import Hasura.RQL.Types.Eventing.Backend
+import Hasura.RQL.Types.GraphqlSchemaIntrospection
+import Hasura.RQL.Types.Metadata
+import Hasura.RQL.Types.Metadata.Backend
+import Hasura.RQL.Types.Network
+import Hasura.RQL.Types.Permission
+import Hasura.RQL.Types.QueryCollection
+import Hasura.RQL.Types.RemoteSchema
+import Hasura.RQL.Types.Roles
 import Hasura.RQL.Types.Run
+import Hasura.RQL.Types.ScheduledTrigger
+import Hasura.RQL.Types.SchemaCache
+import Hasura.RQL.Types.SchemaCache.Build
+import Hasura.RQL.Types.Source
 import Hasura.SQL.AnyBackend
-import Hasura.SQL.Tag
+import Hasura.SQL.Backend
 import Hasura.Server.API.Backend
 import Hasura.Server.API.Instances ()
 import Hasura.Server.Types
@@ -237,24 +253,26 @@ instance FromJSON RQLMetadataV1 where
       "bulk" -> RMBulk <$> args
       -- backend specific
       _ -> do
+        (backendSourceKind, cmd) <- parseQueryType queryType
+        dispatchAnyBackend @BackendAPI backendSourceKind \(backendSourceKind' :: BackendSourceKind b) -> do
+          argValue <- args
+          command <- choice <$> sequenceA [p backendSourceKind' cmd argValue | p <- metadataV1CommandParsers @b]
+          onNothing command $
+            fail $
+              "unknown metadata command \"" <> T.unpack cmd
+                <> "\" for backend "
+                <> T.unpack (T.toTxt backendSourceKind')
+    where
+      parseQueryType :: MonadFail m => Text -> m (AnyBackend BackendSourceKind, Text)
+      parseQueryType queryType =
         let (prefix, T.drop 1 -> cmd) = T.breakOn "_" queryType
-        backendType <-
-          runAesonParser parseJSON (String prefix)
-            `onLeft` \_ ->
-              fail
+         in (,cmd) <$> backendSourceKindFromText prefix
+              `onNothing` fail
                 ( "unknown metadata command \"" <> T.unpack queryType
                     <> "\"; \""
                     <> T.unpack prefix
                     <> "\" was not recognized as a valid backend name"
                 )
-        dispatchAnyBackend @BackendAPI (liftTag backendType) \(_ :: BackendTag b) -> do
-          argValue <- args
-          command <- choice <$> sequenceA [p cmd argValue | p <- metadataV1CommandParsers @b]
-          onNothing command $
-            fail $
-              "unknown metadata command \"" <> T.unpack cmd
-                <> "\" for backend "
-                <> T.unpack (T.toTxt backendType)
 
 data RQLMetadataV2
   = RMV2ReplaceMetadata !ReplaceMetadataV2
@@ -335,11 +353,11 @@ runMetadataQuery env logger instanceId userInfo httpManager serverConfigCtx sche
             & liftEitherM
 
         pure (r, modSchemaCache')
-      (MaintenanceModeEnabled, ReadOnlyModeDisabled) ->
+      (MaintenanceModeEnabled (), ReadOnlyModeDisabled) ->
         throw500 "metadata cannot be modified in maintenance mode"
       (MaintenanceModeDisabled, ReadOnlyModeEnabled) ->
         throw400 NotSupported "metadata cannot be modified in read-only mode"
-      (MaintenanceModeEnabled, ReadOnlyModeEnabled) ->
+      (MaintenanceModeEnabled (), ReadOnlyModeEnabled) ->
         throw500 "metadata cannot be modified in maintenance mode"
     else pure (r, modSchemaCache)
 

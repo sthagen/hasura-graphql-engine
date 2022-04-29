@@ -32,7 +32,15 @@ import Hasura.Prelude
 import Hasura.RQL.IR
 import Hasura.RQL.IR.Insert qualified as IR
 import Hasura.RQL.IR.Select qualified as IR
-import Hasura.RQL.Types hiding (BackendInsert)
+import Hasura.RQL.Types.Backend hiding (BackendInsert)
+import Hasura.RQL.Types.Column
+import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.ComputedField
+import Hasura.RQL.Types.Function
+import Hasura.RQL.Types.Relationships.Local
+import Hasura.RQL.Types.SchemaCache
+import Hasura.RQL.Types.Table
+import Hasura.SQL.Backend
 import Language.GraphQL.Draft.Syntax qualified as G
 
 ----------------------------------------------------------------
@@ -108,8 +116,7 @@ msBuildTableUpdateMutationFields ::
   m [FieldParser n (AnnotatedUpdateG 'MSSQL (RemoteRelationshipField UnpreparedValue) (UnpreparedValue 'MSSQL))]
 msBuildTableUpdateMutationFields sourceName tableName tableInfo gqlName = do
   fieldParsers <- runMaybeT do
-    tablePerms <- MaybeT $ tablePermissions tableInfo
-    updatePerms <- hoistMaybe $ _permUpd tablePerms
+    updatePerms <- MaybeT $ _permUpd <$> tablePermissions tableInfo
     let mkBackendUpdate backendUpdateTableInfo =
           (fmap . fmap) BackendUpdate $
             SU.buildUpdateOperators

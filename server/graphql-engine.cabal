@@ -440,6 +440,7 @@ library
                      , Hasura.Backends.MSSQL.DDL.RunSQL
                      , Hasura.Backends.MSSQL.DDL.Source
                      , Hasura.Backends.MSSQL.DDL.Source.Version
+                     , Hasura.Backends.MSSQL.Execute.QueryTags
                      , Hasura.Backends.MSSQL.Execute.Delete
                      , Hasura.Backends.MSSQL.Execute.Insert
                      , Hasura.Backends.MSSQL.Execute.Update
@@ -556,6 +557,7 @@ library
                      , Hasura.Backends.DataWrapper.Agent.Client
                      , Hasura.Backends.DataWrapper.IR.Column
                      , Hasura.Backends.DataWrapper.IR.Expression
+                     , Hasura.Backends.DataWrapper.IR.Export
                      , Hasura.Backends.DataWrapper.IR.Function
                      , Hasura.Backends.DataWrapper.IR.Name
                      , Hasura.Backends.DataWrapper.IR.OrderBy
@@ -620,7 +622,6 @@ library
                      , Hasura.Server.Migrate.Internal
                      , Hasura.Server.Auth.JWT.Internal
                      , Hasura.Server.Auth.JWT.Logging
-                     , Hasura.RQL.Types
                      , Hasura.RQL.Types.Action
                      , Hasura.RQL.Types.Allowlist
                      , Hasura.RQL.Types.ApiLimit
@@ -809,6 +810,7 @@ library
                      , Data.Tuple.Extended
                      , Hasura.SQL.AnyBackend
                      , Hasura.SQL.Backend
+                     , Hasura.SQL.BackendMap
                      , Hasura.SQL.TH
                      , Hasura.SQL.Tag
                      , Hasura.SQL.GeoJSON

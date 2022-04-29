@@ -20,7 +20,7 @@ import Data.HashMap.Strict.InsOrd qualified as OMap
 import Data.IntMap qualified as IntMap
 import Data.Sequence qualified as Seq
 import Database.PG.Query qualified as Q
-import Hasura.Backends.Postgres.Connection (runTx)
+import Hasura.Backends.Postgres.Connection.MonadTx
 import Hasura.Backends.Postgres.Execute.Insert (convertToSQLTransaction)
 import Hasura.Backends.Postgres.Execute.Mutation qualified as PGE
 import Hasura.Backends.Postgres.Execute.Prepare
@@ -33,7 +33,7 @@ import Hasura.Backends.Postgres.Execute.Prepare
     withUserVars,
   )
 import Hasura.Backends.Postgres.Execute.Subscription qualified as PGL
-import Hasura.Backends.Postgres.Execute.Types (PGSourceConfig (..))
+import Hasura.Backends.Postgres.Execute.Types (PGSourceConfig (..), dmlTxErrorHandler)
 import Hasura.Backends.Postgres.SQL.DML qualified as S
 import Hasura.Backends.Postgres.SQL.Types qualified as PG
 import Hasura.Backends.Postgres.SQL.Value qualified as PG
@@ -68,22 +68,17 @@ import Hasura.QueryTags
   ( QueryTagsComment (..),
     emptyQueryTagsComment,
   )
-import Hasura.RQL.DML.Internal (dmlTxErrorHandler)
 import Hasura.RQL.IR (MutationDB (..), QueryDB (..))
 import Hasura.RQL.IR.Delete qualified as IR
 import Hasura.RQL.IR.Insert qualified as IR
 import Hasura.RQL.IR.Returning qualified as IR
 import Hasura.RQL.IR.Select qualified as IR
 import Hasura.RQL.IR.Update qualified as IR
-import Hasura.RQL.Types
-  ( Backend (..),
-    BackendType (Postgres),
-    ColumnInfo (..),
-    liftTx,
-  )
+import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
   ( ColumnType (..),
     ColumnValue (..),
+    ciName,
   )
 import Hasura.RQL.Types.Common
   ( FieldName (..),
@@ -92,6 +87,7 @@ import Hasura.RQL.Types.Common
     StringifyNumbers,
   )
 import Hasura.SQL.AnyBackend qualified as AB
+import Hasura.SQL.Backend
 import Hasura.Session (UserInfo (..))
 import Hasura.Tracing qualified as Tracing
 import Language.GraphQL.Draft.Syntax qualified as G
@@ -196,14 +192,15 @@ convertDelete ::
   forall pgKind m.
   ( MonadError QErr m,
     Backend ('Postgres pgKind),
-    PostgresAnnotatedFieldJSON pgKind
+    PostgresAnnotatedFieldJSON pgKind,
+    MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
   IR.AnnDelG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   StringifyNumbers ->
-  QueryTagsComment ->
   m (Tracing.TraceT (Q.TxET QErr IO) EncJSON)
-convertDelete userInfo deleteOperation stringifyNum queryTags = do
+convertDelete userInfo deleteOperation stringifyNum = do
+  queryTags <- ask
   preparedDelete <- traverse (prepareWithoutPlan userInfo) deleteOperation
   pure $ flip runReaderT queryTags $ PGE.execDeleteQuery stringifyNum userInfo (preparedDelete, Seq.empty)
 
@@ -211,14 +208,15 @@ convertUpdate ::
   forall pgKind m.
   ( MonadError QErr m,
     Backend ('Postgres pgKind),
-    PostgresAnnotatedFieldJSON pgKind
+    PostgresAnnotatedFieldJSON pgKind,
+    MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
   IR.AnnotatedUpdateG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   StringifyNumbers ->
-  QueryTagsComment ->
   m (Tracing.TraceT (Q.TxET QErr IO) EncJSON)
-convertUpdate userInfo updateOperation stringifyNum queryTags = do
+convertUpdate userInfo updateOperation stringifyNum = do
+  queryTags <- ask
   preparedUpdate <- traverse (prepareWithoutPlan userInfo) updateOperation
   if null $ updateOperations . IR._auBackend $ updateOperation
     then pure $ pure $ IR.buildEmptyMutResp $ IR._auOutput preparedUpdate
@@ -231,14 +229,15 @@ convertInsert ::
   forall pgKind m.
   ( MonadError QErr m,
     Backend ('Postgres pgKind),
-    PostgresAnnotatedFieldJSON pgKind
+    PostgresAnnotatedFieldJSON pgKind,
+    MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
   IR.AnnotatedInsert ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   StringifyNumbers ->
-  QueryTagsComment ->
   m (Tracing.TraceT (Q.TxET QErr IO) EncJSON)
-convertInsert userInfo insertOperation stringifyNum queryTags = do
+convertInsert userInfo insertOperation stringifyNum = do
+  queryTags <- ask
   preparedInsert <- traverse (prepareWithoutPlan userInfo) insertOperation
   pure $ flip runReaderT queryTags $ convertToSQLTransaction preparedInsert userInfo Seq.empty stringifyNum
 
@@ -248,16 +247,16 @@ convertFunction ::
   forall pgKind m.
   ( MonadError QErr m,
     Backend ('Postgres pgKind),
-    PostgresAnnotatedFieldJSON pgKind
+    PostgresAnnotatedFieldJSON pgKind,
+    MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
   JsonAggSelect ->
   -- | VOLATILE function as 'SelectExp'
   IR.AnnSimpleSelectG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
-  -- | Query Tags
-  QueryTagsComment ->
   m (Tracing.TraceT (Q.TxET QErr IO) EncJSON)
-convertFunction userInfo jsonAggSelect unpreparedQuery queryTags = do
+convertFunction userInfo jsonAggSelect unpreparedQuery = do
+  queryTags <- ask
   -- Transform the RQL AST into a prepared SQL query
   (preparedQuery, PlanningSt _ _ planVals) <-
     flip runStateT initPlanningSt $
@@ -285,12 +284,11 @@ pgDBMutationPlan ::
   MutationDB ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   m (DBStepInfo ('Postgres pgKind))
 pgDBMutationPlan userInfo stringifyNum sourceName sourceConfig mrf = do
-  mutationQueryTagsComment <- ask
   go <$> case mrf of
-    MDBInsert s -> convertInsert userInfo s stringifyNum mutationQueryTagsComment
-    MDBUpdate s -> convertUpdate userInfo s stringifyNum mutationQueryTagsComment
-    MDBDelete s -> convertDelete userInfo s stringifyNum mutationQueryTagsComment
-    MDBFunction returnsSet s -> convertFunction userInfo returnsSet s mutationQueryTagsComment
+    MDBInsert s -> convertInsert userInfo s stringifyNum
+    MDBUpdate s -> convertUpdate userInfo s stringifyNum
+    MDBDelete s -> convertDelete userInfo s stringifyNum
+    MDBFunction returnsSet s -> convertFunction userInfo returnsSet s
   where
     go v = DBStepInfo @('Postgres pgKind) sourceName sourceConfig Nothing v
 

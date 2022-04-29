@@ -24,8 +24,14 @@ import Hasura.GraphQL.Parser.Constants qualified as G
 import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.Common
 import Hasura.Prelude
-import Hasura.RQL.DML.Internal (getRolePermInfo)
-import Hasura.RQL.Types hiding (askTableInfo)
+import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.Column
+import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.ComputedField
+import Hasura.RQL.Types.Relationships.Local
+import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
+import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.Table
 import Hasura.Session (RoleName)
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -132,7 +138,7 @@ tablePermissions ::
   forall b r m.
   (MonadReader r m, Has RoleName r) =>
   TableInfo b ->
-  m (Maybe (RolePermInfo b))
+  m (RolePermInfo b)
 tablePermissions tableInfo = do
   roleName <- asks getter
   pure $ getRolePermInfo roleName tableInfo
@@ -142,7 +148,7 @@ tableSelectPermissions ::
   (MonadReader r m, Has RoleName r) =>
   TableInfo b ->
   m (Maybe (SelPermInfo b))
-tableSelectPermissions tableInfo = (_permSel =<<) <$> tablePermissions tableInfo
+tableSelectPermissions tableInfo = _permSel <$> tablePermissions tableInfo
 
 tableSelectFields ::
   forall b r m.
@@ -214,7 +220,7 @@ tableUpdateColumns ::
   TableInfo b ->
   m [ColumnInfo b]
 tableUpdateColumns tableInfo = do
-  permissions <- (_permUpd =<<) <$> tablePermissions tableInfo
+  permissions <- _permUpd <$> tablePermissions tableInfo
   pure $ filter (isUpdatable permissions) $ tableColumns tableInfo
   where
     isUpdatable :: Maybe (UpdPermInfo b) -> ColumnInfo b -> Bool

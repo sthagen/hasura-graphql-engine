@@ -24,6 +24,7 @@ import Data.HashMap.Strict qualified as Map
 import Data.IntMap qualified as IntMap
 import Data.Text.Extended
 import Database.PG.Query qualified as Q
+import Hasura.Backends.Postgres.Connection.MonadTx
 import Hasura.Backends.Postgres.SQL.DML qualified as S
 import Hasura.Backends.Postgres.SQL.Value
 import Hasura.Backends.Postgres.Translate.Column
@@ -33,8 +34,8 @@ import Hasura.GraphQL.Execute.Backend
 import Hasura.GraphQL.Parser.Column
 import Hasura.GraphQL.Parser.Schema
 import Hasura.Prelude
-import Hasura.RQL.DML.Internal (fromCurrentSession, withTypeAnn)
-import Hasura.RQL.Types
+import Hasura.RQL.Types.Column
+import Hasura.SQL.Backend
 import Hasura.Session
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -74,7 +75,10 @@ prepareWithPlan userInfo = \case
         `onNothing` throw400
           NotFound
           ("missing session variable: " <>> sessionVariableToText sessVar)
-    let sessVarVal = fromCurrentSession currentSessionExp sessVar
+    let sessVarVal =
+          S.SEOpApp
+            (S.SQLOp "->>")
+            [currentSessionExp, S.SELit $ sessionVariableToText sessVar]
     pure $ withTypeAnn ty sessVarVal
   UVLiteral sqlExp -> pure sqlExp
   UVSession -> pure currentSessionExp

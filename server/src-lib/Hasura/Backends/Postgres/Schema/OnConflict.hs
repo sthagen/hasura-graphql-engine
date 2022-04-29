@@ -1,5 +1,5 @@
 {-# LANGUAGE ApplicativeDo #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 
 -- | Postgres Schema OnConflict
 --
@@ -27,8 +27,13 @@ import Hasura.GraphQL.Schema.BoolExp
 import Hasura.GraphQL.Schema.Common
 import Hasura.GraphQL.Schema.Table
 import Hasura.Prelude
+import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.IR.Insert qualified as IR
-import Hasura.RQL.Types
+import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.SchemaCache
+import Hasura.RQL.Types.Table
+import Hasura.SQL.Backend
 import Language.GraphQL.Draft.Syntax qualified as G
 
 -- | Parser for a field name @on_conflict@ of type @tablename_on_conflict@.
@@ -50,7 +55,7 @@ onConflictFieldParser ::
   TableInfo ('Postgres pgKind) ->
   m (InputFieldsParser n (Maybe (IR.OnConflictClause ('Postgres pgKind) (UnpreparedValue ('Postgres pgKind)))))
 onConflictFieldParser sourceName tableInfo = do
-  updatePerms <- (_permUpd =<<) <$> tablePermissions tableInfo
+  updatePerms <- _permUpd <$> tablePermissions tableInfo
   let maybeConstraints = tciUniqueOrPrimaryKeyConstraints . _tiCoreInfo $ tableInfo
   let maybeConflictObject = conflictObjectParser sourceName tableInfo <$> maybeConstraints <*> updatePerms
   case maybeConflictObject of

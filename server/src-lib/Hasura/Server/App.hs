@@ -60,8 +60,13 @@ import Hasura.Logging qualified as L
 import Hasura.Metadata.Class
 import Hasura.Prelude hiding (get, put)
 import Hasura.RQL.DDL.Schema
-import Hasura.RQL.Types
+import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Endpoint as EP
+import Hasura.RQL.Types.Function
+import Hasura.RQL.Types.RemoteSchema
+import Hasura.RQL.Types.SchemaCache
+import Hasura.RQL.Types.Source
+import Hasura.SQL.Backend
 import Hasura.Server.API.Config (runGetConfig)
 import Hasura.Server.API.Metadata
 import Hasura.Server.API.PGDump qualified as PGD
@@ -117,7 +122,7 @@ data ServerCtx = ServerCtx
     scEnvironment :: !Env.Environment,
     scRemoteSchemaPermsCtx :: !RemoteSchemaPermsCtx,
     scFunctionPermsCtx :: !FunctionPermissionsCtx,
-    scEnableMaintenanceMode :: !MaintenanceMode,
+    scEnableMaintenanceMode :: !(MaintenanceMode ()),
     scExperimentalFeatures :: !(S.HashSet ExperimentalFeature),
     scLoggingSettings :: !LoggingSettings,
     scEventingMode :: !EventingMode,
@@ -763,7 +768,7 @@ mkWaiApp ::
   FunctionPermissionsCtx ->
   WS.ConnectionOptions ->
   KeepAliveDelay ->
-  MaintenanceMode ->
+  MaintenanceMode () ->
   EventingMode ->
   ReadOnlyMode ->
   -- | Set of the enabled experimental features
