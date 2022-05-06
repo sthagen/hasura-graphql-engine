@@ -187,7 +187,7 @@ fromSelectRows annSelectG = do
     case from of
       Ir.FromTable qualifiedObject -> fromQualifiedTable qualifiedObject
       Ir.FromFunction nm (Ir.FunctionArgsExp [Ir.AEInput json] _) (Just columns)
-        | nm == FunctionName "unnest" -> fromUnnestedJSON json columns (map fst fields)
+        | functionName nm == "unnest" -> fromUnnestedJSON json columns (map fst fields)
       _ -> refute (pure (FromTypeUnsupported from))
   Args
     { argsOrderBy,
@@ -953,7 +953,7 @@ fromAnnColumnField _stringifyNumbers annColumnField = do
     Ir.AnnColumnField
       { _acfColumn = column,
         _acfAsText = asText :: Bool,
-        _acfOp = _ :: Maybe (Ir.ColumnOp 'BigQuery), -- TODO: What's this?
+        _acfArguments = _ :: Maybe Void,
         _acfCaseBoolExpression = caseBoolExpMaybe :: Maybe (Ir.AnnColumnCaseBoolExp 'BigQuery Expression)
       } = annColumnField
 

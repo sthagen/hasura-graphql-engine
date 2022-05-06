@@ -38,9 +38,11 @@ instance Backend 'MSSQL where
   type ScalarType 'MSSQL = MSSQL.ScalarType
   type BooleanOperators 'MSSQL = MSSQL.BooleanOperators
   type SQLExpression 'MSSQL = MSSQL.Expression
-  type SQLOperator 'MSSQL = MSSQL.Op
+  type ScalarSelectionArguments 'MSSQL = Void
 
   type BackendUpdate 'MSSQL = MSSQL.BackendUpdate
+
+  type ComputedFieldDefinition 'MSSQL = Void
 
   type ExtraTableMetadata 'MSSQL = [MSSQL.ColumnName] -- List of identity columns
   type BackendInsert 'MSSQL = MSSQL.BackendInsert
@@ -87,3 +89,6 @@ instance Backend 'MSSQL where
 
   snakeCaseTableName :: TableName 'MSSQL -> Text
   snakeCaseTableName = MSSQL.snakeCaseTableName
+
+  computedFieldFunction :: ComputedFieldDefinition 'MSSQL -> FunctionName 'MSSQL
+  computedFieldFunction = absurd

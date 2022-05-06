@@ -4,18 +4,34 @@
 
 ### Bug fixes and improvements
 
+- server: fix bug when event triggers where defined on tables that contained non lower-case alphabet characters
 - server: avoid encoding 'varchar' values to UTF8 in MSSQL backends
 - server: add support for MSSQL event triggers (#7228)
 - server: update pg_dump to be compatible with postgres 14 (#7676)
 - server: fix parsing remote relationship json definition from 1.x server catalog on migration (fix #7906)
 - server: Don't drop nested typed null fields in actions (fix #8237)
 - server: fixes remote relationships on actions (fix #8399)
+- server: fixes url/query date variable bug in REST endpoints
+- server: makes url/query variables in REST endpoints assume string if other types not applicable
 - console: add remote database relationships for views
 - console: bug fixes for RS-to-RS relationships
+- console: allow users to remove prefix / suffix / root field namespace from a remote schema
 - cli: avoid exporting hasura-specific schemas during hasura init (#8352)
 - cli: fix performance regression in `migrate status` command (fix #8398)
 
+## v2.6.1
+
+- server: fix bug when event triggers where defined on tables that contained non lower-case alphabet characters (fix #8454)
+- server: refactor insert mutations IR use of "default values" (fixes #8443)
+
+## v2.5.2
+
+- server: refactor insert mutations IR use of "default values" (fixes #8443)
+
 ## Milestone Release - v2.6.0
+
+### Known issue
+SQL Server: Mutation: [Default values overwritten on insert under certain conditions](https://github.com/hasura/graphql-engine/issues/8443). Will be addressed in 2.5.2 and 2.6.1.
 
 ### Announcing GraphQL Joins
 We are delighted to announce Hasura’s data federation capabilities that accelerate the API development process by creating a single GraphQL schema from multiple data sources such as databases and remote GraphQL APIs. This allows you to query and mutate across federated data sources in real-time without writing any custom code. In addition, we can leverage many of Hasura’s powerful features from Hasura CE and Hasura Cloud.
@@ -48,6 +64,9 @@ The query and raw-query field from http-logs for metadata requests are removed b
 - docs: support for graphql-ws is considered GA
 
 ## v2.5.1
+
+### Known issue
+SQL Server: Mutation: [Default values overwritten on insert under certain conditions](https://github.com/hasura/graphql-engine/issues/8443). Will be addressed in 2.5.2 and 2.6.1.
 
 ### Bug fixes and improvements
 - server: fixes remote relationships on actions (fix #8399)

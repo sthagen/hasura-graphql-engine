@@ -55,10 +55,11 @@ class
     Representable (Column b),
     Representable (ScalarType b),
     Representable (SQLExpression b),
-    Representable (SQLOperator b),
+    Representable (ScalarSelectionArguments b),
     Representable (SourceConnConfiguration b),
     Representable (ExtraTableMetadata b),
     Representable (XComputedField b),
+    Representable (ComputedFieldDefinition b),
     Ord (TableName b),
     Ord (FunctionName b),
     Ord (ScalarType b),
@@ -72,6 +73,7 @@ class
     FromJSON (TableName b),
     FromJSON (SourceConnConfiguration b),
     FromJSON (ExtraTableMetadata b),
+    FromJSON (ComputedFieldDefinition b),
     FromJSON (BackendSourceKind b),
     FromJSONKey (Column b),
     ToJSON (BackendConfig b),
@@ -85,6 +87,7 @@ class
     ToJSON (SourceConnConfiguration b),
     ToJSON (ExtraTableMetadata b),
     ToJSON (SQLExpression b),
+    ToJSON (ComputedFieldDefinition b),
     ToJSONKey (Column b),
     ToJSONKey (FunctionName b),
     ToJSONKey (ScalarType b),
@@ -127,22 +130,54 @@ class
   where
   -- types
   type BackendConfig b :: Type
-  type SourceConfig b :: Type
+
+  -- | User facing connection configuration for a database.
   type SourceConnConfiguration b :: Type
+
+  -- | Internal connection configuration for a database - connection string,
+  -- connection pool etc
+  type SourceConfig b :: Type
+
+  -- Fully qualified name of a table
   type TableName b :: Type
-  type RawFunctionInfo b :: Type
+
+  -- Fully qualified name of a function
   type FunctionName b :: Type
+
+  -- Information about a function obtained by introspecting the underlying
+  -- database
+  type RawFunctionInfo b :: Type
+
+  -- Type of a function argument
   type FunctionArgType b :: Type
+
+  -- Fully qualified name of a constraint
   type ConstraintName b :: Type
+
   type BasicOrderType b :: Type
   type NullsOrderType b :: Type
   type CountType b :: Type
+
+  -- Name of a 'column'
   type Column b :: Type
+
   type ScalarValue b :: Type
   type ScalarType b :: Type
+
   type BooleanOperators b :: Type -> Type
   type SQLExpression b :: Type
-  type SQLOperator b :: Type
+  type ComputedFieldDefinition b :: Type
+
+  -- | Arguments of a scalar field's selection
+  -- {
+  --   query {
+  --     some_table {
+  --       # a scalar field
+  --       column(ScalarSelectionArguments)
+  --     }
+  --   }
+  -- }
+  type ScalarSelectionArguments b :: Type
 
   type ExtraTableMetadata b :: Type
 
@@ -179,6 +214,7 @@ class
   scalarValueToJSON :: ScalarValue b -> Value
   functionToTable :: FunctionName b -> TableName b
   tableToFunction :: TableName b -> FunctionName b
+  computedFieldFunction :: ComputedFieldDefinition b -> FunctionName b
 
   -- functions on names
   tableGraphQLName :: TableName b -> Either QErr G.Name

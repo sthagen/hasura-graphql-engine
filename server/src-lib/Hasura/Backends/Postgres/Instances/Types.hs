@@ -19,6 +19,7 @@ import Hasura.Backends.Postgres.SQL.Types qualified as PG
 import Hasura.Backends.Postgres.SQL.Value qualified as PG
 import Hasura.Backends.Postgres.Types.BoolExp qualified as PG
 import Hasura.Backends.Postgres.Types.CitusExtraTableMetadata qualified as Citus
+import Hasura.Backends.Postgres.Types.ComputedFieldDefinition qualified as PG
 import Hasura.Backends.Postgres.Types.Insert qualified as PG (BackendInsert)
 import Hasura.Backends.Postgres.Types.Update qualified as PG
 import Hasura.Base.Error
@@ -79,7 +80,8 @@ instance
   type ScalarType ('Postgres pgKind) = PG.PGScalarType
   type BooleanOperators ('Postgres pgKind) = PG.BooleanOperators
   type SQLExpression ('Postgres pgKind) = PG.SQLExp
-  type SQLOperator ('Postgres pgKind) = PG.SQLOp
+  type ComputedFieldDefinition ('Postgres pgKind) = PG.ComputedFieldDefinition
+  type ScalarSelectionArguments ('Postgres pgKind) = PG.ColumnOp
 
   type BackendUpdate ('Postgres pgKind) = PG.BackendUpdate
 
@@ -100,6 +102,7 @@ instance
   scalarValueToJSON = PG.pgScalarValueToJson
   functionToTable = fmap (PG.TableName . PG.getFunctionTxt)
   tableToFunction = fmap (PG.FunctionName . PG.getTableTxt)
+  computedFieldFunction = PG._cfdFunction
 
   tableGraphQLName = PG.qualifiedObjectToName
   functionGraphQLName = PG.qualifiedObjectToName

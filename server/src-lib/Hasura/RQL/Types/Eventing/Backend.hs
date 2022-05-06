@@ -83,9 +83,7 @@ class Backend b => BackendEventTrigger (b :: BackendType) where
 
   -- | Ad-hoc function to set a retry for an undelivered event
   setRetry ::
-    ( MonadIO m,
-      MonadError QErr m
-    ) =>
+    (MonadIO m, MonadError QErr m) =>
     SourceConfig b ->
     Event b ->
     Time.UTCTime ->
@@ -95,9 +93,7 @@ class Backend b => BackendEventTrigger (b :: BackendType) where
   -- | @getMaintenanceModeVersion@ gets the source catalog version from the
   --   source
   getMaintenanceModeVersion ::
-    ( MonadIO m,
-      MonadError QErr m
-    ) =>
+    (MonadIO m, MonadError QErr m) =>
     SourceConfig b ->
     m MaintenanceModeVersion
 
@@ -150,9 +146,7 @@ class Backend b => BackendEventTrigger (b :: BackendType) where
   --   marks all the events related to the event trigger as archived.
   --   See Note [Cleanup for dropped triggers]
   dropTriggerAndArchiveEvents ::
-    ( MonadIO m,
-      MonadError QErr m
-    ) =>
+    (MonadIO m, MonadError QErr m) =>
     SourceConfig b ->
     TriggerName ->
     TableName b ->
@@ -166,9 +160,7 @@ class Backend b => BackendEventTrigger (b :: BackendType) where
   --   case, we need to drop the trigger created by us earlier for the INSERT
   --   trigger.
   dropDanglingSQLTrigger ::
-    ( MonadIO m,
-      MonadError QErr m
-    ) =>
+    (MonadIO m, MonadError QErr m) =>
     SourceConfig b ->
     TriggerName ->
     TableName b ->
@@ -207,6 +199,13 @@ class Backend b => BackendEventTrigger (b :: BackendType) where
     -- keys. Hence the PrimaryKey argument below.
     Maybe (PrimaryKey b (ColumnInfo b)) ->
     m (Either QErr ())
+
+--------------------------------------------------------------------------------
+-- TODO: move those instances to 'Backend/*/Instances/Eventing' and create a
+-- corresponding 'Instances.hs' file in this directory to import them, similarly
+-- to how we import instances for other backend classes. This would
+-- significantly reduce the number of files in the core engine that end up
+-- depending / importing backend-specific files.
 
 instance BackendEventTrigger ('Postgres 'Vanilla) where
   insertManualEvent = PG.insertManualEvent
@@ -284,28 +283,28 @@ instance BackendEventTrigger 'MySQL where
 -- implement these methods in the 'Hasura.Experimental.Adapters' module
 -- hierarchy just to keep everything as tidy as possible for that section of
 -- code.
-instance BackendEventTrigger 'DataWrapper where
+instance BackendEventTrigger 'DataConnector where
   insertManualEvent _ _ _ _ _ _ =
-    throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   fetchUndeliveredEvents _ _ _ _ _ =
-    throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   setRetry _ _ _ _ =
-    throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   recordSuccess _ _ _ _ =
-    runExceptT $ throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    runExceptT $ throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   getMaintenanceModeVersion _ =
-    throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   recordError _ _ _ _ _ =
-    runExceptT $ throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    runExceptT $ throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   recordError' _ _ _ _ _ =
-    runExceptT $ throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    runExceptT $ throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   dropTriggerAndArchiveEvents _ _ _ =
-    throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   dropDanglingSQLTrigger _ _ _ _ =
-    throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers"
+    throw400 NotSupported "Event triggers are not supported for the Data Connector backend"
   redeliverEvent _ _ =
-    throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   unlockEventsInSource _ _ =
-    runExceptT $ throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    runExceptT $ throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
   createTableEventTrigger _ _ _ _ _ _ _ =
-    runExceptT $ throw400 NotSupported "Event triggers are not supported for GraphQL Data Wrappers."
+    runExceptT $ throw400 NotSupported "Event triggers are not supported for the Data Connector backend."
