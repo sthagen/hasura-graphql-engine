@@ -10,6 +10,7 @@ module Hasura.Backends.MSSQL.Instances.Schema () where
 import Data.Has
 import Data.HashMap.Strict qualified as Map
 import Data.List.NonEmpty qualified as NE
+import Data.Text.Casing qualified as C
 import Data.Text.Extended
 import Database.ODBC.SQLServer qualified as ODBC
 import Hasura.Backends.MSSQL.Schema.IfMatched
@@ -39,6 +40,8 @@ import Hasura.RQL.Types.ComputedField
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache
+import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.SourceCustomization (NamingCase)
 import Hasura.RQL.Types.Table
 import Hasura.SQL.Backend
 import Language.GraphQL.Draft.Syntax qualified as G
@@ -85,10 +88,10 @@ instance BackendSchema 'MSSQL where
 
 msBuildTableRelayQueryFields ::
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   TableName 'MSSQL ->
   TableInfo 'MSSQL ->
-  G.Name ->
+  C.GQLNameIdentifier ->
   NESeq (ColumnInfo 'MSSQL) ->
   m [a]
 msBuildTableRelayQueryFields _sourceName _tableName _tableInfo _gqlName _pkeyColumns =
@@ -97,7 +100,7 @@ msBuildTableRelayQueryFields _sourceName _tableName _tableInfo _gqlName _pkeyCol
 backendInsertParser ::
   forall m r n.
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   TableInfo 'MSSQL ->
   m (InputFieldsParser n (BackendInsert (UnpreparedValue 'MSSQL)))
 backendInsertParser sourceName tableInfo = do
@@ -109,10 +112,10 @@ backendInsertParser sourceName tableInfo = do
 
 msBuildTableUpdateMutationFields ::
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   TableName 'MSSQL ->
   TableInfo 'MSSQL ->
-  G.Name ->
+  C.GQLNameIdentifier ->
   m [FieldParser n (AnnotatedUpdateG 'MSSQL (RemoteRelationshipField UnpreparedValue) (UnpreparedValue 'MSSQL))]
 msBuildTableUpdateMutationFields sourceName tableName tableInfo gqlName = do
   fieldParsers <- runMaybeT do
@@ -140,7 +143,7 @@ this. Should we save it?
 
 msBuildTableDeleteMutationFields ::
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   TableName 'MSSQL ->
   TableInfo 'MSSQL ->
   G.Name ->
@@ -153,7 +156,7 @@ msBuildTableDeleteMutationFields _sourceName _tableName _tableInfo _gqlName _del
 
 msBuildFunctionQueryFields ::
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   FunctionName 'MSSQL ->
   FunctionInfo 'MSSQL ->
   TableName 'MSSQL ->
@@ -163,7 +166,7 @@ msBuildFunctionQueryFields _ _ _ _ =
 
 msBuildFunctionRelayQueryFields ::
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   FunctionName 'MSSQL ->
   FunctionInfo 'MSSQL ->
   TableName 'MSSQL ->
@@ -174,7 +177,7 @@ msBuildFunctionRelayQueryFields _sourceName _functionName _functionInfo _tableNa
 
 msBuildFunctionMutationFields ::
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   FunctionName 'MSSQL ->
   FunctionInfo 'MSSQL ->
   TableName 'MSSQL ->
@@ -189,7 +192,7 @@ msBuildFunctionMutationFields _ _ _ _ =
 msTableArgs ::
   forall r m n.
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   TableInfo 'MSSQL ->
   m (InputFieldsParser n (IR.SelectArgsG 'MSSQL (UnpreparedValue 'MSSQL)))
 msTableArgs sourceName tableInfo = do
@@ -213,7 +216,7 @@ msTableArgs sourceName tableInfo = do
 msMkRelationshipParser ::
   forall r m n.
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   RelInfo 'MSSQL ->
   m (Maybe (InputFieldsParser n (Maybe (IR.AnnotatedInsertField 'MSSQL (UnpreparedValue 'MSSQL)))))
 msMkRelationshipParser _sourceName _relationshipInfo = do
@@ -297,11 +300,13 @@ msScalarSelectionArgumentsParser ::
 msScalarSelectionArgumentsParser _columnType = pure Nothing
 
 msOrderByOperators ::
+  NamingCase ->
   NonEmpty
     ( Definition P.EnumValueInfo,
       (BasicOrderType 'MSSQL, NullsOrderType 'MSSQL)
     )
-msOrderByOperators =
+msOrderByOperators _tCase =
+  -- NOTE: NamingCase is not being used here as we don't support naming conventions for this DB
   NE.fromList
     [ ( define G._asc "in ascending order, nulls first",
         (MSSQL.AscOrder, MSSQL.NullsFirst)
@@ -331,14 +336,15 @@ msComparisonExps ::
     MonadSchema n m,
     MonadError QErr m,
     MonadReader r m,
-    Has QueryContext r,
-    Has MkTypename r
+    Has SchemaOptions r,
+    Has MkTypename r,
+    Has NamingCase r
   ) =>
   ColumnType 'MSSQL ->
   m (Parser 'Input n [ComparisonExp 'MSSQL])
 msComparisonExps = P.memoize 'comparisonExps \columnType -> do
   -- see Note [Columns in comparison expression are never nullable]
-  collapseIfNull <- asks $ qcDangerousBooleanCollapse . getter
+  collapseIfNull <- retrieve soDangerousBooleanCollapse
 
   -- parsers used for individual values
   typedParser <- columnParser columnType (G.Nullability False)
@@ -355,6 +361,9 @@ msComparisonExps = P.memoize 'comparisonExps \columnType -> do
             <> P.getName typedParser
             <<> ". All fields are combined with logical 'AND'."
 
+  -- Naming convention
+  tCase <- asks getter
+
   pure $
     P.object name (Just desc) $
       fmap catMaybes $
@@ -362,10 +371,12 @@ msComparisonExps = P.memoize 'comparisonExps \columnType -> do
           concat
             [ -- Common ops for all types
               equalityOperators
+                tCase
                 collapseIfNull
                 (mkParameter <$> typedParser)
                 (mkListLiteral <$> columnListParser),
               comparisonOperators
+                tCase
                 collapseIfNull
                 (mkParameter <$> typedParser),
               -- Ops for String like types
@@ -438,7 +449,7 @@ msCountTypeInput = \case
 -- Currently unsupported: returns Nothing for now.
 msComputedField ::
   MonadBuildSchema 'MSSQL r m n =>
-  SourceName ->
+  SourceInfo 'MSSQL ->
   ComputedFieldInfo 'MSSQL ->
   TableName 'MSSQL ->
   TableInfo 'MSSQL ->

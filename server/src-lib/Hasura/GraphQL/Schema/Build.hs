@@ -54,9 +54,10 @@ module Hasura.GraphQL.Schema.Build
   )
 where
 
+import Data.Has (getter)
+import Data.Text.Casing qualified as C
 import Data.Text.Extended
 import Hasura.GraphQL.Parser hiding (EnumValueInfo, field)
-import Hasura.GraphQL.Parser.Constants qualified as G
 import Hasura.GraphQL.Schema.Backend (MonadBuildSchema)
 import Hasura.GraphQL.Schema.Common
 import Hasura.GraphQL.Schema.Mutation
@@ -69,31 +70,50 @@ import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.SchemaCache
+import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
 import Hasura.SQL.Backend
 import Language.GraphQL.Draft.Syntax qualified as G
 
+-- | Builds field name with proper case. Please note that this is a pure
+--   function as all the validation has already been done while preparing
+--   @GQLNameIdentifier@.
+setFieldNameCase ::
+  NamingCase ->
+  TableInfo b ->
+  CustomRootField ->
+  (C.GQLNameIdentifier -> C.GQLNameIdentifier) ->
+  C.GQLNameIdentifier ->
+  G.Name
+setFieldNameCase tCase tInfo crf getFieldName tableName =
+  (applyFieldNameCaseIdentifier tCase fieldIdentifier)
+  where
+    tccName = fmap (`C.Identifier` []) . _tcCustomName . _tciCustomConfig . _tiCoreInfo $ tInfo
+    crfName = fmap (`C.Identifier` []) (_crfName crf)
+    fieldIdentifier = fromMaybe (getFieldName (fromMaybe tableName tccName)) crfName
+
 buildTableQueryFields ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   TableName b ->
   TableInfo b ->
-  G.Name ->
+  C.GQLNameIdentifier ->
   (m [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))])
-buildTableQueryFields sourceName tableName tableInfo gqlName = do
+buildTableQueryFields sourceInfo tableName tableInfo gqlName = do
+  tCase <- asks getter
   -- select table
-  selectName <- mkRootFieldName . fromMaybe gqlName $ _crfName _tcrfSelect
+  selectName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfSelect mkSelectField gqlName
   -- select table by pk
-  selectPKName <- mkRootFieldName . fromMaybe (gqlName <> G.__by_pk) $ _crfName _tcrfSelectByPk
+  selectPKName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfSelectByPk mkSelectByPkField gqlName
   -- select table aggregate
-  selectAggName <- mkRootFieldName . fromMaybe (gqlName <> G.__aggregate) $ _crfName _tcrfSelectAggregate
+  selectAggName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfSelectAggregate mkSelectAggregateField gqlName
   catMaybes
     <$> sequenceA
-      [ optionalFieldParser QDBMultipleRows $ selectTable sourceName tableInfo selectName selectDesc,
-        optionalFieldParser QDBSingleRow $ selectTableByPk sourceName tableInfo selectPKName selectPKDesc,
-        optionalFieldParser QDBAggregation $ selectTableAggregate sourceName tableInfo selectAggName selectAggDesc
+      [ optionalFieldParser QDBMultipleRows $ selectTable sourceInfo tableInfo selectName selectDesc,
+        optionalFieldParser QDBSingleRow $ selectTableByPk sourceInfo tableInfo selectPKName selectPKDesc,
+        optionalFieldParser QDBAggregation $ selectTableAggregate sourceInfo tableInfo selectAggName selectAggDesc
       ]
   where
     selectDesc = buildFieldDescription defaultSelectDesc $ _crfComment _tcrfSelect
@@ -107,39 +127,42 @@ buildTableQueryFields sourceName tableName tableInfo gqlName = do
 buildTableStreamingSubscriptionFields ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   TableName b ->
   TableInfo b ->
-  G.Name ->
+  C.GQLNameIdentifier ->
   m [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
-buildTableStreamingSubscriptionFields sourceName tableName tableInfo gqlName = do
+buildTableStreamingSubscriptionFields sourceInfo tableName tableInfo gqlName = do
+  tCase <- asks getter
   let customRootFields = _tcCustomRootFields $ _tciCustomConfig $ _tiCoreInfo tableInfo
       selectDesc = Just $ G.Description $ "fetch data from the table in a streaming manner : " <>> tableName
-  selectStreamName <-
-    mkRootFieldName $ fromMaybe gqlName (_crfName $ _tcrfSelect customRootFields) <> G._stream
+  selectStreamName <- mkRootFieldName $ setFieldNameCase tCase tableInfo (_tcrfSelect customRootFields) mkSelectStreamField gqlName
   catMaybes
     <$> sequenceA
-      [ optionalFieldParser QDBStreamMultipleRows $ selectStreamTable sourceName tableInfo selectStreamName selectDesc
+      [ optionalFieldParser QDBStreamMultipleRows $ selectStreamTable sourceInfo tableInfo selectStreamName selectDesc
       ]
 
 buildTableInsertMutationFields ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  (SourceName -> TableInfo b -> m (InputFieldsParser n (BackendInsert b (UnpreparedValue b)))) ->
+  (SourceInfo b -> TableInfo b -> m (InputFieldsParser n (BackendInsert b (UnpreparedValue b)))) ->
   Scenario ->
-  SourceName ->
+  SourceInfo b ->
   TableName b ->
   TableInfo b ->
-  G.Name ->
+  C.GQLNameIdentifier ->
   m [FieldParser n (AnnotatedInsert b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
-buildTableInsertMutationFields backendInsertAction scenario sourceName tableName tableInfo gqlName = do
-  insertName <- mkRootFieldName . fromMaybe (G._insert_ <> gqlName) $ _crfName _tcrfInsert
-  insertOneName <- mkRootFieldName . fromMaybe (G._insert_ <> gqlName <> G.__one) $ _crfName _tcrfInsertOne
-  insert <- insertIntoTable backendInsertAction scenario sourceName tableInfo insertName insertDesc
+buildTableInsertMutationFields backendInsertAction scenario sourceInfo tableName tableInfo gqlName = do
+  tCase <- asks getter
+  -- insert in table
+  insertName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfInsert mkInsertField gqlName
+  -- insert one in table
+  insertOneName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfInsertOne mkInsertOneField gqlName
+  insert <- insertIntoTable backendInsertAction scenario sourceInfo tableInfo insertName insertDesc
   -- Select permissions are required for insertOne: the selection set is the
   -- same as a select on that table, and it therefore can't be populated if the
   -- user doesn't have select permissions.
-  insertOne <- insertOneIntoTable backendInsertAction scenario sourceName tableInfo insertOneName insertOneDesc
+  insertOne <- insertOneIntoTable backendInsertAction scenario sourceInfo tableInfo insertOneName insertOneDesc
   pure $ catMaybes [insert, insertOne]
   where
     insertDesc = buildFieldDescription defaultInsertDesc $ _crfComment _tcrfInsert
@@ -178,26 +201,26 @@ buildTableUpdateMutationFields ::
       (InputFieldsParser n (BackendUpdate b (UnpreparedValue b)))
   ) ->
   -- | The source that the table lives in
-  SourceName ->
+  SourceInfo b ->
   -- | The name of the table being acted on
   TableName b ->
   -- | table info
   TableInfo b ->
   -- | field display name
-  G.Name ->
+  C.GQLNameIdentifier ->
   m [FieldParser n (AnnotatedUpdateG b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
-buildTableUpdateMutationFields mkBackendUpdate sourceName tableName tableInfo gqlName = do
-  let _viewInfo = _tciViewInfo $ _tiCoreInfo tableInfo
+buildTableUpdateMutationFields mkBackendUpdate sourceInfo tableName tableInfo gqlName = do
+  tCase <- asks getter
   backendUpdate <- mkBackendUpdate tableInfo
   -- update table
-  updateName <- mkRootFieldName . fromMaybe (G._update_ <> gqlName) $ _crfName _tcrfUpdate
+  updateName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfUpdate mkUpdateField gqlName
   -- update table by pk
-  updatePKName <- mkRootFieldName . fromMaybe (G._update_ <> gqlName <> G.__by_pk) $ _crfName _tcrfUpdateByPk
-  update <- updateTable backendUpdate sourceName tableInfo updateName updateDesc
+  updatePKName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfUpdateByPk mkUpdateByPkField gqlName
+  update <- updateTable backendUpdate sourceInfo tableInfo updateName updateDesc
   -- Primary keys can only be tested in the `where` clause if a primary key
   -- exists on the table and if the user has select permissions on all columns
   -- that make up the key.
-  updateByPk <- updateTableByPk backendUpdate sourceName tableInfo updatePKName updatePKDesc
+  updateByPk <- updateTableByPk backendUpdate sourceInfo tableInfo updatePKName updatePKDesc
   pure $ catMaybes [update, updateByPk]
   where
     updateDesc = buildFieldDescription defaultUpdateDesc $ _crfComment _tcrfUpdate
@@ -209,21 +232,22 @@ buildTableUpdateMutationFields mkBackendUpdate sourceName tableName tableInfo gq
 buildTableDeleteMutationFields ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   TableName b ->
   TableInfo b ->
-  G.Name ->
+  C.GQLNameIdentifier ->
   m [FieldParser n (AnnDelG b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
-buildTableDeleteMutationFields sourceName tableName tableInfo gqlName = do
+buildTableDeleteMutationFields sourceInfo tableName tableInfo gqlName = do
+  tCase <- asks getter
   -- delete from table
-  deleteName <- mkRootFieldName . fromMaybe (G._delete_ <> gqlName) $ _crfName _tcrfDelete
+  deleteName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfDelete mkDeleteField gqlName
   -- delete from table by pk
-  deletePKName <- mkRootFieldName . fromMaybe (G._delete_ <> gqlName <> G.__by_pk) $ _crfName _tcrfDeleteByPk
-  delete <- deleteFromTable sourceName tableInfo deleteName deleteDesc
+  deletePKName <- mkRootFieldName $ setFieldNameCase tCase tableInfo _tcrfDeleteByPk mkDeleteByPkField gqlName
+  delete <- deleteFromTable sourceInfo tableInfo deleteName deleteDesc
   -- Primary keys can only be tested in the `where` clause if the user has
   -- select permissions for them, which at the very least requires select
   -- permissions.
-  deleteByPk <- deleteFromTableByPk sourceName tableInfo deletePKName deletePKDesc
+  deleteByPk <- deleteFromTableByPk sourceInfo tableInfo deletePKName deletePKDesc
   pure $ catMaybes [delete, deleteByPk]
   where
     deleteDesc = buildFieldDescription defaultDeleteDesc $ _crfComment _tcrfDelete
@@ -235,12 +259,12 @@ buildTableDeleteMutationFields sourceName tableName tableInfo gqlName = do
 buildFunctionQueryFieldsPG ::
   forall r m n pgKind.
   MonadBuildSchema ('Postgres pgKind) r m n =>
-  SourceName ->
+  SourceInfo ('Postgres pgKind) ->
   FunctionName ('Postgres pgKind) ->
   FunctionInfo ('Postgres pgKind) ->
   TableName ('Postgres pgKind) ->
   m [FieldParser n (QueryDB ('Postgres pgKind) (RemoteRelationshipField UnpreparedValue) (UnpreparedValue ('Postgres pgKind)))]
-buildFunctionQueryFieldsPG sourceName functionName functionInfo tableName = do
+buildFunctionQueryFieldsPG sourceInfo functionName functionInfo tableName = do
   let -- select function
       funcDesc =
         Just . G.Description $
@@ -256,24 +280,24 @@ buildFunctionQueryFieldsPG sourceName functionName functionInfo tableName = do
 
   catMaybes
     <$> sequenceA
-      [ optionalFieldParser (queryResultType) $ selectFunction sourceName functionInfo funcDesc,
-        optionalFieldParser (QDBAggregation) $ selectFunctionAggregate sourceName functionInfo funcAggDesc
+      [ optionalFieldParser (queryResultType) $ selectFunction sourceInfo functionInfo funcDesc,
+        optionalFieldParser (QDBAggregation) $ selectFunctionAggregate sourceInfo functionInfo funcAggDesc
       ]
 
 buildFunctionMutationFieldsPG ::
   forall r m n pgKind.
   MonadBuildSchema ('Postgres pgKind) r m n =>
-  SourceName ->
+  SourceInfo ('Postgres pgKind) ->
   FunctionName ('Postgres pgKind) ->
   FunctionInfo ('Postgres pgKind) ->
   TableName ('Postgres pgKind) ->
   m [FieldParser n (MutationDB ('Postgres pgKind) (RemoteRelationshipField UnpreparedValue) (UnpreparedValue ('Postgres pgKind)))]
-buildFunctionMutationFieldsPG sourceName functionName functionInfo tableName = do
+buildFunctionMutationFieldsPG sourceInfo functionName functionInfo tableName = do
   let funcDesc = Just $ G.Description $ "execute VOLATILE function " <> functionName <<> " which returns " <>> tableName
       jsonAggSelect = _fiJsonAggSelect functionInfo
   catMaybes
     <$> sequenceA
-      [ optionalFieldParser (MDBFunction jsonAggSelect) $ selectFunction sourceName functionInfo funcDesc
+      [ optionalFieldParser (MDBFunction jsonAggSelect) $ selectFunction sourceInfo functionInfo funcDesc
       -- TODO: do we want aggregate mutation functions?
       ]
 

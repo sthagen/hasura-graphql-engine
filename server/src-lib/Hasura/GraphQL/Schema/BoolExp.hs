@@ -1,5 +1,5 @@
 {-# LANGUAGE ApplicativeDo #-}
-{-# LANGUAGE TemplateHaskellQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Hasura.GraphQL.Schema.BoolExp
   ( boolExp,
@@ -9,6 +9,8 @@ module Hasura.GraphQL.Schema.BoolExp
   )
 where
 
+import Data.Text.Casing (GQLNameIdentifier)
+import Data.Text.Casing qualified as C
 import Data.Text.Extended
 import Hasura.GraphQL.Parser
   ( InputFieldsParser,
@@ -26,11 +28,12 @@ import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
-import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.ComputedField
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
+import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.SourceCustomization (NamingCase, applyFieldNameCaseIdentifier)
 import Hasura.RQL.Types.Table
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -45,10 +48,10 @@ import Language.GraphQL.Draft.Syntax qualified as G
 boolExp ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   TableInfo b ->
   m (Parser 'Input n (AnnBoolExp b (UnpreparedValue b)))
-boolExp sourceName tableInfo = memoizeOn 'boolExp (sourceName, tableName) $ do
+boolExp sourceInfo tableInfo = memoizeOn 'boolExp (_siName sourceInfo, tableName) $ do
   tableGQLName <- getTableGQLName tableInfo
   name <- P.mkTypename $ tableGQLName <> G.__bool_exp
   let description =
@@ -56,9 +59,9 @@ boolExp sourceName tableInfo = memoizeOn 'boolExp (sourceName, tableName) $ do
           "Boolean expression to filter rows from the table " <> tableName
             <<> ". All fields are combined with a logical 'AND'."
 
-  fieldInfos <- tableSelectFields sourceName tableInfo
+  fieldInfos <- tableSelectFields sourceInfo tableInfo
   tableFieldParsers <- catMaybes <$> traverse mkField fieldInfos
-  recur <- boolExp sourceName tableInfo
+  recur <- boolExp sourceInfo tableInfo
   -- Bafflingly, ApplicativeDo doesn’t work if we inline this definition (I
   -- think the TH splices throw it off), so we have to define it separately.
   let specialFieldParsers =
@@ -86,12 +89,12 @@ boolExp sourceName tableInfo = memoizeOn 'boolExp (sourceName, tableName) $ do
           lift $ fmap (AVColumn columnInfo) <$> comparisonExps @b (ciType columnInfo)
         -- field_name: field_type_bool_exp
         FIRelationship relationshipInfo -> do
-          remoteTableInfo <- askTableInfo sourceName $ riRTable relationshipInfo
+          remoteTableInfo <- askTableInfo sourceInfo $ riRTable relationshipInfo
           remotePermissions <- lift $ tableSelectPermissions remoteTableInfo
           let remoteTableFilter =
                 fmap partialSQLExpToUnpreparedValue
                   <$> maybe annBoolExpTrue spiFilter remotePermissions
-          remoteBoolExp <- lift $ boolExp sourceName remoteTableInfo
+          remoteBoolExp <- lift $ boolExp sourceInfo remoteTableInfo
           pure $ fmap (AVRelationship relationshipInfo . andAnnBoolExps remoteTableFilter) remoteBoolExp
         FIComputedField ComputedFieldInfo {..} -> do
           let ComputedFieldFunction {..} = _cfiFunction
@@ -106,8 +109,8 @@ boolExp sourceName tableInfo = memoizeOn 'boolExp (sourceName, tableName) $ do
                 <$> case computedFieldReturnType @b _cfiReturnType of
                   ReturnsScalar scalarType -> lift $ fmap CFBEScalar <$> comparisonExps @b (ColumnScalar scalarType)
                   ReturnsTable table -> do
-                    info <- askTableInfo @b sourceName table
-                    lift $ fmap (CFBETable table) <$> boolExp sourceName info
+                    info <- askTableInfo sourceInfo table
+                    lift $ fmap (CFBETable table) <$> boolExp sourceInfo info
                   ReturnsOthers -> hoistMaybe Nothing
             _ -> hoistMaybe Nothing
 
@@ -182,20 +185,23 @@ been called at all.
 -- This is temporary, and should be removed as soon as possible.
 mkBoolOperator ::
   (MonadParse n, 'Input P.<: k) =>
+  -- | Naming convention for the field
+  NamingCase ->
   -- | shall this be collapsed to True when null is given?
   Bool ->
   -- | name of this operator
-  G.Name ->
+  GQLNameIdentifier ->
   -- | optional description
   Maybe G.Description ->
   -- | parser for the underlying value
   Parser k n a ->
   InputFieldsParser n (Maybe a)
-mkBoolOperator True name desc = fmap join . P.fieldOptional name desc . P.nullable
-mkBoolOperator False name desc = P.fieldOptional name desc
+mkBoolOperator tCase True name desc = fmap join . P.fieldOptional (applyFieldNameCaseIdentifier tCase name) desc . P.nullable
+mkBoolOperator tCase False name desc = P.fieldOptional (applyFieldNameCaseIdentifier tCase name) desc
 
 equalityOperators ::
   (MonadParse n, 'Input P.<: k) =>
+  NamingCase ->
   -- | shall this be collapsed to True when null is given?
   Bool ->
   -- | parser for one column value
@@ -203,24 +209,25 @@ equalityOperators ::
   -- | parser for a list of column values
   Parser k n (UnpreparedValue b) ->
   [InputFieldsParser n (Maybe (OpExpG b (UnpreparedValue b)))]
-equalityOperators collapseIfNull valueParser valueListParser =
-  [ mkBoolOperator collapseIfNull G.__is_null Nothing $ bool ANISNOTNULL ANISNULL <$> P.boolean,
-    mkBoolOperator collapseIfNull G.__eq Nothing $ AEQ True <$> valueParser,
-    mkBoolOperator collapseIfNull G.__neq Nothing $ ANE True <$> valueParser,
-    mkBoolOperator collapseIfNull G.__in Nothing $ AIN <$> valueListParser,
-    mkBoolOperator collapseIfNull G.__nin Nothing $ ANIN <$> valueListParser
+equalityOperators tCase collapseIfNull valueParser valueListParser =
+  [ mkBoolOperator tCase collapseIfNull (C.fromTuple $$(G.litGQLIdentifier ["_is", "null"])) Nothing $ bool ANISNOTNULL ANISNULL <$> P.boolean,
+    mkBoolOperator tCase collapseIfNull (C.fromName G.__eq) Nothing $ AEQ True <$> valueParser,
+    mkBoolOperator tCase collapseIfNull (C.fromName G.__neq) Nothing $ ANE True <$> valueParser,
+    mkBoolOperator tCase collapseIfNull (C.fromName G.__in) Nothing $ AIN <$> valueListParser,
+    mkBoolOperator tCase collapseIfNull (C.fromName G.__nin) Nothing $ ANIN <$> valueListParser
   ]
 
 comparisonOperators ::
   (MonadParse n, 'Input P.<: k) =>
+  NamingCase ->
   -- | shall this be collapsed to True when null is given?
   Bool ->
   -- | parser for one column value
   Parser k n (UnpreparedValue b) ->
   [InputFieldsParser n (Maybe (OpExpG b (UnpreparedValue b)))]
-comparisonOperators collapseIfNull valueParser =
-  [ mkBoolOperator collapseIfNull G.__gt Nothing $ AGT <$> valueParser,
-    mkBoolOperator collapseIfNull G.__lt Nothing $ ALT <$> valueParser,
-    mkBoolOperator collapseIfNull G.__gte Nothing $ AGTE <$> valueParser,
-    mkBoolOperator collapseIfNull G.__lte Nothing $ ALTE <$> valueParser
+comparisonOperators tCase collapseIfNull valueParser =
+  [ mkBoolOperator tCase collapseIfNull (C.fromName G.__gt) Nothing $ AGT <$> valueParser,
+    mkBoolOperator tCase collapseIfNull (C.fromName G.__lt) Nothing $ ALT <$> valueParser,
+    mkBoolOperator tCase collapseIfNull (C.fromName G.__gte) Nothing $ AGTE <$> valueParser,
+    mkBoolOperator tCase collapseIfNull (C.fromName G.__lte) Nothing $ ALTE <$> valueParser
   ]

@@ -56,7 +56,7 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/hasura/graphql-parser-hs.git
-  tag: bf54018cd0948c14e651ad2d14238e8f42c333ee
+  tag: 47feca50fbfe6a059d02910c283e7567fbc1d7ef
 
 source-repository-package
   type: git

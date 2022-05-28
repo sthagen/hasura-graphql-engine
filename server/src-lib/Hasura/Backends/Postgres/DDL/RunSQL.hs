@@ -35,7 +35,6 @@ import Hasura.Backends.Postgres.Execute.Types
 import Hasura.Backends.Postgres.SQL.Types hiding (FunctionName, TableName)
 import Hasura.Base.Error
 import Hasura.EncJSON
-import Hasura.GraphQL.Schema.Common (purgeDependencies)
 import Hasura.Prelude
 import Hasura.RQL.DDL.Schema
 import Hasura.RQL.DDL.Schema.Diff
@@ -326,10 +325,10 @@ runTxWithMetadataCheck source sourceConfig txAccess tableCache functionCache cas
           tableIndirectDeps <- getIndirectDependenciesFromTableDiff source tablesDiff
 
           -- If table indirect dependencies exist and cascading is not enabled then report an exception
-          when (tableIndirectDeps /= [] && not cascadeDependencies) $ reportDependentObjectsExist tableIndirectDeps
+          when (not (null tableIndirectDeps) && not cascadeDependencies) $ reportDependentObjectsExist tableIndirectDeps
 
           -- Purge all the table dependents
-          purgeDependencies tableIndirectDeps
+          traverse_ purgeSourceAndSchemaDependencies tableIndirectDeps
 
           -- Collect function names from purged table dependencies
           let purgedFunctions = collectFunctionsInDeps tableIndirectDeps

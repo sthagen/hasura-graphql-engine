@@ -37,7 +37,7 @@ import Hasura.EncJSON
 import Hasura.GraphQL.Context
 import Hasura.GraphQL.Namespace
 import Hasura.GraphQL.Parser.Constants qualified as G
-import Hasura.GraphQL.Schema.Common (purgeDependencies, textToName)
+import Hasura.GraphQL.Schema.Common (textToName)
 import Hasura.Incremental qualified as Inc
 import Hasura.Prelude
 import Hasura.RQL.DDL.Schema.Cache.Common
@@ -53,6 +53,7 @@ import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.SchemaCacheTypes
 import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.SourceCustomization (NamingCase, applyFieldNameCaseCust)
 import Hasura.RQL.Types.Table
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.Backend
@@ -196,12 +197,10 @@ checkConflictingNode sc tnGQL = do
           case names of
             Nothing -> pure ()
             Just ns ->
-              if tnGQL `elem` ns
-                then
-                  throw400 RemoteSchemaConflicts $
-                    "node " <> tnGQL
-                      <> " already exists in current graphql schema"
-                else pure ()
+              when (tnGQL `elem` ns) $
+                throw400 RemoteSchemaConflicts $
+                  "node " <> tnGQL
+                    <> " already exists in current graphql schema"
         _ -> pure ()
 
 trackExistingTableOrViewP2 ::
@@ -356,11 +355,11 @@ unTrackExistingTableOrViewP2 (UntrackTable source qtn cascade) = withNewInconsis
       indirectDeps = mapMaybe getIndirectDep allDeps
 
   -- Report bach with an error if cascade is not set
-  when (indirectDeps /= [] && not cascade) $
+  when (not (null indirectDeps) && not cascade) $
     reportDependentObjectsExist indirectDeps
   -- Purge all the dependents from state
   metadataModifier <- execWriterT do
-    purgeDependencies indirectDeps
+    traverse_ purgeSourceAndSchemaDependencies indirectDeps
     tell $ dropTableInMetadata @b source qtn
   -- delete the table and its direct dependencies
   withNewInconsistentObjsCheck $ buildSchemaCache metadataModifier
@@ -408,10 +407,11 @@ buildTableCache ::
     SourceConfig b,
     DBTablesMetadata b,
     [TableBuildInput b],
-    Inc.Dependency Inc.InvalidationKey
+    Inc.Dependency Inc.InvalidationKey,
+    NamingCase
   )
     `arr` Map.HashMap (TableName b) (TableCoreInfoG b (ColumnInfo b) (ColumnInfo b))
-buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuildInputs, reloadMetadataInvalidationKey) -> do
+buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuildInputs, reloadMetadataInvalidationKey, tCase) -> do
   rawTableInfos <-
     (|
       Inc.keyed
@@ -430,7 +430,7 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
   tableInfos <-
     (|
       Inc.keyed
-        (| withTable (\table -> processTableInfo -< (enumTables, table)) |)
+        (| withTable (\table -> processTableInfo -< (enumTables, table, tCase)) |)
       |) (withSourceInKey source rawTableCache)
   returnA -< removeSourceInKey (Map.catMaybes tableInfos)
   where
@@ -517,17 +517,18 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
         QErr
         arr
         ( Map.HashMap (TableName b) (PrimaryKey b (Column b), TableConfig b, EnumValues),
-          TableCoreInfoG b (RawColumnInfo b) (Column b)
+          TableCoreInfoG b (RawColumnInfo b) (Column b),
+          NamingCase
         )
         (TableCoreInfoG b (ColumnInfo b) (ColumnInfo b))
-    processTableInfo = proc (enumTables, rawInfo) ->
+    processTableInfo = proc (enumTables, rawInfo, tCase) ->
       liftEitherA
         -< do
           let columns = _tciFieldInfoMap rawInfo
               enumReferences = resolveEnumReferences enumTables (_tciForeignKeys rawInfo)
           columnInfoMap <-
             collectColumnConfiguration columns (_tciCustomConfig rawInfo)
-              >>= traverse (processColumnInfo enumReferences (_tciName rawInfo))
+              >>= traverse (processColumnInfo tCase enumReferences (_tciName rawInfo))
           assertNoDuplicateFieldNames (Map.elems columnInfoMap)
 
           primaryKey <- traverse (resolvePrimaryKeyColumns columnInfoMap) (_tciPrimaryKey rawInfo)
@@ -582,16 +583,17 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
 
     processColumnInfo ::
       (QErrM n) =>
+      NamingCase ->
       Map.HashMap (Column b) (NonEmpty (EnumReference b)) ->
       TableName b ->
       (RawColumnInfo b, G.Name, Maybe G.Description) ->
       n (ColumnInfo b)
-    processColumnInfo tableEnumReferences tableName (rawInfo, name, description) = do
+    processColumnInfo tCase tableEnumReferences tableName (rawInfo, name, description) = do
       resolvedType <- resolveColumnType
       pure
         ColumnInfo
           { ciColumn = pgCol,
-            ciName = name,
+            ciName = (applyFieldNameCaseCust tCase name),
             ciPosition = rciPosition rawInfo,
             ciType = resolvedType,
             ciIsNullable = rciIsNullable rawInfo,

@@ -10,12 +10,14 @@ module Hasura.GraphQL.Schema.Table
     tableColumns,
     tableSelectColumns,
     tableUpdateColumns,
+    getTableIdentifierName,
   )
 where
 
 import Data.Has
 import Data.HashMap.Strict qualified as Map
 import Data.HashSet qualified as Set
+import Data.Text.Casing
 import Data.Text.Extended
 import Hasura.Base.Error (QErr)
 import Hasura.GraphQL.Parser (Kind (..), Parser)
@@ -26,7 +28,6 @@ import Hasura.GraphQL.Schema.Common
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
-import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.ComputedField
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
@@ -56,6 +57,22 @@ getTableGQLName tableInfo = do
     `onNothing` tableGraphQLName @b tableName
     `onLeft` throwError
 
+-- | similar to @getTableGQLName@ but returns table name as a list with name pieces
+--   instead of concatenating schema and table name together.
+getTableIdentifierName ::
+  forall b m.
+  (Backend b, MonadError QErr m) =>
+  TableInfo b ->
+  m (GQLNameIdentifier)
+getTableIdentifierName tableInfo =
+  let coreInfo = _tiCoreInfo tableInfo
+      tableName = _tciName coreInfo
+      tableCustomName = _tcCustomName $ _tciCustomConfig coreInfo
+   in maybe
+        (liftEither $ getTableIdentifier @b tableName)
+        (pure . (`Identifier` []))
+        tableCustomName
+
 -- | Table select columns enum
 --
 -- Parser for an enum type that matches the columns of the given
@@ -67,12 +84,12 @@ getTableGQLName tableInfo = do
 tableSelectColumnsEnum ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   TableInfo b ->
   m (Maybe (Parser 'Both n (Column b)))
-tableSelectColumnsEnum sourceName tableInfo = do
+tableSelectColumnsEnum sourceInfo tableInfo = do
   tableGQLName <- getTableGQLName @b tableInfo
-  columns <- tableSelectColumns sourceName tableInfo
+  columns <- tableSelectColumns sourceInfo tableInfo
   enumName <- P.mkTypename $ tableGQLName <> G.__select_column
   let description =
         Just $
@@ -155,13 +172,12 @@ tableSelectFields ::
   ( Backend b,
     MonadError QErr m,
     MonadReader r m,
-    Has SourceCache r,
     Has RoleName r
   ) =>
-  SourceName ->
+  SourceInfo b ->
   TableInfo b ->
   m [FieldInfo b]
-tableSelectFields sourceName tableInfo = do
+tableSelectFields sourceInfo tableInfo = do
   let tableFields = _tciFieldInfoMap . _tiCoreInfo $ tableInfo
   permissions <- tableSelectPermissions tableInfo
   filterM (canBeSelected permissions) $ Map.elems tableFields
@@ -170,14 +186,14 @@ tableSelectFields sourceName tableInfo = do
     canBeSelected (Just permissions) (FIColumn columnInfo) =
       pure $ Map.member (ciColumn columnInfo) (spiCols permissions)
     canBeSelected _ (FIRelationship relationshipInfo) = do
-      tableInfo' <- askTableInfo sourceName $ riRTable relationshipInfo
+      tableInfo' <- askTableInfo sourceInfo $ riRTable relationshipInfo
       isJust <$> tableSelectPermissions @b tableInfo'
     canBeSelected (Just permissions) (FIComputedField computedFieldInfo) =
       case computedFieldReturnType @b (_cfiReturnType computedFieldInfo) of
         ReturnsScalar _ ->
           pure $ Map.member (_cfiName computedFieldInfo) $ spiScalarComputedFields permissions
         ReturnsTable tableName -> do
-          tableInfo' <- askTableInfo sourceName tableName
+          tableInfo' <- askTableInfo sourceInfo tableName
           isJust <$> tableSelectPermissions @b tableInfo'
         ReturnsOthers -> pure False
     canBeSelected _ (FIRemoteRelationship _) = pure True
@@ -197,14 +213,13 @@ tableSelectColumns ::
   ( Backend b,
     MonadError QErr m,
     MonadReader r m,
-    Has SourceCache r,
     Has RoleName r
   ) =>
-  SourceName ->
+  SourceInfo b ->
   TableInfo b ->
   m [ColumnInfo b]
-tableSelectColumns sourceName tableInfo =
-  mapMaybe columnInfo <$> tableSelectFields sourceName tableInfo
+tableSelectColumns sourceInfo tableInfo =
+  mapMaybe columnInfo <$> tableSelectFields sourceInfo tableInfo
   where
     columnInfo (FIColumn ci) = Just ci
     columnInfo _ = Nothing

@@ -26,8 +26,9 @@ import Hasura.GraphQL.Schema.Table (getTableGQLName, tableSelectColumns, tableSe
 import Hasura.Prelude
 import Hasura.RQL.IR.Select qualified as IR
 import Hasura.RQL.Types.Column
-import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.SchemaCache
+import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.SourceCustomization (NamingCase, applyFieldNameCaseCust, applyTypeNameCaseCust)
 import Hasura.RQL.Types.Subscription
 import Hasura.RQL.Types.Table
 import Language.GraphQL.Draft.Syntax qualified as G
@@ -36,12 +37,13 @@ import Language.GraphQL.Draft.Syntax qualified as G
 cursorBatchSizeArg ::
   forall n.
   MonadParse n =>
+  NamingCase ->
   InputFieldsParser n Int
-cursorBatchSizeArg =
+cursorBatchSizeArg tCase =
   fromIntegral
     <$> P.field batchSizeName batchSizeDesc P.nonNegativeInt
   where
-    batchSizeName = G._batch_size
+    batchSizeName = applyFieldNameCaseCust tCase G._batch_size
     batchSizeDesc = Just $ G.Description "maximum number of rows returned in a single batch"
 
 -- | Cursor ordering enum fields
@@ -52,10 +54,11 @@ cursorBatchSizeArg =
 -- > }
 cursorOrderingArgParser ::
   forall n m r.
-  (MonadSchema n m, Has P.MkTypename r, MonadReader r m) =>
+  (MonadSchema n m, Has P.MkTypename r, Has NamingCase r, MonadReader r m) =>
   m (Parser 'Both n CursorOrdering)
 cursorOrderingArgParser = do
-  enumName <- P.mkTypename G._cursor_ordering
+  tCase <- asks getter
+  enumName <- P.mkTypename $ applyTypeNameCaseCust tCase G._cursor_ordering
   let description =
         Just $
           G.Description $
@@ -77,7 +80,7 @@ cursorOrderingArgParser = do
 -- > ordering: cursor_ordering
 cursorOrderingArg ::
   forall n m r.
-  (MonadSchema n m, Has P.MkTypename r, MonadReader r m) =>
+  (MonadSchema n m, Has P.MkTypename r, Has NamingCase r, MonadReader r m) =>
   m (InputFieldsParser n (Maybe CursorOrdering))
 cursorOrderingArg = do
   cursorOrderingParser' <- cursorOrderingArgParser
@@ -88,7 +91,7 @@ cursorOrderingArg = do
 -- > column_name: column_type
 streamColumnParserArg ::
   forall b n m r.
-  (BackendSchema b, MonadSchema n m, Has P.MkTypename r, MonadReader r m, MonadError QErr m) =>
+  (BackendSchema b, MonadSchema n m, Has P.MkTypename r, MonadReader r m, MonadError QErr m, Has NamingCase r) =>
   ColumnInfo b ->
   m (InputFieldsParser n (Maybe (ColumnInfo b, ColumnValue b)))
 streamColumnParserArg colInfo = do
@@ -110,15 +113,16 @@ streamColumnParserArg colInfo = do
 -- > }
 streamColumnValueParser ::
   forall b n m r.
-  (BackendSchema b, MonadSchema n m, Has P.MkTypename r, MonadReader r m, MonadError QErr m) =>
-  SourceName ->
+  (BackendSchema b, MonadSchema n m, Has P.MkTypename r, MonadReader r m, MonadError QErr m, Has NamingCase r) =>
+  SourceInfo b ->
   G.Name ->
   [ColumnInfo b] ->
   m (Parser 'Input n [(ColumnInfo b, ColumnValue b)])
-streamColumnValueParser sourceName tableGQLName colInfos =
-  memoizeOn 'streamColumnValueParser (sourceName, tableGQLName) $ do
+streamColumnValueParser sourceInfo tableGQLName colInfos =
+  memoizeOn 'streamColumnValueParser (_siName sourceInfo, tableGQLName) $ do
+    tCase <- asks getter
     columnVals <- sequenceA <$> traverse streamColumnParserArg colInfos
-    objName <- P.mkTypename $ tableGQLName <> G.__stream_cursor_value_input
+    objName <- P.mkTypename $ tableGQLName <> applyTypeNameCaseCust tCase G.__stream_cursor_value_input
     pure do
       let description = G.Description $ "Initial value of the column from where the streaming should start"
       P.object objName (Just description) columnVals <&> catMaybes
@@ -131,16 +135,18 @@ streamColumnValueParserArg ::
     MonadSchema n m,
     Has P.MkTypename r,
     MonadReader r m,
-    MonadError QErr m
+    MonadError QErr m,
+    Has NamingCase r
   ) =>
-  SourceName ->
+  SourceInfo b ->
   G.Name ->
   [ColumnInfo b] ->
   m (InputFieldsParser n [(ColumnInfo b, ColumnValue b)])
-streamColumnValueParserArg sourceName tableGQLName colInfos = do
-  columnValueParser <- streamColumnValueParser sourceName tableGQLName colInfos
+streamColumnValueParserArg sourceInfo tableGQLName colInfos = do
+  tCase <- asks getter
+  columnValueParser <- streamColumnValueParser sourceInfo tableGQLName colInfos
   pure do
-    P.field G._initial_value (Just $ G.Description "Stream column input with initial value") columnValueParser
+    P.field (applyFieldNameCaseCust tCase G._initial_value) (Just $ G.Description "Stream column input with initial value") columnValueParser
 
 -- | Argument to accept the cursor data. At the time of writing this, only a single
 --   column cursor is supported and if multiple column cursors are provided,
@@ -148,14 +154,14 @@ streamColumnValueParserArg sourceName tableGQLName colInfos = do
 -- >
 tableStreamColumnArg ::
   forall n m r b.
-  (BackendSchema b, MonadSchema n m, Has P.MkTypename r, MonadReader r m, MonadError QErr m) =>
-  SourceName ->
+  (BackendSchema b, MonadSchema n m, Has P.MkTypename r, MonadReader r m, MonadError QErr m, Has NamingCase r) =>
+  SourceInfo b ->
   G.Name ->
   [ColumnInfo b] ->
   m (InputFieldsParser n [IR.StreamCursorItem b])
-tableStreamColumnArg sourceName tableGQLName colInfos = do
+tableStreamColumnArg sourceInfo tableGQLName colInfos = do
   cursorOrderingParser <- cursorOrderingArg
-  streamColumnParser <- streamColumnValueParserArg sourceName tableGQLName colInfos
+  streamColumnParser <- streamColumnValueParserArg sourceInfo tableGQLName colInfos
   pure $ do
     orderingArg <- cursorOrderingParser
     columnArg <- streamColumnParser
@@ -170,17 +176,18 @@ tableStreamColumnArg sourceName tableGQLName colInfos = do
 tableStreamCursorExp ::
   forall m n r b.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   TableInfo b ->
   m (Parser 'Input n [(IR.StreamCursorItem b)])
-tableStreamCursorExp sourceName tableInfo =
-  memoizeOn 'tableStreamCursorExp (sourceName, tableInfoName tableInfo) $ do
+tableStreamCursorExp sourceInfo tableInfo =
+  memoizeOn 'tableStreamCursorExp (_siName sourceInfo, tableInfoName tableInfo) $ do
+    tCase <- asks getter
     tableGQLName <- getTableGQLName tableInfo
-    columnInfos <- tableSelectColumns sourceName tableInfo
-    objName <- P.mkTypename $ tableGQLName <> G.__stream_cursor_input
+    columnInfos <- tableSelectColumns sourceInfo tableInfo
+    objName <- P.mkTypename $ tableGQLName <> applyTypeNameCaseCust tCase G.__stream_cursor_input
     let description =
           G.Description $ "Streaming cursor of the table " <>> tableGQLName
-    columnParsers <- tableStreamColumnArg sourceName tableGQLName columnInfos
+    columnParsers <- tableStreamColumnArg sourceInfo tableGQLName columnInfos
     pure $ P.object objName (Just description) columnParsers
 
 -- | Argument to accept the cursor input object.
@@ -188,11 +195,11 @@ tableStreamCursorExp sourceName tableInfo =
 tableStreamCursorArg ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   TableInfo b ->
   m (InputFieldsParser n [IR.StreamCursorItem b])
-tableStreamCursorArg sourceName tableInfo = do
-  cursorParser <- tableStreamCursorExp sourceName tableInfo
+tableStreamCursorArg sourceInfo tableInfo = do
+  cursorParser <- tableStreamCursorExp sourceInfo tableInfo
   pure $ do
     cursorArgs <-
       P.field cursorName cursorDesc $ P.list $ P.nullable cursorParser
@@ -206,12 +213,13 @@ tableStreamCursorArg sourceName tableInfo = do
 tableStreamArguments ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   TableInfo b ->
   m (InputFieldsParser n (SelectStreamArgs b))
-tableStreamArguments sourceName tableInfo = do
-  whereParser <- tableWhereArg sourceName tableInfo
-  cursorParser <- tableStreamCursorArg sourceName tableInfo
+tableStreamArguments sourceInfo tableInfo = do
+  tCase <- asks getter
+  whereParser <- tableWhereArg sourceInfo tableInfo
+  cursorParser <- tableStreamCursorArg sourceInfo tableInfo
   pure $ do
     whereArg <- whereParser
     cursorArg <-
@@ -219,7 +227,7 @@ tableStreamArguments sourceName tableInfo = do
         [] -> parseError "one streaming column field is expected"
         [c] -> pure c
         _ -> parseError "multiple column cursors are not supported yet"
-    batchSizeArg <- cursorBatchSizeArg
+    batchSizeArg <- cursorBatchSizeArg tCase
     pure $
       IR.SelectStreamArgsG whereArg batchSizeArg cursorArg
 
@@ -227,7 +235,7 @@ tableStreamArguments sourceName tableInfo = do
 selectStreamTable ::
   forall b r m n.
   MonadBuildSchema b r m n =>
-  SourceName ->
+  SourceInfo b ->
   -- | table info
   TableInfo b ->
   -- | field display name
@@ -235,14 +243,14 @@ selectStreamTable ::
   -- | field description, if any
   Maybe G.Description ->
   m (Maybe (P.FieldParser n (StreamSelectExp b)))
-selectStreamTable sourceName tableInfo fieldName description = runMaybeT $ do
+selectStreamTable sourceInfo tableInfo fieldName description = runMaybeT $ do
   selectPermissions <- MaybeT $ tableSelectPermissions tableInfo
   xStreamSubscription <- hoistMaybe $ streamSubscriptionExtension @b
-  stringifyNum <- asks $ qcStringifyNum . getter
-  tableStreamArgsParser <- lift $ tableStreamArguments sourceName tableInfo
-  selectionSetParser <- MaybeT $ tableSelectionList sourceName tableInfo
+  stringifyNum <- retrieve soStringifyNum
+  tableStreamArgsParser <- lift $ tableStreamArguments sourceInfo tableInfo
+  selectionSetParser <- MaybeT $ tableSelectionList sourceInfo tableInfo
   lift $
-    memoizeOn 'selectStreamTable (sourceName, tableName, fieldName) $ do
+    memoizeOn 'selectStreamTable (_siName sourceInfo, tableName, fieldName) $ do
       pure $
         P.subselection fieldName description tableStreamArgsParser selectionSetParser
           <&> \(args, fields) ->
