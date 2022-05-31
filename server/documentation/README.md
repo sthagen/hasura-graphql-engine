@@ -10,22 +10,18 @@ You can also get started with a list of [tips and tricks](tips.md).
 
 ## Haddock documentation
 
-You can browse the generated [haddock documentation](haddock/) for the engine's
-code; we automatically update it on every push to a branch of interest:
-
-* [stable branch](haddock/stable)
-* [alpha branch](haddock/alpha)
-* [beta branch](haddock/beta)
-* [main branch](haddock/main)
-
+You can [browse the engine's haddock documentation](haddock) for the [stable](haddock/stable) branch, [main](haddock/main) branch, and every previous version release since `v2.2.0`.
 
 ## Architecture deep-dive
 
-* how to understand our [GraphQL schema](schema.md)
-* how to perform [database migrations](migration-guidelines.md)
-* how the [execution of remote joins](remote_joins_execution.md) works
+* how to understand our [GraphQL schema](deep-dives/schema.md)
+* how to perform [database migrations](deep-dives/migration-guidelines.md)
+* how the [execution of remote joins](deep-dives/remote-joins-execution.md) works
 
-TODO: we can either list individual topics here, or point to architecture/ and have a README file there.
+
+## Backend-specific documentation
+
+* [BigQuery](data-sources/bigquery.md)
 
 ## Notes
 

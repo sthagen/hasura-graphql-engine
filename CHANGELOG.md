@@ -43,15 +43,19 @@ is `graphql-default`, the field names generated will be `my_table`, `my_tableByP
 
 ### Bug fixes and improvements
 
+- server: add support for scalar array response type in actions (#3661)
+- server: add support for table computed fields in bigquery backends
 - server: do not serialize env vars in logs or errors for remote schemas
 - server: fix failure when executing consecutive delete mutations on mssql (#8462)
+- server: bugfix: insertion of multiple empty objects should result in multiple entries (#8475)
+- console: add support for application/x-www-form-urlencoded in rest connectors (#8097)
 
 ## v2.7.0
 
 ### Streaming subscriptions
 
 Streaming subscriptions can be used to subscribe only to the data which has been changed in the
-query. The streaming is done on the basis of a cursor, which is chosen by the user. 
+query. The streaming is done on the basis of a cursor, which is chosen by the user.
 See [docs](https://hasura.io/docs/latest/graphql/core/databases/postgres/subscriptions/streaming/index/).
 
 Request payload:
@@ -60,11 +64,11 @@ Request payload:
 subscription GetUserLatestMessages ($user_id: uuid!) {
   messages_stream (
     cursor: {
-      initial_value: {id: 0}, 
+      initial_value: {id: 0},
       ordering: ASC
-    }, 
-    batch_size: 1, 
-    where: {user_id: {_eq: $user_id}} 
+    },
+    batch_size: 1,
+    where: {user_id: {_eq: $user_id}}
   ) {
     id
     message

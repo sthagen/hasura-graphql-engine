@@ -57,7 +57,7 @@
             transformed_request:
         path: $
         code: unexpected
-      message: got object for the action webhook response, might want to check the action return type defined!
+      message: got object for the action webhook response, expecting String
 - description: Revert action wehbook
   url: /v1/query
   status: 200
