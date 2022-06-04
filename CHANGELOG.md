@@ -50,6 +50,7 @@ is `graphql-default`, the field names generated will be `my_table`, `my_tableByP
 - server: fix failure when executing consecutive delete mutations on mssql (#8462)
 - server: bugfix: insertion of multiple empty objects should result in multiple entries (#8475)
 - console: add support for application/x-www-form-urlencoded in rest connectors (#8097)
+- cli: add support for multiple admin secrets
 
 ## v2.7.0
 
@@ -109,6 +110,7 @@ Response 2:
 
 ### Bug fixes and improvements
 
+- server: add support for custom scalar in action output type (#4185)
 - server: add support for MSSQL event triggers (#7228)
 - server: update pg_dump to be compatible with postgres 14 (#7676)
 - server: fix bug where timestamp values sent to postgres would erroneously trim leading zeroes (#8096)
@@ -147,6 +149,7 @@ Response 2:
 - server: fixes url/query date variable bug in REST endpoints
 - server: makes url/query variables in REST endpoints assume string if other types not applicable
 - server: fix inserting empty objects with default values to postgres, citus, and sql server (fix #8475)
+- server: allow casting most postgres scalar types to strings in comparison expressions (fix #8524)
 - console: add remote database relationships for views
 - console: bug fixes for RS-to-RS relationships
 - console: allow users to remove prefix / suffix / root field namespace from a remote schema

@@ -2,10 +2,11 @@
 module Hasura.Backends.DataConnector.API
   ( module V0,
     Api,
-    ConfigSchemaApi,
     SchemaApi,
     QueryApi,
     ConfigHeader,
+    SourceNameHeader,
+    SourceName,
     openApiSchemaJson,
     Routes (..),
     apiClient,
@@ -15,6 +16,7 @@ where
 import Data.Aeson qualified as J
 import Data.Data (Proxy (..))
 import Data.OpenApi (OpenApi)
+import Data.Text (Text)
 import Hasura.Backends.DataConnector.API.V0.API as V0
 import Servant.API
 import Servant.API.Generic
@@ -25,26 +27,32 @@ import Prelude
 --------------------------------------------------------------------------------
 -- Servant Routes
 
-type ConfigSchemaApi =
-  "config-schema"
-    :> Get '[JSON] V0.ConfigSchemaResponse
+type CapabilitiesApi =
+  "capabilities"
+    :> Get '[JSON] V0.CapabilitiesResponse
 
 type SchemaApi =
   "schema"
+    :> SourceNameHeader
     :> ConfigHeader
     :> Get '[JSON] V0.SchemaResponse
 
 type QueryApi =
   "query"
+    :> SourceNameHeader
     :> ConfigHeader
     :> ReqBody '[JSON] V0.Query
     :> Post '[JSON] V0.QueryResponse
 
 type ConfigHeader = Header' '[Required, Strict] "X-Hasura-DataConnector-Config" V0.Config
 
+type SourceNameHeader = Header' '[Required, Strict] "X-Hasura-DataConnector-SourceName" SourceName
+
+type SourceName = Text
+
 data Routes mode = Routes
-  { -- | 'GET /config-schema'
-    _configSchema :: mode :- ConfigSchemaApi,
+  { -- | 'GET /capabilities'
+    _capabilities :: mode :- CapabilitiesApi,
     -- | 'GET /schema'
     _schema :: mode :- SchemaApi,
     -- | 'POST /query'
@@ -54,11 +62,11 @@ data Routes mode = Routes
 
 -- | servant-openapi3 does not (yet) support NamedRoutes so we need to compose the
 -- API the old-fashioned way using :<|> for use by @toOpenApi@
-type Api = ConfigSchemaApi :<|> SchemaApi :<|> QueryApi
+type Api = CapabilitiesApi :<|> SchemaApi :<|> QueryApi
 
 -- | Provide an OpenApi 3.0 schema for the API
 openApiSchema :: OpenApi
-openApiSchema = toOpenApi (Proxy :: Proxy Api)
+openApiSchema = toOpenApi (Proxy @Api)
 
 -- | The OpenAPI 3.0 schema for the API
 --
