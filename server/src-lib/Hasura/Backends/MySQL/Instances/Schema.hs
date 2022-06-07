@@ -35,7 +35,7 @@ import Hasura.SQL.Backend
 import Language.GraphQL.Draft.Syntax qualified as G
 
 instance BackendSchema 'MySQL where
-  buildTableQueryFields = GSB.buildTableQueryFields
+  buildTableQueryAndSubscriptionFields = GSB.buildTableQueryAndSubscriptionFields
   buildTableRelayQueryFields = buildTableRelayQueryFields'
   buildTableStreamingSubscriptionFields = GSB.buildTableStreamingSubscriptionFields
   buildTableInsertMutationFields = buildTableInsertMutationFields'
@@ -55,7 +55,6 @@ instance BackendSchema 'MySQL where
   countTypeInput = mysqlCountTypeInput
   aggregateOrderByCountType = error "aggregateOrderByCountType: MySQL backend does not support this operation yet."
   computedField = error "computedField: MySQL backend does not support this operation yet."
-  node = error "node: MySQL backend does not support this operation yet."
 
 mysqlTableArgs ::
   forall r m n.

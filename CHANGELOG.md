@@ -2,6 +2,55 @@
 
 ## Next release
 
+### Disabling query/subscription root fields
+
+When a table is tracked in the graphql-engine, automatically three root fields are generated
+namely `<table>`, `<table>_by_pk` and `<table>_aggregate` in the `query` and the `subscription`
+root.
+
+Sometimes we may not want a role to access a table directly but it may still be required to tracked so that:
+
+1. It can be accessed via a relationship to another table
+2. It can be used in select permissions in another table, if there's a relationship between the two tables.
+
+For such use-cases, we can disable all the root fields of the given table. This can be done in the following manner:
+
+```json
+{
+   "role": "user",
+   "permission": {
+     "columns": [
+       "id",
+       "name"
+     ],
+     "filter": {},
+     "allow_aggregations": true,
+     "query_root_fields": [],
+     "subscription_root_fields": []
+   }
+ }
+```
+
+Another use case to use this feature is to allow a role to directly access a table only
+if it has access to the primary key value. It can be done in the following manner:
+
+```json
+{
+   "role": "user",
+   "permission": {
+     "columns": [
+       "id",
+       "name"
+     ],
+     "filter": {},
+     "allow_aggregations": false,
+     "query_root_fields": ["select_by_pk"],
+     "subscription_root_fields": ["select_by_pk"]
+   }
+ }
+```
+
+
 ### Naming conventions in HGE
 Now, users can specify the naming convention of the auto-generated names in the HGE.
 This is an experimental feature and is postgres only for now. There are two naming
@@ -43,6 +92,7 @@ is `graphql-default`, the field names generated will be `my_table`, `my_tableByP
 
 ### Bug fixes and improvements
 
+- server: errors from healthcheck are now logged as internal errors
 - server: do not expand environment variable references in logs or API responses from remote schemas, actions and event triggers for security reasons (fix #3935)
 - server: extend backend_only setting for update and delete permissions
 - server: add support for scalar array response type in actions (#3661)

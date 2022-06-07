@@ -796,11 +796,13 @@ library
                      , Hasura.GraphQL.Schema.BoolExp
                      , Hasura.GraphQL.Schema.Build
                      , Hasura.GraphQL.Schema.Common
-                     , Hasura.GraphQL.Schema.Introspect
                      , Hasura.GraphQL.Schema.Instances
+                     , Hasura.GraphQL.Schema.Introspect
                      , Hasura.GraphQL.Schema.Mutation
+                     , Hasura.GraphQL.Schema.Node
                      , Hasura.GraphQL.Schema.OrderBy
                      , Hasura.GraphQL.Schema.Postgres
+                     , Hasura.GraphQL.Schema.Relay
                      , Hasura.GraphQL.Schema.Remote
                      , Hasura.GraphQL.Schema.RemoteRelationship
                      , Hasura.GraphQL.Schema.Select
@@ -1155,6 +1157,13 @@ test-suite tests-hspec
     Test.RemoteRelationship.XToDBArrayRelationshipSpec
     Test.RemoteRelationship.XToDBObjectRelationshipSpec
     Test.RemoteRelationship.XToRemoteSchemaRelationshipSpec
+    Test.DisableRootFields.Common
+    Test.DisableRootFields.DefaultRootFieldsSpec
+    Test.DisableRootFields.SelectPermission.EnablePKSpec
+    Test.DisableRootFields.SelectPermission.EnableAggSpec
+    Test.DisableRootFields.SelectPermission.EnableAllRootFieldsSpec
+    Test.DisableRootFields.SelectPermission.DisableAllRootFieldsSpec
+    Test.DisableRootFields.SelectPermission.DisableAllRootFieldsRelationshipSpec
     Test.RequestHeadersSpec
     Test.RunSQLSpec
     Test.BigQuery.ComputedFieldSpec

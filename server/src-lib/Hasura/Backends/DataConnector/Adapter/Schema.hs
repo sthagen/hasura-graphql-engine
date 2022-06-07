@@ -35,7 +35,7 @@ import Language.GraphQL.Draft.Syntax qualified as GQL
 
 instance BackendSchema 'DataConnector where
   -- top level parsers
-  buildTableQueryFields = GS.B.buildTableQueryFields
+  buildTableQueryAndSubscriptionFields = GS.B.buildTableQueryAndSubscriptionFields
 
   buildTableRelayQueryFields = experimentalBuildTableRelayQueryFields
 
@@ -67,8 +67,6 @@ instance BackendSchema 'DataConnector where
     error "aggregateOrderByCountType: not implemented for the Data Connector backend."
   computedField =
     error "computedField: not implemented for the Data Connector backend."
-  node =
-    error "node: not implemented for the Data Connector backend."
 
 --------------------------------------------------------------------------------
 

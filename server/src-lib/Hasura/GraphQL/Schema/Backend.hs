@@ -46,15 +46,14 @@ import Hasura.RQL.IR.Insert qualified as IR
 import Hasura.RQL.IR.Select qualified as IR
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column hiding (EnumValueInfo)
-import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.ComputedField
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization (NamingCase)
-import Hasura.RQL.Types.Table
 import Hasura.SQL.Backend
+import Hasura.Server.Types (StreamingSubscriptionsCtx)
 import Language.GraphQL.Draft.Syntax qualified as G
 
 -- TODO: Might it make sense to add those constraints to MonadSchema directly?
@@ -97,13 +96,17 @@ class
   BackendSchema (b :: BackendType)
   where
   -- top level parsers
-  buildTableQueryFields ::
+  buildTableQueryAndSubscriptionFields ::
     MonadBuildSchema b r m n =>
     SourceInfo b ->
     TableName b ->
     TableInfo b ->
+    StreamingSubscriptionsCtx ->
     GQLNameIdentifier ->
-    m [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
+    m
+      ( [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))],
+        [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
+      )
   buildTableStreamingSubscriptionFields ::
     MonadBuildSchema b r m n =>
     SourceInfo b ->
@@ -241,11 +244,6 @@ class
     TableInfo b ->
     m (Maybe (FieldParser n (AnnotatedField b)))
 
-  -- | The 'node' root field of a Relay request.
-  node ::
-    MonadBuildSchema b r m n =>
-    m (Parser 'Output n (HashMap (TableName b) (SourceName, SourceConfig b, SelPermInfo b, PrimaryKeyColumns b, AnnotatedFields b)))
-
 type ComparisonExp b = OpExpG b (UnpreparedValue b)
 
 -- $modelling
@@ -266,7 +264,7 @@ type ComparisonExp b = OpExpG b (UnpreparedValue b)
 -- The chain of functions leading to a parser for this RootField will be along
 -- the lines of:
 --
--- > > BackendSchema.buildTableQueryFields     (Suggested default its GSB namesake)
+-- > > BackendSchema.buildTableQueryAndSubscriptionFields     (Suggested default its GSB namesake)
 -- >   > GSS.selectTable
 -- >     > BackendSchema.tableArguments        (Suggested default implementation being
 -- >                                            GSS.defaultTableArgs)
@@ -301,8 +299,8 @@ type ComparisonExp b = OpExpG b (UnpreparedValue b)
 --
 -- We should break up / refactor the building blocks (in
 -- "Hasura.GraphQL.Schema.Build" etc.) which are used to implement the top-level
--- type class methods (e.g. @BackendSchema@.'buildTableQueryFields', c.f.
--- @GSB.@'Hasura.GraphQL.Schema.Build.buildTableQueryFields', etc.) and have them
+-- type class methods (e.g. @BackendSchema@.'buildTableQueryAndSubscriptionFields', c.f.
+-- @GSB.@'Hasura.GraphQL.Schema.Build.buildTableQueryAndSubscriptionFields', etc.) and have them
 -- invoke the backend-specific behaviors they rely on via /function arguments/
 -- instead of other type class methods.
 --

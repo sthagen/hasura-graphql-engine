@@ -33,7 +33,6 @@ import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.ComputedField
 import Hasura.RQL.Types.Function
-import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
 import Hasura.RQL.Types.Source (SourceInfo)
 import Hasura.RQL.Types.SourceCustomization (NamingCase)
 import Hasura.RQL.Types.Table
@@ -45,7 +44,7 @@ import Language.GraphQL.Draft.Syntax qualified as G
 
 instance BackendSchema 'BigQuery where
   -- top level parsers
-  buildTableQueryFields = GSB.buildTableQueryFields
+  buildTableQueryAndSubscriptionFields = GSB.buildTableQueryAndSubscriptionFields
   buildTableRelayQueryFields = bqBuildTableRelayQueryFields
   buildTableStreamingSubscriptionFields = GSB.buildTableStreamingSubscriptionFields
   buildTableInsertMutationFields = bqBuildTableInsertMutationFields
@@ -71,7 +70,6 @@ instance BackendSchema 'BigQuery where
   countTypeInput = bqCountTypeInput
   aggregateOrderByCountType = BigQuery.IntegerScalarType
   computedField = bqComputedField
-  node = bqNode
 
 ----------------------------------------------------------------
 -- Top level parsers
@@ -404,7 +402,7 @@ bqComputedField ::
   TableName 'BigQuery ->
   TableInfo 'BigQuery ->
   m (Maybe (FieldParser n (AnnotatedField 'BigQuery)))
-bqComputedField sourceName ComputedFieldInfo {..} tableName _tableInfo = runMaybeT do
+bqComputedField sourceName ComputedFieldInfo {..} tableName tableInfo = runMaybeT do
   stringifyNum <- retrieve soStringifyNum
   fieldName <- lift $ textToName $ computedFieldNameToText _cfiName
   functionArgsParser <- lift $ computedFieldFunctionArgs _cfiFunction
@@ -428,6 +426,9 @@ bqComputedField sourceName ComputedFieldInfo {..} tableName _tableInfo = runMayb
                     IR._asnStrfyNum = stringifyNum
                   }
     BigQuery.ReturnTableSchema returnFields -> do
+      -- Check if the computed field is available in the select permission
+      selectPermissions <- MaybeT $ tableSelectPermissions tableInfo
+      guard $ Map.member _cfiName $ spiComputedFields selectPermissions
       objectTypeName <-
         P.mkTypename =<< do
           computedFieldGQLName <- textToName $ computedFieldNameToText _cfiName
@@ -475,7 +476,6 @@ bqComputedField sourceName ComputedFieldInfo {..} tableName _tableInfo = runMayb
 
       objectName <-
         P.mkTypename =<< do
-          tableInfo <- askTableInfo sourceName tableName
           computedFieldGQLName <- textToName $ computedFieldNameToText _cfiName
           tableGQLName <- getTableGQLName @'BigQuery tableInfo
           pure $ computedFieldGQLName <> G.__ <> tableGQLName <> G.__args
@@ -509,24 +509,3 @@ bqRemoteRelationshipField ::
   m (Maybe [FieldParser n (AnnotatedField 'BigQuery)])
 bqRemoteRelationshipField _remoteFieldInfo = pure Nothing
 -}
-
--- | The 'node' root field of a Relay request. Relay is currently unsupported on BigQuery,
--- meaning this parser will never be called: any attempt to create this parser should
--- therefore fail.
-bqNode ::
-  MonadBuildSchema 'BigQuery r m n =>
-  m
-    ( Parser
-        'Output
-        n
-        ( HashMap
-            (TableName 'BigQuery)
-            ( SourceName,
-              SourceConfig 'BigQuery,
-              SelPermInfo 'BigQuery,
-              PrimaryKeyColumns 'BigQuery,
-              AnnotatedFields 'BigQuery
-            )
-        )
-    )
-bqNode = throw500 "BigQuery does not support relay; `node` should never be exposed in the schema."

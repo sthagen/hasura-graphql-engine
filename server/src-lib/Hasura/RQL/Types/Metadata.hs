@@ -1041,14 +1041,16 @@ metadataToOrdJSON
             selPermDefToOrdJSON :: Backend b => SelPermDef b -> AO.Value
             selPermDefToOrdJSON = permDefToOrdJSON selPermToOrdJSON
               where
-                selPermToOrdJSON (SelPerm columns fltr limit allowAgg computedFieldsPerm) =
+                selPermToOrdJSON (SelPerm columns fltr limit allowAgg computedFieldsPerm allowedQueryRootFieldTypes allowedSubscriptionRootFieldTypes) =
                   AO.object $
                     catMaybes
                       [ columnsPair,
                         computedFieldsPermPair,
                         filterPair,
                         limitPair,
-                        allowAggPair
+                        allowAggPair,
+                        allowedQueryRootFieldsPair,
+                        allowedSubscriptionRootFieldsPair
                       ]
                   where
                     columnsPair = Just ("columns", AO.toOrdered columns)
@@ -1059,6 +1061,16 @@ metadataToOrdJSON
                       if allowAgg
                         then Just ("allow_aggregations", AO.toOrdered allowAgg)
                         else Nothing
+                    allowedQueryRootFieldsPair =
+                      case allowedQueryRootFieldTypes of
+                        ARFAllowAllRootFields -> Nothing
+                        ARFAllowConfiguredRootFields configuredRootFields ->
+                          Just ("query_root_fields", AO.toOrdered configuredRootFields)
+                    allowedSubscriptionRootFieldsPair =
+                      case allowedSubscriptionRootFieldTypes of
+                        ARFAllowAllRootFields -> Nothing
+                        ARFAllowConfiguredRootFields configuredRootFields ->
+                          Just ("subscription_root_fields", AO.toOrdered configuredRootFields)
 
             updPermDefToOrdJSON :: forall b. Backend b => UpdPermDef b -> AO.Value
             updPermDefToOrdJSON = permDefToOrdJSON updPermToOrdJSON
@@ -1201,10 +1213,10 @@ metadataToOrdJSON
       customTypesToOrdJSON :: CustomTypes -> AO.Value
       customTypesToOrdJSON (CustomTypes inpObjs objs scalars enums) =
         AO.object . catMaybes $
-          [ listToMaybeOrdPair "input_objects" inputObjectToOrdJSON =<< inpObjs,
-            listToMaybeOrdPair "objects" objectTypeToOrdJSON =<< objs,
-            listToMaybeOrdPair "scalars" scalarTypeToOrdJSON =<< scalars,
-            listToMaybeOrdPair "enums" enumTypeToOrdJSON =<< enums
+          [ listToMaybeOrdPair "input_objects" inputObjectToOrdJSON inpObjs,
+            listToMaybeOrdPair "objects" objectTypeToOrdJSON objs,
+            listToMaybeOrdPair "scalars" scalarTypeToOrdJSON scalars,
+            listToMaybeOrdPair "enums" enumTypeToOrdJSON enums
           ]
         where
           inputObjectToOrdJSON :: InputObjectTypeDefinition -> AO.Value
@@ -1231,7 +1243,7 @@ metadataToOrdJSON
               ]
                 <> catMaybes
                   [ maybeDescriptionToMaybeOrdPair descM,
-                    maybeAnyToMaybeOrdPair "relationships" AO.toOrdered rels
+                    listToMaybeOrdPair "relationships" AO.toOrdered rels
                   ]
             where
               fieldDefinitionToOrdJSON :: ObjectFieldDefinition GraphQLType -> AO.Value
