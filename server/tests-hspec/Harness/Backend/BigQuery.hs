@@ -21,6 +21,8 @@ module Harness.Backend.BigQuery
     setupWithAdditionalRelationship,
     teardown,
     teardownWithAdditionalRelationship,
+    setupTablesAction,
+    setupPermissionsAction,
   )
 where
 
@@ -30,6 +32,7 @@ import Data.Aeson
     object,
     (.=),
   )
+import Data.Aeson.Key qualified as K
 import Data.Foldable (for_)
 import Data.String
 import Data.Text (Text, pack, replace)
@@ -44,9 +47,9 @@ import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
 import Harness.Test.Context
   ( BackendType (BigQuery),
-    defaultBackendTypeString,
-    defaultSource,
   )
+import Harness.Test.Fixture
+import Harness.Test.Permissions qualified as Permissions
 import Harness.Test.Schema
   ( BackendScalarType (..),
     BackendScalarValue (..),
@@ -367,7 +370,7 @@ trackArrayRelationships backend Table {tableName, tableReferences} testEnvironme
                     "name" .= String referenceTargetTable
                   ],
               "column_mapping"
-                .= object [referenceLocalColumn .= referenceTargetColumn]
+                .= object [K.fromText referenceLocalColumn .= referenceTargetColumn]
             ]
         payload =
           [yaml|
@@ -402,7 +405,7 @@ trackObjectRelationships backend Table {tableName, tableReferences} testEnvironm
                     "name" .= String referenceTargetTable
                   ],
               "column_mapping"
-                .= object [referenceLocalColumn .= referenceTargetColumn]
+                .= object [K.fromText referenceLocalColumn .= referenceTargetColumn]
             ]
         payload =
           [yaml|
@@ -455,3 +458,23 @@ args:
     name: *tableName
   relationship: *objectRelationshipName
 |]
+
+setupTablesAction :: [Schema.Table] -> TestEnvironment -> SetupAction
+setupTablesAction ts env =
+  SetupAction
+    (setup ts (env, ()))
+    (const $ teardown ts (env, ()))
+
+setupPermissionsAction :: [Permissions.Permission] -> TestEnvironment -> SetupAction
+setupPermissionsAction permissions env =
+  SetupAction
+    (setupPermissions permissions env)
+    (const $ teardownPermissions permissions env)
+
+-- | Setup the given permissions to the graphql engine in a TestEnvironment.
+setupPermissions :: [Permissions.Permission] -> TestEnvironment -> IO ()
+setupPermissions permissions env = Permissions.setup "bq" permissions env
+
+-- | Remove the given permissions from the graphql engine in a TestEnvironment.
+teardownPermissions :: [Permissions.Permission] -> TestEnvironment -> IO ()
+teardownPermissions permissions env = Permissions.teardown "bq" permissions env

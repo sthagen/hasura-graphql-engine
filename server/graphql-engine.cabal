@@ -202,7 +202,6 @@ library
                      , dc-api
                      , free
                      , hashable
-                     , hashable-time
                      , http-client-tls
                      , http-conduit
                      , http-media
@@ -251,7 +250,6 @@ library
                      , vector-instances
                      , wai
                      , witch
-                     , hashable-time
 
                      -- Encoder related
                      , uuid
@@ -395,6 +393,7 @@ library
                      , Control.Monad.Trans.Managed
                      , Control.Monad.Unique
                      , Data.Aeson.Extended
+                     , Data.Aeson.KeyMap.Extended
                      , Data.Aeson.Ordered
                      , Data.Environment
                      , Data.HashMap.Strict.Extended
@@ -1100,6 +1099,7 @@ test-suite tests-hspec
   other-modules:
     SpecHook
 
+
  -- Harness
     Harness.Constants
     Harness.Env
@@ -1122,7 +1122,11 @@ test-suite tests-hspec
  -- Harness.Test
     Harness.Test.BackendType
     Harness.Test.Context
+    Harness.Test.Fixture
+    Harness.Test.Hspec.Extended
+    Harness.Test.Introspection
     Harness.Test.Schema
+    Harness.Test.Permissions
 
  -- Harness.Quoter
     Harness.Quoter.Graphql
@@ -1135,13 +1139,14 @@ test-suite tests-hspec
     Test.BackendOnlyPermissionsSpec
     Test.ColumnPresetsSpec
     Test.CustomFieldNamesSpec
-    Test.DirectivesSpec
     Test.DC.QuerySpec
+    Test.DirectivesSpec
     Test.EventTriggersRunSQLSpec
     Test.HelloWorldSpec
     Test.InsertCheckPermissionSpec
     Test.InsertDefaultsSpec
     Test.InsertEnumColumnSpec
+    Test.InsertOnConflictSpec
     Test.LimitOffsetSpec
     Test.NestedRelationshipsSpec
     Test.ObjectRelationshipsLimitSpec

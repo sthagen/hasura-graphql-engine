@@ -117,7 +117,9 @@ LEFT JOIN LATERAL
 -- primary key
 LEFT JOIN LATERAL
   ( SELECT jsonb_build_object(
-      'constraint', jsonb_build_object('name', class.relname, 'oid', class.oid :: integer),
+      'constraint', jsonb_build_object(
+        'name', class.relname,
+        'oid', class.oid :: integer),
       'columns', coalesce(columns.info, '[]')
     ) AS info
     FROM pg_catalog.pg_index index
@@ -135,10 +137,24 @@ LEFT JOIN LATERAL
 
 -- unique constraints
 LEFT JOIN LATERAL
-  ( SELECT jsonb_agg(jsonb_build_object('name', class.relname, 'oid', class.oid :: integer)) AS info
+  ( SELECT jsonb_agg(
+      jsonb_build_object(
+        'constraint', jsonb_build_object(
+          'name', class.relname,
+          'oid', class.oid :: integer
+          ),
+        'columns', columns.info
+        )
+      ) AS info
     FROM pg_catalog.pg_index index
     JOIN pg_catalog.pg_class class
       ON class.oid = index.indexrelid
+    LEFT JOIN LATERAL
+      ( SELECT jsonb_agg("column".attname) AS info
+        FROM pg_catalog.pg_attribute "column"
+        WHERE "column".attrelid = "table".oid
+          AND "column".attnum = ANY (index.indkey)
+      ) AS columns ON true
     WHERE index.indrelid = "table".oid
       AND index.indisunique
       AND NOT index.indisprimary
@@ -213,5 +229,5 @@ LEFT JOIN LATERAL
 -- all these identify table-like things
 WHERE "table".relkind IN ('r', 't', 'v', 'm', 'f', 'p')
   -- and tables not from any system schemas
-  AND "table".table_schema NOT LIKE 'pg_%'
+  AND "table".table_schema NOT LIKE 'pg\_%'
   AND "table".table_schema NOT IN ('information_schema', 'hdb_catalog');
