@@ -2,12 +2,24 @@
 
 ## Next release
 
+### Event Triggers for MS SQL Server 
+
+(closes https://github.com/hasura/graphql-engine/issues/7228)
+Event Triggers support has been added for MS SQL Server. Now, you can invoke external webhooks on insert/update/delete events on your MS SQL Server tables. See the [docs](https://hasura.io/docs/latest/graphql/core/event-triggers/index/) for more details.
+
 ### Bug fixes and improvements
 
+- server: support limit in BigQuery computed fields (fix #8562)
+- server: extend telemetry to handle multiple sources
 - console: allow schemas prefixed with `pg`, but not `pg_` (fix #8435)
 - console: add support for computed fields with session arg in permission builder (fix #8321)
+- console: add GraphQL field customization for new database connections (root fields namespace, prefix, and suffix, and type names prefix and suffix)
+- console: add support for mssql event triggers
+- cli: fix perfomance regression with large metadata in `metadata apply`
+- cli: fix error reporting in `metadata apply` command (#8280)
+- server: query runtime performance optimizations
 
-## v2.8.0-beta.1
+## v2.8.0
 
 ### Disabling query/subscription root fields 
 
@@ -63,7 +75,7 @@ Note that console support for this permission will be released later.
 ### Introducing naming conventions (experimental)
 
 Now, users can specify the naming convention of the auto-generated names in the HGE.
-This is an experimental feature and is supported for postgres databases only for now. There are two naming
+This is an experimental feature (enabled by setting `HASURA_GRAPHQL_EXPERIMENTAL_FEATURES: naming_convention`) and is supported for postgres databases only for now. There are two naming
 conventions possible:
 | Naming Convention | Field names | Type names  | Arguments  | Enum values |
 |-------------------|-------------|-------------|------------|-------------|
@@ -161,8 +173,174 @@ is `graphql-default`, the field names generated will be `my_table`, `my_tableByP
 
 ### Bug fixes and improvements
 
+- server: fix create event trigger failure for MSSQL sources on a table with a table name that is a reserved MSSQL keyword.
 - server: errors from `/healthz` endpoint are now logged with more details
-- server: do not expand environment variable references in logs or API responses from remote schemas, actions and event triggers for security reasons (fix #3935)
+- server: do not expand environment variable references in logs or API responses from remote schemas, actions and event triggers for security reasons
+- server: introduce [backend_only permissions](https://hasura.io/docs/latest/graphql/core/auth/authorization/permission-rules/#backend-only-permissions) for update and delete mutations (fix #5275)
+- server: add support for scalar array response type in actions
+- server: add support for table computed fields in bigquery backends
+- server: fix failure when executing consecutive delete mutations on mssql (#8462)
+- server: bugfix: insertion of multiple empty objects should result in multiple entries (#8475)
+- server: allow schemas prefixed with `pg`, but not `pg_` (fix hasura/graphql-engine#8435)
+- console: add support for application/x-www-form-urlencoded in rest connectors (#8097)
+- server: restore the ability to do no-op upserts (#8260).
+
+## v2.8.0-beta.1
+
+### Disabling query/subscription root fields
+
+When a table is tracked in graphql-engine, three root fields are generated automatically
+namely `<table>`, `<table>_by_pk` and `<table>_aggregate` in the `query` and the `subscription`
+root. You can now control which root fields are exposed for a given role by specifying them in the select permission.
+
+The main use-case for this feature is to disable APIs that access the table directly but which still need to be tracked so that:
+
+1. It can be accessed via a relationship to another table
+2. It can be used in select permissions for another table via a relationship
+
+For such use-cases, we can disable all the root fields of the given table. This can be done by setting the select permission as follows:
+
+```json
+{
+   "role": "user",
+   "permission": {
+     "columns": [
+       "id",
+       "name"
+     ],
+     "filter": {},
+     "allow_aggregations": true,
+     "query_root_fields": [],
+     "subscription_root_fields": []
+   }
+ }
+```
+
+Another use-case is to allow a role to directly access a table only
+if it has access to the primary key value. This can be done by setting the select permission as follows:
+
+```json
+{
+   "role": "user",
+   "permission": {
+     "columns": [
+       "id",
+       "name"
+     ],
+     "filter": {},
+     "allow_aggregations": false,
+     "query_root_fields": ["select_by_pk"],
+     "subscription_root_fields": ["select_by_pk"]
+   }
+ }
+```
+
+Note that console support for this permission will be released later.
+
+
+### Introducing naming conventions (experimental)
+
+Now, users can specify the naming convention of the auto-generated names in the HGE.
+This is an experimental feature and is supported for postgres databases only for now. There are two naming
+conventions possible:
+| Naming Convention | Field names | Type names  | Arguments  | Enum values |
+|-------------------|-------------|-------------|------------|-------------|
+| `hasura-default`  | Snake case  | Snake case  | Snake case | as defined  |
+| `graphql-default` | Camel case  | Pascal case | Camel case | Uppercased  |
+
+Suppose there is a table called `my_table` and it has columns `id`, `date_of_birth`, `last_seen`, then with
+`graphql-default` naming convention we will get the following auto-generated API:
+
+```
+query {
+  myTable(orderBy: {dateOfBirth: asc}, limit: 10) {
+    id
+    dateOfBirth
+    lastSeen
+  }
+}
+```
+
+
+To configure the naming convention for a source, set the naming convention in source
+customisation while adding the source:
+
+```JSON
+{
+  "resource_version": 2,
+  "metadata": {
+    "version": 1,
+    "sources": [
+      {
+        "name": "default",
+        "kind": "postgres",
+        "tables": [],
+        "configuration": {},
+        "customization": {
+          "naming_convention": "graphql-default"
+        }
+      }
+    ]
+  }
+}
+```
+
+To set the default naming convention globally,
+use the environment variable `HASURA_GRAPHQL_DEFAULT_NAMING_CONVENTION`.  Note
+that the global default can be overridden by the source customisation setting mentioned above.
+
+Note: Custom field names and custom table names will override the naming convention
+(i.e. if the custom table name is `my_table` and `naming_convention`
+is `graphql-default`, the field names generated will be `my_table`, `my_tableByPk`,
+`my_tableAggregate` and so on).
+
+### Behaviour Changes
+
+- cli: change the ordering used for object fields in metadata files to alphabetical order
+
+  Example:
+  <table>
+     <thead>
+        <tr>
+           <th>Server Metadata (JSON)</th>
+           <th>Old behaviour (YAML)</th>
+           <th>New Behaviour (YAML)</th>
+        </tr>
+     </thead>
+     <tbody>
+        <tr>
+           <td>
+              <pre>
+  {
+    "function": {
+      "schema": "public",
+      "name": "search_albums"
+    }
+  }
+         </pre>
+           </td>
+           <td>
+              <pre>
+  function:
+    schema: public
+    name: search_albums
+        </pre>
+           </td>
+           <td>
+              <pre>
+  function:
+    name: search_albums
+    schema: public
+        </pre>
+           </td>
+        </tr>
+     </tbody>
+  </table>
+
+### Bug fixes and improvements
+
+- server: errors from `/healthz` endpoint are now logged with more details
+- server: do not expand environment variable references in logs or API responses from remote schemas, actions and event triggers for security reasons
 - server: introduce [backend_only permissions](https://hasura.io/docs/latest/graphql/core/auth/authorization/permission-rules/#backend-only-permissions) for update and delete mutations (fix #5275)
 - server: add support for scalar array response type in actions
 - server: add support for table computed fields in bigquery backends

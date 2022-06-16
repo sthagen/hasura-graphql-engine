@@ -2,14 +2,13 @@
 module Hasura.GraphQL.Parser.Monad
   ( SchemaT,
     runSchemaT,
-    ParseT,
-    runParseT,
+    Parse,
+    runParse,
     ParseError (..),
-    reportParseErrors,
   )
 where
 
-import Control.Monad.Validate
+import Control.Monad.Except
 import Data.Dependent.Map (DMap)
 import Data.Dependent.Map qualified as DM
 import Data.GADT.Compare.Extended
@@ -17,7 +16,6 @@ import Data.IORef
 import Data.Kind qualified as K
 import Data.Parser.JSONPath
 import Data.Proxy (Proxy (..))
-import Data.Sequence.NonEmpty qualified as NE
 import Hasura.Base.Error
 import Hasura.GraphQL.Parser.Class
 import Hasura.Prelude
@@ -162,28 +160,25 @@ newtype instance ParserById m '(p, a) = ParserById (p m a)
 -- -------------------------------------------------------------------------------------------------
 -- query parsing
 
-newtype ParseT m a = ParseT
-  { unParseT :: ReaderT JSONPath (ValidateT (NESeq ParseError) m) a
+newtype Parse a = Parse
+  { unParse :: ReaderT JSONPath (Except ParseError) a
   }
   deriving (Functor, Applicative, Monad)
 
-runParseT ::
-  Functor m =>
-  ParseT m a ->
-  m (Either (NESeq ParseError) a)
-runParseT =
-  unParseT
-    >>> flip runReaderT []
-    >>> runValidateT
+runParse ::
+  MonadError QErr m =>
+  Parse a ->
+  m a
+runParse parse =
+  onLeft
+    (runExcept <<< flip runReaderT [] <<< unParse $ parse)
+    reportParseErrors
 
-instance MonadTrans ParseT where
-  lift = ParseT . lift . lift
-
-instance Monad m => MonadParse (ParseT m) where
-  withPath f x = ParseT $ withReaderT f $ unParseT x
-  parseErrorWith code text = ParseT $ do
+instance MonadParse Parse where
+  withPath f x = Parse $ withReaderT f $ unParse x
+  parseErrorWith code text = Parse $ do
     path <- ask
-    lift $ refute $ NE.singleton ParseError {peCode = code, pePath = path, peMessage = text}
+    lift $ throwError $ ParseError {peCode = code, pePath = path, peMessage = text}
 
 data ParseError = ParseError
   { pePath :: JSONPath,
@@ -193,11 +188,7 @@ data ParseError = ParseError
 
 reportParseErrors ::
   MonadError QErr m =>
-  NESeq ParseError ->
+  ParseError ->
   m a
-reportParseErrors errs = case NE.head errs of
-  -- TODO: Our error reporting machinery doesn’t currently support reporting
-  -- multiple errors at once, so we’re throwing away all but the first one
-  -- here. It would be nice to report all of them!
-  ParseError {pePath, peMessage, peCode} ->
-    throwError (err400 peCode peMessage) {qePath = pePath}
+reportParseErrors (ParseError {pePath, peMessage, peCode}) =
+  throwError (err400 peCode peMessage) {qePath = pePath}

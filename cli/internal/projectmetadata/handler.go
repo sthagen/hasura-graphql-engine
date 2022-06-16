@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"io/ioutil"
 	"os"
 	"path/filepath"
-
-	goyaml "github.com/goccy/go-yaml"
 
 	"github.com/hasura/graphql-engine/cli/v2/internal/metadataobject"
 	"github.com/hasura/graphql-engine/cli/v2/internal/metadatautil"
@@ -117,7 +114,7 @@ func (h *Handler) buildMetadataMap() (map[string]interface{}, error) {
 	for _, object := range h.objects {
 		objectMetadata, err := object.Build()
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
+			if errors.Is(err, metadataobject.ErrMetadataFileNotFound) {
 				h.logger.Debugf("metadata file for %s was not found, assuming an empty file", object.Key())
 				continue
 			}
@@ -322,11 +319,8 @@ func (m Metadata) JSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	jsonbs, err := goyaml.YAMLToJSON(yamlbs)
-	if err != nil {
-		return nil, err
-	}
-	return jsonbs, nil
+
+	return metadatautil.YAMLToJSON(yamlbs)
 }
 
 func (m Metadata) YAML() ([]byte, error) {
