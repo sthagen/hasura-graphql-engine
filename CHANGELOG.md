@@ -4,6 +4,9 @@
 
 ### Bug fixes and improvements
 
+- console: Hide TimescaleDB internal schema from data tab
+- console: support naming convention in source customization for postgres DB [CON-297]
+
 ## v2.9.0-beta.1
 
 ### Event Triggers for MS SQL Server
@@ -13,6 +16,7 @@ Event Triggers support has been added for MS SQL Server. Now, you can invoke ext
 
 ### Bug fixes and improvements
 
+- server: add `*_update_source` API and modify behaviour of `*_add_source` API (See [docs](https://hasura.io/docs/latest/graphql/core/api-reference/metadata-api/source/) )
 - server: support limit in BigQuery computed fields (fix #8562)
 - server: improve GraphQL query parsing time and per-query memory allocation
 - console: allow schemas prefixed with `pg`, but not `pg_` (fix #8435)
@@ -30,7 +34,7 @@ Event Triggers support has been added for MS SQL Server. Now, you can invoke ext
 
 ## v2.8.0
 
-### Disabling query/subscription root fields 
+### Disabling query/subscription root fields
 
 When a table is tracked in graphql-engine, three root fields are generated automatically
 namely `<table>`, `<table>_by_pk` and `<table>_aggregate` in the `query` and the `subscription`
@@ -105,7 +109,7 @@ query {
 ```
 
 
-To configure the naming convention for a source, set the naming convention in source 
+To configure the naming convention for a source, set the naming convention in source
 customisation while adding the source:
 
 ```JSON
@@ -132,7 +136,7 @@ To set the default naming convention globally,
 use the environment variable `HASURA_GRAPHQL_DEFAULT_NAMING_CONVENTION`.  Note
 that the global default can be overridden by the source customisation setting mentioned above.
 
-Note: Custom field names and custom table names will override the naming convention 
+Note: Custom field names and custom table names will override the naming convention
 (i.e. if the custom table name is `my_table` and `naming_convention`
 is `graphql-default`, the field names generated will be `my_table`, `my_tableByPk`,
 `my_tableAggregate` and so on).
@@ -459,6 +463,7 @@ Response 2:
 - server: allow casting most postgres scalar types to strings in comparison expressions (fix #8524)
 - console: add remote database relationships for views
 - console: bug fixes for RS-to-RS relationships
+- console: exclude `_timescaledb_internal` from db introspection sql, for performance reasons ()
 - console: allow users to remove prefix / suffix / root field namespace from a remote schema
 - console: new "add remote schema" page (with GQL customization)
 - console: fix console crash on adding pg sources with connection params through api

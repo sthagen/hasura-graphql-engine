@@ -1,9 +1,9 @@
 import React, { ChangeEvent, Dispatch } from 'react';
 import { FaCheckCircle, FaInfoCircle } from 'react-icons/fa';
+import { ToolTip } from '@/new-components/Tooltip';
 
 import { ConnectDBActions, ConnectDBState, connectionTypes } from './state';
 import { LabeledInput } from '../../../Common/LabeledInput';
-import Tooltip from '../../../Common/Tooltip/Tooltip';
 import { Driver, getSupportedDrivers } from '../../../../dataSources';
 
 import styles from './DataSources.scss';
@@ -12,10 +12,12 @@ import { SupportedFeaturesType } from '../../../../dataSources/types';
 import { Path } from '../../../Common/utils/tsUtils';
 import ConnectionSettingsForm from './ConnectionSettingsForm';
 import { GraphQLFieldCustomizationContainer } from './GraphQLFieldCustomization/GraphQLFieldCustomizationContainer';
+import { SampleDBSection, SampleDBTrial } from './SampleDatabase';
 
 export interface ConnectDatabaseFormProps {
   // Connect DB State Props
   connectionDBState: ConnectDBState;
+  sampleDBTrial?: SampleDBTrial;
   connectionDBStateDispatch: Dispatch<ConnectDBActions>;
   // Connection Type Props - for the Radio buttons
   updateConnectionTypeRadio: (e: ChangeEvent<HTMLInputElement>) => void;
@@ -82,6 +84,7 @@ const supportedDrivers = getSupportedDrivers('connectDbForm.enabled');
 
 const ConnectDatabaseForm: React.FC<ConnectDatabaseFormProps> = ({
   connectionDBState,
+  sampleDBTrial,
   connectionDBStateDispatch,
   changeConnectionType,
   updateConnectionTypeRadio,
@@ -90,6 +93,26 @@ const ConnectDatabaseForm: React.FC<ConnectDatabaseFormProps> = ({
   isEditState = false,
   title,
 }) => {
+  const onSampleDBTry = () => {
+    if (sampleDBTrial && sampleDBTrial.isActive()) {
+      sampleDBTrial.track.tryButton();
+      if (sampleDBTrial.isActive()) {
+        connectionDBStateDispatch({
+          type: 'UPDATE_DISPLAY_NAME',
+          data: 'SampleDB',
+        });
+        connectionDBStateDispatch({
+          type: 'UPDATE_DB_DRIVER',
+          data: 'postgres',
+        });
+        connectionDBStateDispatch({
+          type: 'UPDATE_DB_URL',
+          data: sampleDBTrial.getDatabaseUrl(),
+        });
+      }
+    }
+  };
+
   const isDBSupported = (driver: Driver, connectionType: string) => {
     let ts = 'databaseURL';
     if (connectionType === 'CONNECTION_PARAMETERS') {
@@ -120,6 +143,11 @@ const ConnectDatabaseForm: React.FC<ConnectDatabaseFormProps> = ({
       <div className={styles.connect_form_layout}>
         {!isreadreplica ? (
           <>
+            {sampleDBTrial && sampleDBTrial.isActive() && (
+              <div className="mb-md">
+                <SampleDBSection onTrySampleDB={onSampleDBTry} />
+              </div>
+            )}
             <LabeledInput
               onChange={e =>
                 connectionDBStateDispatch({
@@ -156,10 +184,10 @@ const ConnectDatabaseForm: React.FC<ConnectDatabaseFormProps> = ({
           </>
         ) : null}
         <p
-          className={`${styles.remove_pad_bottom} mb-md ${styles.connect_db_header}`}
+          className={`${styles.remove_pad_bottom} mb-md flex items-center gap-1 ${styles.connect_db_header}`}
         >
           {title ?? defaultTitle}
-          <Tooltip message="Environment variable recommended" />
+          <ToolTip message="Environment variable recommended" />
           <a
             href="https://hasura.io/docs/latest/graphql/cloud/projects/create.html#existing-database"
             target="_blank"
@@ -277,9 +305,11 @@ const ConnectDatabaseForm: React.FC<ConnectDatabaseFormProps> = ({
               />
             ) : (
               <div className={styles.add_mar_bottom_mid}>
-                <div className={styles.add_mar_bottom_mid}>
+                <div
+                  className={`${styles.add_mar_bottom_mid} flex items-center gap-1`}
+                >
                   <b>Service Account Key:</b>
-                  <Tooltip message="Service account key for BigQuery data source" />
+                  <ToolTip message="Service account key for BigQuery data source" />
                 </div>
                 <JSONEditor
                   minLines={5}
@@ -421,7 +451,9 @@ const ConnectDatabaseForm: React.FC<ConnectDatabaseFormProps> = ({
           <GraphQLFieldCustomizationContainer
             rootFields={connectionDBState.customization?.rootFields}
             typeNames={connectionDBState.customization?.typeNames}
+            namingConvention={connectionDBState.customization?.namingConvention}
             connectionDBStateDispatch={connectionDBStateDispatch}
+            connectionDBState={connectionDBState}
           />
         )}
       </div>

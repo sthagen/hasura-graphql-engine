@@ -36,7 +36,7 @@ import Hasura.Base.Error
 import Hasura.EncJSON
 import Hasura.Metadata.Class
 import Hasura.Prelude
-import Hasura.RQL.DDL.CustomTypes (lookupPGScalar)
+import Hasura.RQL.DDL.CustomTypes (lookupBackendScalar)
 import Hasura.RQL.Types.Action
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
@@ -116,7 +116,7 @@ resolveAction ::
   Env.Environment ->
   AnnotatedCustomTypes ->
   ActionDefinitionInput ->
-  BackendMap ScalarSet -> -- See Note [Postgres scalars in custom types]
+  BackendMap ScalarMap -> -- See Note [Postgres scalars in custom types]
   m
     ( ResolvedActionDefinition,
       AnnotatedOutputType
@@ -128,8 +128,8 @@ resolveAction env AnnotatedCustomTypes {..} ActionDefinition {..} allScalars = d
           argumentBaseType = G.getBaseType gType
       (gType,)
         <$> if
-            | Just noCTScalar <- lookupPGScalar allScalars argumentBaseType (NOCTScalar . ASTReusedScalar argumentBaseType) ->
-              pure noCTScalar
+            | Just noCTScalar <- lookupBackendScalar allScalars argumentBaseType ->
+              pure $ NOCTScalar noCTScalar
             | Just nonObjectType <- Map.lookup argumentBaseType _actInputTypes ->
               pure nonObjectType
             | otherwise ->
@@ -143,11 +143,11 @@ resolveAction env AnnotatedCustomTypes {..} ActionDefinition {..} allScalars = d
   outputObject <- do
     aot <-
       if
-          | Just aoTScalar <- lookupPGScalar allScalars outputBaseType (AOTScalar . ASTReusedScalar outputBaseType) -> do
-            pure aoTScalar
+          | Just aoTScalar <- lookupBackendScalar allScalars outputBaseType ->
+            pure $ AOTScalar aoTScalar
           | Just objectType <- Map.lookup outputBaseType _actObjectTypes ->
             pure $ AOTObject objectType
-          | Just (NOCTScalar s) <- Map.lookup outputBaseType _actInputTypes -> do
+          | Just (NOCTScalar s) <- Map.lookup outputBaseType _actInputTypes ->
             pure (AOTScalar s)
           | otherwise ->
             throw400 NotExists ("the type: " <> dquote outputBaseType <> " is not an object or scalar type defined in custom types")
@@ -166,22 +166,22 @@ resolveAction env AnnotatedCustomTypes {..} ActionDefinition {..} allScalars = d
                     AOFTEnum _ -> False
                     AOFTObject _ -> True
               )
-              (_otdFields $ _aotDefinition aot')
+              (_aotFields aot')
           AOTScalar _ -> ([], [])
         scalarOrEnumFieldNames = fmap (\ObjectFieldDefinition {..} -> unObjectFieldName _ofdName) scalarOrEnumFields
         validateSyncAction = case aot of
           AOTObject aot' -> do
             let relationshipsWithNonTopLevelFields =
                   filter
-                    ( \TypeRelationship {..} ->
-                        let objsInRel = unObjectFieldName <$> Map.keys _trFieldMapping
+                    ( \AnnotatedTypeRelationship {..} ->
+                        let objsInRel = unObjectFieldName <$> Map.keys _atrFieldMapping
                          in not $ all (`elem` scalarOrEnumFieldNames) objsInRel
                     )
-                    (_otdRelationships $ _aotDefinition aot')
+                    (_aotRelationships aot')
             unless (null relationshipsWithNonTopLevelFields) $
               throw400 ConstraintError $
                 "Relationships cannot be defined with nested object fields : "
-                  <> commaSeparated (dquote . _trName <$> relationshipsWithNonTopLevelFields)
+                  <> commaSeparated (dquote . _atrName <$> relationshipsWithNonTopLevelFields)
           AOTScalar _ -> pure ()
     case _adType of
       ActionQuery -> validateSyncAction
@@ -189,7 +189,7 @@ resolveAction env AnnotatedCustomTypes {..} ActionDefinition {..} allScalars = d
       ActionMutation ActionAsynchronous -> case aot of
         AOTScalar _ -> pure ()
         AOTObject aot' ->
-          unless (null (_otdRelationships $ _aotDefinition aot') || null nestedObjects) $
+          unless (null (_aotRelationships aot') || null nestedObjects) $
             throw400 ConstraintError $ "Async action relations cannot be used with object fields : " <> commaSeparated (dquote . _ofdName <$> nestedObjects)
     pure aot
   resolvedWebhook <- resolveWebhook env _adHandler

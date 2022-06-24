@@ -329,27 +329,6 @@ export const createActionTransform = () => {
   cy.getBySel('action-timeout-seconds').should('have.value', '25');
 };
 
-export const modifyActionTransform = () => {
-  cy.visit('/actions/manage/login/modify');
-  cy.url({ timeout: AWAIT_LONG }).should(
-    'eq',
-    `${baseUrl}/actions/manage/login/modify`
-  );
-  cy.getBySel('transform-GET').click();
-  cy.getBySel('transform-requestUrl')
-    .clear()
-    .type('/{{$body.action.name}}/actions', {
-      parseSpecialCharSequences: false,
-    });
-  cy.getBySel('transform-query-params-kv-remove-button-0').click();
-  togglePayloadTransformSection();
-
-  cy.getBySel('save-modify-action-changes').click();
-  cy.get('.notification', { timeout: AWAIT_LONG })
-    .should('be.visible')
-    .and('contain', 'Action saved successfully');
-};
-
 export const deleteActionTransform = () => deleteAction('login');
 
 const createV1ActionTransform = (actionName: string) => {

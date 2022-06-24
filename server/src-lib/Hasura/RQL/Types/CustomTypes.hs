@@ -14,7 +14,6 @@ module Hasura.RQL.Types.CustomTypes
     InputObjectTypeName (..),
     InputObjectFieldDefinition (..),
     InputObjectFieldName (..),
-    ObjectType,
     ObjectTypeDefinition (..),
     ObjectTypeName (..),
     ObjectFieldDefinition (..),
@@ -26,13 +25,13 @@ module Hasura.RQL.Types.CustomTypes
     EnumValueDefinition (..),
 
     -- ** Relationships
-    TypeRelationship (..),
+    TypeRelationshipDefinition (..),
     RelationshipName (..),
-    trName,
-    trType,
-    trSource,
-    trRemoteTable,
-    trFieldMapping,
+    trdName,
+    trdType,
+    trdSource,
+    trdRemoteTable,
+    trdFieldMapping,
 
     -- * Schema cache
     AnnotatedCustomTypes (..),
@@ -40,25 +39,28 @@ module Hasura.RQL.Types.CustomTypes
     AnnotatedOutputType (..),
     AnnotatedObjectType (..),
     AnnotatedObjectFieldType (..),
+    AnnotatedTypeRelationship (..),
     AnnotatedScalarType (..),
-    fieldTypeToScalarType,
+    ScalarWrapper (..),
   )
 where
 
 import Control.Lens.TH (makeLenses)
-import Data.Aeson ((.!=), (.:), (.:?))
+import Data.Aeson ((.!=), (.:), (.:?), (.=))
 import Data.Aeson qualified as J
 import Data.Aeson.TH qualified as J
 import Data.Text qualified as T
 import Data.Text.Extended (ToTxt (..))
 import Hasura.Backends.Postgres.Instances.Types ()
-import Hasura.Backends.Postgres.SQL.Types
+import Hasura.Backends.Postgres.SQL.Types qualified as PG
 import Hasura.Incremental (Cacheable)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
+import Hasura.SQL.AnyBackend
 import Hasura.SQL.Backend
 import Language.GraphQL.Draft.Parser qualified as GParse
 import Language.GraphQL.Draft.Printer qualified as GPrint
@@ -105,7 +107,7 @@ isInBuiltScalar s
 -- | A set of custom GraphQL types, sorted by "kind".
 data CustomTypes = CustomTypes
   { _ctInputObjects :: [InputObjectTypeDefinition],
-    _ctObjects :: [ObjectType],
+    _ctObjects :: [ObjectTypeDefinition],
     _ctScalars :: [ScalarTypeDefinition],
     _ctEnums :: [EnumTypeDefinition]
   }
@@ -161,24 +163,19 @@ newtype InputObjectFieldName = InputObjectFieldName {unInputObjectFieldName :: G
 --------------------------------------------------------------------------------
 -- Custom objects
 
--- | TODO: remove this, either by specializing 'ObjectTypeDefinition', or by
--- moving the ties to Postgres outside of this module.
-type ObjectType =
-  ObjectTypeDefinition GraphQLType QualifiedTable PGCol
-
-data ObjectTypeDefinition field remoteTable remoteField = ObjectTypeDefinition
+data ObjectTypeDefinition = ObjectTypeDefinition
   { _otdName :: ObjectTypeName,
     _otdDescription :: Maybe G.Description,
-    _otdFields :: NonEmpty (ObjectFieldDefinition field),
-    _otdRelationships :: [TypeRelationship remoteTable remoteField]
+    _otdFields :: NonEmpty (ObjectFieldDefinition GraphQLType),
+    _otdRelationships :: [TypeRelationshipDefinition]
   }
   deriving (Show, Eq, Generic)
 
-instance (NFData field, NFData remoteTable, NFData remoteField) => NFData (ObjectTypeDefinition field remoteTable remoteField)
+instance NFData ObjectTypeDefinition
 
-instance (Cacheable field, Cacheable remoteTable, Cacheable remoteField) => Cacheable (ObjectTypeDefinition field remoteTable remoteField)
+instance Cacheable ObjectTypeDefinition
 
-instance (J.FromJSON a, J.FromJSON b, J.FromJSON c) => J.FromJSON (ObjectTypeDefinition a b c) where
+instance J.FromJSON ObjectTypeDefinition where
   parseJSON = J.withObject "ObjectTypeDefinition" \o ->
     ObjectTypeDefinition
       <$> (o .: "name")
@@ -257,28 +254,35 @@ instance Cacheable EnumValueDefinition
 --------------------------------------------------------------------------------
 -- Relationships
 
-data TypeRelationship table field = TypeRelationship
-  { _trName :: RelationshipName,
-    _trType :: RelType,
+data TypeRelationshipDefinition = TypeRelationshipDefinition
+  { _trdName :: RelationshipName,
+    _trdType :: RelType,
     -- TODO: replace this with RemoteRelationshipDefinition?
-    _trSource :: SourceName,
-    _trRemoteTable :: table,
-    _trFieldMapping :: HashMap ObjectFieldName field
+    -- As of now, we can't yet generalize this, due to the way async action
+    -- queries' joins are implemented in GraphQL.Execute.Action (with an ad-hoc
+    -- temporary table on postgres). If we are willing to change the way joins
+    -- are performed, then we can replace this PG-specific code with the new and
+    -- fancy generalized remote relationship code.
+    _trdSource :: SourceName,
+    _trdRemoteTable :: PG.QualifiedTable,
+    _trdFieldMapping :: HashMap ObjectFieldName PG.PGCol
   }
   deriving (Show, Eq, Generic)
 
-instance (NFData t, NFData f) => NFData (TypeRelationship t f)
+instance NFData TypeRelationshipDefinition
 
-instance (Cacheable t, Cacheable f) => Cacheable (TypeRelationship t f)
+instance Cacheable TypeRelationshipDefinition
 
-instance (J.FromJSON t, J.FromJSON f) => J.FromJSON (TypeRelationship t f) where
-  parseJSON = J.withObject "Object" $ \o ->
-    TypeRelationship <$> o .: "name"
+instance J.FromJSON TypeRelationshipDefinition where
+  parseJSON = J.withObject "TypeRelationshipDefinition" $ \o ->
+    TypeRelationshipDefinition
+      <$> o .: "name"
       <*> o .: "type"
       <*> o .:? "source" .!= defaultSource
       <*> o .: "remote_table"
       <*> o .: "field_mapping"
 
+-- | TODO: deduplicate this in favour of RelName
 newtype RelationshipName = RelationshipName {unRelationshipName :: G.Name}
   deriving (Show, Eq, Ord, Hashable, J.FromJSON, J.ToJSON, ToTxt, Generic, NFData, Cacheable)
 
@@ -308,44 +312,53 @@ data AnnotatedInputType
 
 data AnnotatedScalarType
   = ASTCustom ScalarTypeDefinition
-  | ASTReusedScalar G.Name (ScalarType ('Postgres 'Vanilla))
+  | ASTReusedScalar G.Name (AnyBackend ScalarWrapper)
   deriving (Eq, Generic)
+
+instance J.ToJSON AnnotatedScalarType where
+  toJSON = \case
+    ASTCustom std ->
+      J.object ["tag" .= J.String "ASTCustom", "contents" .= J.toJSON std]
+    -- warning: can't be parsed back, as it does not include the
+    -- backend-specific scalar information.
+    ASTReusedScalar name _scalar ->
+      J.object ["tag" .= J.String "ASTReusedScalar", "contents" .= J.toJSON name]
+
+newtype ScalarWrapper b = ScalarWrapper {unwrapScalar :: (ScalarType b)}
+
+deriving instance (Backend b) => Eq (ScalarWrapper b)
 
 data AnnotatedOutputType
   = AOTObject AnnotatedObjectType
   | AOTScalar AnnotatedScalarType
   deriving (Generic)
 
--- TODO: replace this with equivalent code from RemoteRelationship.
 data AnnotatedObjectType = AnnotatedObjectType
-  { _aotDefinition :: ObjectTypeDefinition (G.GType, AnnotatedObjectFieldType) (TableInfo ('Postgres 'Vanilla)) (ColumnInfo ('Postgres 'Vanilla)),
-    _aotSource :: Maybe (SourceName, SourceConfig ('Postgres 'Vanilla))
+  { _aotName :: ObjectTypeName,
+    _aotDescription :: Maybe G.Description,
+    _aotFields :: NonEmpty (ObjectFieldDefinition (G.GType, AnnotatedObjectFieldType)),
+    _aotRelationships :: [AnnotatedTypeRelationship]
   }
   deriving (Generic)
 
 data AnnotatedObjectFieldType
-  = AOFTScalar !AnnotatedScalarType
-  | AOFTEnum !EnumTypeDefinition
-  | AOFTObject !G.Name
+  = AOFTScalar AnnotatedScalarType
+  | AOFTEnum EnumTypeDefinition
+  | AOFTObject G.Name
   deriving (Generic)
 
--- FIXME: why is this required, and why is it here?
-fieldTypeToScalarType :: AnnotatedObjectFieldType -> PGScalarType
-fieldTypeToScalarType = \case
-  AOFTEnum _ -> PGText
-  AOFTScalar annotatedScalar -> annotatedScalarToPgScalar annotatedScalar
-  AOFTObject _ -> PGJSON
-  where
-    annotatedScalarToPgScalar = \case
-      ASTReusedScalar _ scalarType -> scalarType
-      ASTCustom ScalarTypeDefinition {..} ->
-        if
-            | _stdName == idScalar -> PGText
-            | _stdName == intScalar -> PGInteger
-            | _stdName == floatScalar -> PGFloat
-            | _stdName == stringScalar -> PGText
-            | _stdName == boolScalar -> PGBoolean
-            | otherwise -> PGJSON
+-- TODO: deduplicate this with 'RemoteSourceFieldInfo'
+data AnnotatedTypeRelationship = AnnotatedTypeRelationship
+  { _atrName :: RelationshipName,
+    _atrType :: RelType,
+    _atrSource :: SourceName,
+    _atrSourceConfig :: SourceConfig ('Postgres 'Vanilla),
+    _atrSourceCustomization :: SourceTypeCustomization,
+    -- TODO: see comment in 'TypeRelationship'
+    _atrTableInfo :: TableInfo ('Postgres 'Vanilla),
+    _atrFieldMapping :: HashMap ObjectFieldName (ColumnInfo ('Postgres 'Vanilla))
+  }
+  deriving (Generic)
 
 -------------------------------------------------------------------------------
 -- Template haskell derivation
@@ -359,11 +372,11 @@ $(J.deriveJSON hasuraJSON ''EnumValueDefinition)
 
 $(J.deriveToJSON hasuraJSON ''CustomTypes)
 $(J.deriveToJSON hasuraJSON ''ObjectTypeDefinition)
-$(J.deriveToJSON hasuraJSON ''TypeRelationship)
+$(J.deriveToJSON hasuraJSON ''TypeRelationshipDefinition)
 $(J.deriveToJSON hasuraJSON ''AnnotatedInputType)
-$(J.deriveToJSON hasuraJSON ''AnnotatedScalarType)
 $(J.deriveToJSON hasuraJSON ''AnnotatedOutputType)
 $(J.deriveToJSON hasuraJSON ''AnnotatedObjectType)
 $(J.deriveToJSON hasuraJSON ''AnnotatedObjectFieldType)
+$(J.deriveToJSON hasuraJSON ''AnnotatedTypeRelationship)
 
-$(makeLenses ''TypeRelationship)
+$(makeLenses ''TypeRelationshipDefinition)

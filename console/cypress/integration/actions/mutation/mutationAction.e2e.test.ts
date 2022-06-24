@@ -17,12 +17,12 @@ if (testMode !== 'cli') {
     after(() => {
       // Cleanup after the whole test file run
 
-      // Endure the application is not there when manually deleting the created action to avoid any
+      // Ensure the application is not there when manually deleting the created action to avoid any
       // potential client-side error that makes the test fail
       cy.visitEmptyPage();
 
       // Delete the created action, if any
-      loginActionMustNotExist({ reloadPage: false });
+      loginActionMustNotExist();
     });
 
     it('When the users create, edit, and delete a Mutation Action, everything should work', () => {
@@ -34,6 +34,7 @@ if (testMode !== 'cli') {
       cy.log('**------------------------------**');
       cy.log('**------------------------------**');
 
+      // --------------------
       cy.log('**--- Click on the Create button of the Actions panel**');
       cy.getBySel('data-create-actions').click();
 
@@ -55,8 +56,7 @@ if (testMode !== 'cli') {
       cy.get('@typeConfigurationTextarea').clearConsoleTextarea().type(
         `type LoginResponse {
             accessToken: String!
-          }
-          `,
+          }`,
         { force: true, delay: 0 }
       );
 
@@ -77,6 +77,7 @@ if (testMode !== 'cli') {
       cy.log('**--- Type in the Custom Timeout field**');
       cy.getBySel('action-timeout-seconds').clear().type('25');
 
+      // --------------------
       cy.log('**--- Click the Create button**');
       cy.getBySel('create-action-btn').click();
 
@@ -103,6 +104,7 @@ if (testMode !== 'cli') {
       cy.log('**------------------------------**');
       cy.log('**------------------------------**');
 
+      // --------------------
       cy.log('**--- Go the the action page**');
       cy.getBySel('actions-table-links').within(() => {
         cy.getBySel('login').click();
@@ -114,9 +116,11 @@ if (testMode !== 'cli') {
 
       // --------------------
       cy.log('**--- Enter a new role**');
-      cy.getBySel('role-textbox').type('hakuna_matata');
-      cy.getBySel('hakuna_matata-Permission').click();
+      cy.getBySel('role-textbox').type('manager');
+      cy.getBySel('manager-Permission').click();
 
+      // --------------------
+      cy.log('**--- Click Save Permissions**');
       cy.getBySel('save-permissions-for-action').click();
 
       // Please note: we should wait for the outgoing request but at the moment of writing, I'm not
@@ -137,11 +141,12 @@ if (testMode !== 'cli') {
       cy.log('**------------------------------**');
       cy.log('**------------------------------**');
       cy.log('**------------------------------**');
-      cy.log('**--- Step 3: Action delete**');
+      cy.log('**--- Step 3: Mutation Action delete**');
       cy.log('**------------------------------**');
       cy.log('**------------------------------**');
       cy.log('**------------------------------**');
 
+      // --------------------
       cy.log('**--- Go the the action page**');
       cy.getBySel('actions-table-links').within(() => {
         cy.getBySel('login').click();
