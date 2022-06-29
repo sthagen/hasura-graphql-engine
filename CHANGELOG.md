@@ -53,6 +53,12 @@
 - console: Hide TimescaleDB internal schema from data tab
 - console: support naming convention in source customization for postgres DB [CON-297]
 
+## v2.8.2
+
+### Bug fixes and improvements
+
+- server: revert allow casting most postgres scalar types to strings in comparison expressions (#8617)
+
 ## v2.9.0-beta.1
 
 ### Event Triggers for MS SQL Server
@@ -65,6 +71,7 @@ Event Triggers support has been added for MS SQL Server. Now, you can invoke ext
 - server: add `*_update_source` API and modify behaviour of `*_add_source` API (See [docs](https://hasura.io/docs/latest/graphql/core/api-reference/metadata-api/source/) )
 - server: support limit in BigQuery computed fields (fix #8562)
 - server: improve GraphQL query parsing time and per-query memory allocation
+- server: parameterize array variables in queries and subscriptions
 - console: allow schemas prefixed with `pg`, but not `pg_` (fix #8435)
 - console: add support for computed fields with session arg in permission builder (fix #8321)
 - console: add GraphQL field customization for new database connections (root fields namespace, prefix, and suffix, and type names prefix and suffix)

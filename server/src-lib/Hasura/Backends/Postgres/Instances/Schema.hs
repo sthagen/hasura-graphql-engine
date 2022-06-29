@@ -25,6 +25,7 @@ import Hasura.Backends.Postgres.SQL.DML as PG hiding (CountType, incOp)
 import Hasura.Backends.Postgres.SQL.Types as PG hiding (FunctionName, TableName)
 import Hasura.Backends.Postgres.SQL.Value as PG
 import Hasura.Backends.Postgres.Schema.OnConflict
+import Hasura.Backends.Postgres.Schema.Select
 import Hasura.Backends.Postgres.Types.BoolExp
 import Hasura.Backends.Postgres.Types.Column
 import Hasura.Backends.Postgres.Types.Insert as PGIR
@@ -131,9 +132,9 @@ instance
   buildTableInsertMutationFields = GSB.buildTableInsertMutationFields backendInsertParser
   buildTableUpdateMutationFields = pgkBuildTableUpdateMutationFields
   buildTableDeleteMutationFields = GSB.buildTableDeleteMutationFields
-  buildFunctionQueryFields = GSB.buildFunctionQueryFieldsPG
+  buildFunctionQueryFields = buildFunctionQueryFieldsPG
   buildFunctionRelayQueryFields = pgkBuildFunctionRelayQueryFields
-  buildFunctionMutationFields = GSB.buildFunctionMutationFieldsPG
+  buildFunctionMutationFields = buildFunctionMutationFieldsPG
 
   -- table components
   tableArguments = defaultTableArgs
@@ -396,7 +397,7 @@ comparisonExps = memoize 'comparisonExps \columnType -> do
                 tCase
                 collapseIfNull
                 (IR.mkParameter <$> typedParser)
-                (mkListLiteral columnType <$> columnListParser),
+                (mkListParameter columnType <$> columnListParser),
               -- Comparison ops for non Raster types
               guard (isScalarColumnWhere (/= PGRaster) columnType)
                 *> comparisonOperators
@@ -651,6 +652,13 @@ comparisonExps = memoize 'comparisonExps \columnType -> do
         SETyAnn
           (SEArray $ txtEncoder . cvValue <$> columnValues)
           (mkTypeAnn $ CollectableTypeArray $ unsafePGColumnToBackend columnType)
+    mkListParameter :: ColumnType ('Postgres pgKind) -> [ColumnValue ('Postgres pgKind)] -> IR.UnpreparedValue ('Postgres pgKind)
+    mkListParameter columnType columnValues = do
+      let scalarType = unsafePGColumnToBackend columnType
+      IR.UVParameter Nothing $
+        ColumnValue
+          (ColumnScalar $ PG.PGArray scalarType)
+          (PG.PGValArray $ cvValue <$> columnValues)
 
     castExp :: ColumnType ('Postgres pgKind) -> m (Maybe (Parser 'Input n (CastExp ('Postgres pgKind) (IR.UnpreparedValue ('Postgres pgKind)))))
     castExp sourceType = do
@@ -658,21 +666,6 @@ comparisonExps = memoize 'comparisonExps \columnType -> do
             ColumnScalar PGGeography -> Just (PGGeography, PGGeometry)
             ColumnScalar PGGeometry -> Just (PGGeometry, PGGeography)
             ColumnScalar PGJSONB -> Just (PGJSONB, PGText)
-            ColumnScalar PGSmallInt -> Just (PGSmallInt, PGText)
-            ColumnScalar PGInteger -> Just (PGInteger, PGText)
-            ColumnScalar PGBigInt -> Just (PGBigInt, PGText)
-            ColumnScalar PGFloat -> Just (PGFloat, PGText)
-            ColumnScalar PGDouble -> Just (PGDouble, PGText)
-            ColumnScalar PGNumeric -> Just (PGNumeric, PGText)
-            ColumnScalar PGMoney -> Just (PGMoney, PGText)
-            ColumnScalar PGBoolean -> Just (PGBoolean, PGText)
-            ColumnScalar PGChar -> Just (PGChar, PGText)
-            ColumnScalar PGDate -> Just (PGDate, PGText)
-            ColumnScalar PGTimeStamp -> Just (PGTimeStamp, PGText)
-            ColumnScalar PGTimeStampTZ -> Just (PGTimeStampTZ, PGText)
-            ColumnScalar PGTimeTZ -> Just (PGTimeTZ, PGText)
-            ColumnScalar PGJSON -> Just (PGJSON, PGText)
-            ColumnScalar PGUUID -> Just (PGUUID, PGText)
             _ -> Nothing
 
       forM maybeScalars $ \(sourceScalar, targetScalar) -> do
