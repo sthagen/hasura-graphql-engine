@@ -168,6 +168,7 @@ common lib-depends
                      , monad-loops
                      , monad-validate
                      , mtl
+                     , nonempty-containers
                      , openapi3
                      , optparse-applicative
                      , parsec
@@ -386,6 +387,7 @@ library
                      , Control.Arrow.Interpret
                      , Control.Arrow.Trans
                      , Control.Concurrent.Extended
+                     , Control.Monad.Circular
                      , Control.Monad.Stateless
                      , Control.Monad.Trans.Managed
                      , Control.Monad.Unique
@@ -986,6 +988,7 @@ test-suite graphql-engine-tests
   main-is: Main.hs
   other-modules:
     Control.Concurrent.ExtendedSpec
+    Control.Monad.CircularSpec
     Data.HashMap.Strict.ExtendedSpec
     Data.NonNegativeIntSpec
     Data.Parser.CacheControlSpec
@@ -1240,6 +1243,7 @@ test-suite tests-hspec
     Test.RequestHeadersSpec
     Test.RunSQLSpec
     Test.BigQuery.ComputedFieldSpec
+    Test.BigQuery.GraphQLQueryBasicSpec
     Test.BigQuery.Metadata.ComputedFieldSpec
     Test.SelectSpec
     Test.SerializationSpec
@@ -1293,6 +1297,7 @@ test-suite tests-dc-api
     , Paths_graphql_engine
     , Test.Data
     , Test.CapabilitiesSpec
+    , Test.HealthSpec
     , Test.QuerySpec
     , Test.QuerySpec.BasicSpec
     , Test.QuerySpec.RelationshipsSpec

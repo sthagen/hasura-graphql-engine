@@ -49,9 +49,35 @@
 
 ### Bug fixes and improvements
 
+- server: changes to the Rest Endpoints OpenAPI specification:
+    - the nullability of items in the output is now always correctly reported
+    - scalars other than UUID are more consistently inlined
+    - objects now have a title and, when available, the same description as in the GraphQL schema
 - server: fix dropping column from a table that has update permissions (fix #8415)
 - console: Hide TimescaleDB internal schema from data tab
 - console: support naming convention in source customization for postgres DB [CON-297]
+
+## v2.8.3
+
+### Bug fixes and improvements
+
+- cli: fix performance regression with large metadata in `metadata apply`
+
+  During the execution of `metadata apply` command, the YAML metadata is
+  converted into JSON format because the server API accepts metadata in JSON
+  format. For large metadata(> ~20k LOC), due to a recent change this conversion was 
+  taking upwards of 2 minutes of time, increasing exponentially with metadata size.  
+  With the changes in this release, the performance regression has been fixed.
+  Following is a benchmark comparison of time taken for YAML to JSON conversion
+  before and after the changes for different metadata sizes:
+  | Metadata size(LOC) | Before(seconds) | After(seconds) |
+  |--------------------|-----------------|----------------|
+  |       10k          |      8.7        |     0.22       |
+  |       20k          |     15.9        |     0.29       |
+  |       50k          |     89.5        |     0.52       |
+  |      100k          |    271.9        |     0.81       |
+  |      300k          |      -          |     2.3        |
+
 
 ## v2.8.2
 

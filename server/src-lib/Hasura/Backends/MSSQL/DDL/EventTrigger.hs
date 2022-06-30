@@ -22,7 +22,7 @@ import Data.Aeson qualified as J
 import Data.ByteString qualified as B
 import Data.ByteString.Lazy qualified as BL
 import Data.FileEmbed (makeRelativeToProject)
-import Data.Set qualified as Set
+import Data.Set.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Data.Text.Extended (commaSeparated, toTxt)
 import Data.Text.Lazy qualified as LT
@@ -204,7 +204,7 @@ createTableEventTrigger _serverConfigCtx sourceConfig table columns triggerName 
 unlockEventsInSource ::
   MonadIO m =>
   MSSQLSourceConfig ->
-  Set.Set EventId ->
+  NE.NESet EventId ->
   m (Either QErr Int)
 unlockEventsInSource sourceConfig eventIds =
   liftIO $
@@ -429,14 +429,20 @@ archiveEvents triggerName =
 
 checkEventTx :: EventId -> TxE QErr ()
 checkEventTx eventId = do
+  -- If an event got locked within the last 30 minutes then it means that the event
+  -- got picked up by during the last fetch-event poll and is being processed. Hence
+  -- we do not allow the redelivery of such an event.
   (events :: [Bool]) <-
     multiRowQueryE
       HGE.defaultMSSQLTxErrorHandler
       [ODBC.sql|
-        SELECT l.locked
+        SELECT
+          CAST(CASE 
+                  WHEN (l.locked IS NOT NULL AND l.locked >= DATEADD(MINUTE, -30, SYSDATETIMEOFFSET())) THEN 1 ELSE 0
+              END 
+          AS bit)
         FROM hdb_catalog.event_log l
-        WHERE (l.locked IS NOT NULL AND l.locked >= DATEADD(MINUTE, -30, SYSDATETIMEOFFSET()))
-              AND l.id = $eId
+        WHERE l.id = $eId
       |]
 
   event <- getEvent events
@@ -468,12 +474,13 @@ unlockEventsTx eventIds = do
   numEvents <-
     singleRowQueryE HGE.defaultMSSQLTxErrorHandler $
       rawUnescapedText . LT.toStrict $
-        -- EventIds as list of VALUES (Eg: ('123-abc'),('456-vgh'), ('234-asd'))
+        -- EventIds as list of VALUES (Eg: ('123-abc'), ('456-vgh'), ('234-asd'))
         let eventIdsValues = generateValuesFromEvents eventIds
          in $(makeRelativeToProject "src-rsr/mssql/mssql_unlock_events.sql.shakespeare" >>= ST.stextFile)
   return numEvents
   where
     generateValuesFromEvents :: [EventId] -> Text
+    -- creates a list of event id's  (('123-abc'), ('456-vgh'), ('234-asd'))
     generateValuesFromEvents events = commaSeparated values
       where
         values = map (\e -> "(" <> toTxt e <> ")") events

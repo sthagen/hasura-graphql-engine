@@ -64,6 +64,7 @@ import Data.ByteString.Lazy.Char8 qualified as BLC
 import Data.Environment qualified as Env
 import Data.FileEmbed (makeRelativeToProject)
 import Data.HashMap.Strict qualified as HM
+import Data.Set.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Data.Time.Clock (UTCTime)
 import Data.Time.Clock qualified as Clock
@@ -317,6 +318,7 @@ newtype PGMetadataStorageAppT m a = PGMetadataStorageAppT {runPGMetadataStorageA
       Applicative,
       Monad,
       MonadIO,
+      MonadFix,
       MonadCatch,
       MonadThrow,
       MonadMask,
@@ -550,6 +552,7 @@ flushLogger = liftIO . FL.flushLogStr . _lcLoggerSet
 runHGEServer ::
   forall m impl.
   ( MonadIO m,
+    MonadFix m,
     MonadMask m,
     MonadStateless IO m,
     LA.Forall (LA.Pure m),
@@ -624,6 +627,7 @@ runHGEServer setupHook env serveOptions serveCtx initTime postPollHook serverMet
 mkHGEServer ::
   forall m impl.
   ( MonadIO m,
+    MonadFix m,
     MonadMask m,
     MonadStateless IO m,
     LA.Forall (LA.Pure m),
@@ -838,16 +842,18 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
           let sourceNameString = T.unpack $ sourceNameToText sourceName
           logger $ mkGenericStrLog LevelInfo "event_triggers" $ "unlocking events of source: " ++ sourceNameString
           onJust (HM.lookup sourceName lockedEvents) $ \sourceLockedEvents -> do
-            res <- Retry.retrying Retry.retryPolicyDefault isRetryRequired (return $ unlockEventsInSource @b sourceConfig sourceLockedEvents)
-            case res of
-              Left err ->
-                logger $
-                  mkGenericStrLog LevelWarn "event_trigger" $
-                    "Error while unlocking event trigger events of source: " ++ sourceNameString ++ " error:" ++ show err
-              Right count ->
-                logger $
-                  mkGenericStrLog LevelInfo "event_trigger" $
-                    show count ++ " events of source " ++ sourceNameString ++ " were successfully unlocked"
+            -- No need to execute unlockEventsTx when events are not present
+            onJust (NE.nonEmptySet sourceLockedEvents) $ \nonEmptyLockedEvents -> do
+              res <- Retry.retrying Retry.retryPolicyDefault isRetryRequired (return $ unlockEventsInSource @b sourceConfig nonEmptyLockedEvents)
+              case res of
+                Left err ->
+                  logger $
+                    mkGenericStrLog LevelWarn "event_trigger" $
+                      "Error while unlocking event trigger events of source: " ++ sourceNameString ++ " error:" ++ show err
+                Right count ->
+                  logger $
+                    mkGenericStrLog LevelInfo "event_trigger" $
+                      show count ++ " events of source " ++ sourceNameString ++ " were successfully unlocked"
 
     shutdownAsyncActions ::
       LockedEventsCtx ->
