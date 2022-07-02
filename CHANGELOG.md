@@ -49,13 +49,15 @@
 
 ### Bug fixes and improvements
 
+- server: fix name transformation bug in `graphql-default` naming convention (fixes #8640 partially)
 - server: changes to the Rest Endpoints OpenAPI specification:
     - the nullability of items in the output is now always correctly reported
     - scalars other than UUID are more consistently inlined
     - objects now have a title and, when available, the same description as in the GraphQL schema
 - server: fix dropping column from a table that has update permissions (fix #8415)
+- server: bump Kriti package version to support optional variable lookup in string interpolation (fixes #8574)
 - console: Hide TimescaleDB internal schema from data tab
-- console: support naming convention in source customization for postgres DB [CON-297]
+- console: support naming conventions under GraphQL customizations while connecting postgres DB
 
 ## v2.8.3
 

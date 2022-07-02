@@ -175,7 +175,7 @@ throwErrExit reason = liftIO . throwIO . ExitException reason . BC.pack
 throwErrJExit :: (A.ToJSON a, MonadIO m) => forall b. ExitCode -> a -> m b
 throwErrJExit reason = liftIO . throwIO . ExitException reason . BLC.toStrict . A.encode
 
-parseHGECommand :: EnabledLogTypes impl => Parser (RawHGECommand impl)
+parseHGECommand :: EnabledLogTypes impl => Parser (HGECommand (RawServeOptions impl))
 parseHGECommand =
   subparser
     ( command
@@ -212,7 +212,7 @@ parseHGECommand =
           )
     )
 
-parseArgs :: EnabledLogTypes impl => IO (HGEOptions impl)
+parseArgs :: EnabledLogTypes impl => IO (HGEOptions (ServeOptions impl))
 parseArgs = do
   rawHGEOpts <- execParser opts
   env <- getEnvironment
@@ -227,7 +227,7 @@ parseArgs = do
             <> footerDoc (Just mainCmdFooter)
         )
     hgeOpts =
-      HGEOptionsG <$> parsePostgresConnInfo
+      HGEOptionsRaw <$> parsePostgresConnInfo
         <*> parseMetadataDbUrl
         <*> parseHGECommand
 
@@ -839,8 +839,8 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
       lockedEvents <- readTVarIO leEvents
       forM_ sources $ \backendSourceInfo -> do
         AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo sourceName _ _ sourceConfig _ _ :: SourceInfo b) -> do
-          let sourceNameString = T.unpack $ sourceNameToText sourceName
-          logger $ mkGenericStrLog LevelInfo "event_triggers" $ "unlocking events of source: " ++ sourceNameString
+          let sourceNameText = sourceNameToText sourceName
+          logger $ mkGenericLog LevelInfo "event_triggers" $ "unlocking events of source: " <> sourceNameText
           onJust (HM.lookup sourceName lockedEvents) $ \sourceLockedEvents -> do
             -- No need to execute unlockEventsTx when events are not present
             onJust (NE.nonEmptySet sourceLockedEvents) $ \nonEmptyLockedEvents -> do
@@ -848,12 +848,12 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
               case res of
                 Left err ->
                   logger $
-                    mkGenericStrLog LevelWarn "event_trigger" $
-                      "Error while unlocking event trigger events of source: " ++ sourceNameString ++ " error:" ++ show err
+                    mkGenericLog LevelWarn "event_trigger" $
+                      "Error while unlocking event trigger events of source: " <> sourceNameText <> " error:" <> showQErr err
                 Right count ->
                   logger $
-                    mkGenericStrLog LevelInfo "event_trigger" $
-                      show count ++ " events of source " ++ sourceNameString ++ " were successfully unlocked"
+                    mkGenericLog LevelInfo "event_trigger" $
+                      tshow count <> " events of source " <> sourceNameText <> " were successfully unlocked"
 
     shutdownAsyncActions ::
       LockedEventsCtx ->
@@ -890,11 +890,11 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} initTime postPollHook 
             runMetadataStorageT metadataDBShutdownAction >>= \case
               Left err ->
                 logger $
-                  mkGenericStrLog LevelWarn (T.pack actionType) $
+                  mkGenericLog LevelWarn (T.pack actionType) $
                     "Error while unlocking the processing  "
-                      <> show actionType
+                      <> tshow actionType
                       <> " err - "
-                      <> show err
+                      <> showQErr err
               Right () -> pure ()
       | otherwise = do
         processingEventsCount <- processingEventsCountAction'
