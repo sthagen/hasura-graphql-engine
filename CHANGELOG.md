@@ -49,6 +49,8 @@
 
 ### Bug fixes and improvements
 
+
+- server: Create missing SQL triggers, if any, while reloading metadata and startup.
 - server: fix name transformation bug in `graphql-default` naming convention (fixes #8640 partially)
 - server: changes to the Rest Endpoints OpenAPI specification:
     - the nullability of items in the output is now always correctly reported
@@ -57,7 +59,11 @@
 - server: fix dropping column from a table that has update permissions (fix #8415)
 - server: bump Kriti package version to support optional variable lookup in string interpolation (fixes #8574)
 - console: Hide TimescaleDB internal schema from data tab
-- console: support naming conventions under GraphQL customizations while connecting postgres DB
+- console: support naming convention in source customization for postgres DB [CON-297]
+- build: changes to the `hasura/graphql-engine` docker image:
+  - Debian graphql-engine docker images (`hasura/graphql-engine:<VERSION>`) now use a ubuntu base instead of debian.
+  - Debian flavour of images (`hasura/graphql-engine:<VERSION>.debian`) are still published to Docker Hub.
+  - Centos flavour of images (`hasura/graphql-engine:<VERSION>.centos`) are no longer supported.
 
 ## v2.8.3
 
