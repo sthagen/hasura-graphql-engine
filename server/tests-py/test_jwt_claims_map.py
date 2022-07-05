@@ -24,9 +24,9 @@ if 'claims_map' not in hge_jwt_conf:
 # The following claims_map is assumed to be set
 # {
 #     "claims_map": {
-#         "x-hasura-user-id": {"path":"$.['https://myapp.com/jwt/claims'].user.id"}
-#         "x-hasura-allowed-roles": {"$.['https://myapp.com/jwt/claims'].role.allowed","default":["user","editor"]}
-#         "x-hasura-default-role": {"$.['https://myapp.com/jwt/claims'].role.default","default":"user"}
+#         "x-hasura-user-id": {"path":"$.["https://myapp.com/jwt/claims"].user.id"}
+#         "x-hasura-allowed-roles": {"$.["https://myapp.com/jwt/claims"].role.allowed","default":["user","editor"]}
+#         "x-hasura-default-role": {"$.["https://myapp.com/jwt/claims"].role.default","default":"user"}
 #     }
 # }
 
@@ -200,11 +200,9 @@ class TestJWTClaimsMapBasic():
     @pytest.fixture(scope='class')
     def setup(self, request, hge_ctx):
         self.dir = 'queries/graphql_query/permissions'
-        st_code, resp = hge_ctx.v1q_f(self.dir + '/setup.yaml')
-        assert st_code == 200, resp
+        hge_ctx.v1q_f(self.dir + '/setup.yaml')
         yield
-        st_code, resp = hge_ctx.v1q_f(self.dir + '/teardown.yaml')
-        assert st_code == 200, resp
+        hge_ctx.v1q_f(self.dir + '/teardown.yaml')
 
 # The values of 'x-hasura-allowed-roles' and 'x-hasura-default-role' has
 # been set in the JWT config
@@ -284,8 +282,6 @@ class TestJWTClaimsMapWithStaticHasuraClaimsMapValues():
     @pytest.fixture(scope='class')
     def setup(self, request, hge_ctx):
         self.dir = 'queries/graphql_query/permissions'
-        st_code, resp = hge_ctx.v1q_f(self.dir + '/setup.yaml')
-        assert st_code == 200, resp
+        hge_ctx.v1q_f(self.dir + '/setup.yaml')
         yield
-        st_code, resp = hge_ctx.v1q_f(self.dir + '/teardown.yaml')
-        assert st_code == 200, resp
+        hge_ctx.v1q_f(self.dir + '/teardown.yaml')
