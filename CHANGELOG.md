@@ -58,6 +58,7 @@
 
 ### Bug fixes and improvements
 
+- server: fix prefix/suffix behaviour for `graphql-default` naming convention (fixes #8544)
 - server: fix namespace visibility during introspection (fix #8434)
 - server: Create missing SQL triggers, if any, while reloading metadata and startup.
 - server: fix name transformation bug in `graphql-default` naming convention (fixes #8640 partially)
@@ -69,6 +70,7 @@
 - server: bump Kriti package version to support optional variable lookup in string interpolation (fixes #8574)
 - console: Hide TimescaleDB internal schema from data tab
 - console: support naming convention in source customization for postgres DB [CON-297]
+- console: fix bug where analyze button would stay in analyzing state after analyze failed
 - build: changes to the `hasura/graphql-engine` docker image:
   - Debian graphql-engine docker images (`hasura/graphql-engine:<VERSION>`) now use a ubuntu base instead of debian.
   - Debian flavour of images (`hasura/graphql-engine:<VERSION>.debian`) are still published to Docker Hub.
