@@ -63,6 +63,8 @@ import Hasura.RQL.Types.TableSpec qualified as TableSpec
 import Hasura.RQL.WebhookTransformsSpec qualified as WebhookTransformsSpec
 import Hasura.Server.Auth.JWTSpec qualified as JWTSpec
 import Hasura.Server.Init
+import Hasura.Server.Init.ArgSpec qualified as ArgSpec
+import Hasura.Server.InitSpec qualified as InitSpec
 import Hasura.Server.Migrate
 import Hasura.Server.Migrate.VersionSpec qualified as VersionSpec
 import Hasura.Server.MigrateSpec qualified as MigrateSpec
@@ -140,6 +142,8 @@ unitSpecs = do
   describe "Hasura.RQL.Types.Table" TableSpec.spec
   describe "Hasura.RQL.WebhookTransformsSpec" WebhookTransformsSpec.spec
   describe "Hasura.Server.Auth.JWT" JWTSpec.spec
+  describe "Hasura.Server.Init" InitSpec.spec
+  describe "Hasura.Server.Init.Arg" ArgSpec.spec
   describe "Hasura.Server.Migrate.Version" VersionSpec.spec
   describe "Hasura.Session" SessionSpec.spec
 
