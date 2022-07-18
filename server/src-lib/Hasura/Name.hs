@@ -79,6 +79,9 @@ __scalar = [G.name|_scalar|]
 _id :: G.Name
 _id = [G.name|id|]
 
+_session_variables :: G.Name
+_session_variables = [G.name|session_variables|]
+
 -- * Relationships
 
 __remote_rel_ :: G.Name
@@ -432,6 +435,9 @@ _insert = [G.name|insert|]
 _update :: G.Name
 _update = [G.name|update|]
 
+_updates :: G.Name
+_updates = [G.name|updates|]
+
 _delete :: G.Name
 _delete = [G.name|delete|]
 
@@ -449,6 +455,9 @@ _objects = [G.name|objects|]
 
 _one :: G.Name
 _one = [G.name|one|]
+
+_many :: G.Name
+_many = [G.name|many|]
 
 _returning :: G.Name
 _returning = [G.name|returning|]

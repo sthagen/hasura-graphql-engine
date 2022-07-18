@@ -404,7 +404,7 @@ library
                      , Data.Parser.CacheControl
                      , Data.Parser.Expires
                      , Data.Parser.JSONPath
-                     , Data.Sequence.NonEmpty
+                     , Data.Sequence.NESeq
                      , Data.SqlCommenter
                      , Data.SerializableBlob
                      , Data.Text.Casing
@@ -924,6 +924,7 @@ executable emit-metadata-openapi
 -- However, that doesn't work yet. See https://github.com/haskell/cabal/issues/8218
 test-suite graphql-engine-tests
   import: common-all, common-exe, lib-depends
+  build-tool-depends: hspec-discover:hspec-discover
   type: exitcode-stdio-1.0
   build-depends:
       aeson
@@ -1008,7 +1009,8 @@ test-suite graphql-engine-tests
     Data.Text.RawString
     Data.TimeSpec
     Data.TrieSpec
-    Database.MSSQL.TransactionSpec
+    Database.MSSQL.TransactionSuite
+    Discover
     Hasura.AppSpec
     Hasura.Base.Error.TestInstances
     Hasura.Backends.DataConnector.API.V0.CapabilitiesSpec
@@ -1066,15 +1068,14 @@ test-suite graphql-engine-tests
     Hasura.Server.AuthSpec
     Hasura.Server.InitSpec
     Hasura.Server.Init.ArgSpec
-    Hasura.Server.MigrateSpec
+    Hasura.Server.MigrateSuite
     Hasura.Server.Migrate.VersionSpec
     Hasura.Server.TelemetrySpec
     Hasura.Server.InitSpec
     Hasura.Server.Init.ArgSpec
     Hasura.SessionSpec
     Hasura.SQL.WKTSpec
-    Hasura.StreamingSubscriptionSpec
-    Hasura.StreamingSubscriptionSpec
+    Hasura.StreamingSubscriptionSuite
     Network.HTTP.Client.TransformableSpec
     Test.Aeson.Utils
     Test.Autodocodec.Extended
@@ -1216,8 +1217,11 @@ test-suite tests-hspec
  -- Test
     Test.ArrayParamPermissionSpec
     Test.ArrayRelationshipsSpec
-    Test.BasicFieldsSpec
     Test.BackendOnlyPermissionsSpec
+    Test.BasicFieldsSpec
+    Test.BigQuery.ComputedFieldSpec
+    Test.BigQuery.GraphQLQueryBasicSpec
+    Test.BigQuery.Metadata.ComputedFieldSpec
     Test.ColumnPresetsSpec
     Test.CustomFieldNamesSpec
     Test.CustomRootFieldsSpec
@@ -1226,8 +1230,16 @@ test-suite tests-hspec
     Test.DataConnector.QuerySpec
     Test.DataConnector.SelectPermissionsSpec
     Test.DirectivesSpec
-    Test.EventTriggersRunSQLSpec
+    Test.DisableRootFields.Common
+    Test.DisableRootFields.DefaultRootFieldsSpec
+    Test.DisableRootFields.SelectPermission.DisableAllRootFieldsRelationshipSpec
+    Test.DisableRootFields.SelectPermission.DisableAllRootFieldsSpec
+    Test.DisableRootFields.SelectPermission.EnableAggSpec
+    Test.DisableRootFields.SelectPermission.EnableAllRootFieldsSpec
+    Test.DisableRootFields.SelectPermission.EnablePKSpec
     Test.EventTriggersRecreationSpec
+    Test.EventTriggersRunSQLSpec
+    Test.GatheringUniqueConstraintsSpec
     Test.HelloWorldSpec
     Test.InsertCheckPermissionSpec
     Test.InsertDefaultsSpec
@@ -1239,7 +1251,6 @@ test-suite tests-hspec
     Test.ObjectRelationshipsSpec
     Test.OrderingSpec
     Test.PostgresTypesSpec
-    Test.GatheringUniqueConstraintsSpec
     Test.PrimaryKeySpec
     Test.RemoteRelationship.FromRemoteSchemaSpec
     Test.RemoteRelationship.MetadataAPI.ClearMetadataSpec
@@ -1249,22 +1260,13 @@ test-suite tests-hspec
     Test.RemoteRelationship.XToDBArrayRelationshipSpec
     Test.RemoteRelationship.XToDBObjectRelationshipSpec
     Test.RemoteRelationship.XToRemoteSchemaRelationshipSpec
-    Test.DisableRootFields.Common
-    Test.DisableRootFields.DefaultRootFieldsSpec
-    Test.DisableRootFields.SelectPermission.EnablePKSpec
-    Test.DisableRootFields.SelectPermission.EnableAggSpec
-    Test.DisableRootFields.SelectPermission.EnableAllRootFieldsSpec
-    Test.DisableRootFields.SelectPermission.DisableAllRootFieldsSpec
-    Test.DisableRootFields.SelectPermission.DisableAllRootFieldsRelationshipSpec
     Test.RequestHeadersSpec
     Test.RunSQLSpec
-    Test.BigQuery.ComputedFieldSpec
-    Test.BigQuery.GraphQLQueryBasicSpec
-    Test.BigQuery.Metadata.ComputedFieldSpec
+    Test.SQLServer.InsertVarcharColumnSpec
     Test.SelectSpec
     Test.SerializationSpec
     Test.ServiceLivenessSpec
-    Test.SQLServer.InsertVarcharColumnSpec
+    Test.UpdateManySpec
     Test.ViewsSpec
     Test.WhereSpec
 
