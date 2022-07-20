@@ -22,6 +22,7 @@ module Hasura.RQL.Types.Table
     TableConfig (..),
     TableCoreCache,
     TableCoreInfo,
+    TableEventTriggers,
     TableCoreInfoG (..),
     TableCustomRootFields (..),
     TableInfo (..),
@@ -926,6 +927,9 @@ type TableCoreCache b = M.HashMap (TableName b) (TableCoreInfo b)
 
 type TableCache b = M.HashMap (TableName b) (TableInfo b) -- info of all tables
 
+-- map of all event triggers on the table
+type TableEventTriggers b = M.HashMap (TableName b) [TriggerName]
+
 -- | Metadata of a Postgres foreign key constraint which is being
 -- extracted from database via 'src-rsr/pg_table_metadata.sql'
 newtype ForeignKeyMetadata (b :: BackendType) = ForeignKeyMetadata
@@ -1035,11 +1039,11 @@ askColInfo m c msg = do
     throwErr fieldType =
       throwError $
         err400 UnexpectedPayload $
-          mconcat
-            [ "expecting a database column; but, ",
-              c <<> " is a " <> fieldType <> "; ",
-              msg
-            ]
+          "expecting a database column; but, "
+            <> c <<> " is a "
+            <> fieldType
+            <> "; "
+            <> msg
 
 askComputedFieldInfo ::
   (MonadError QErr m) =>
@@ -1059,10 +1063,9 @@ askComputedFieldInfo fields computedField = do
     throwErr fieldType =
       throwError $
         err400 UnexpectedPayload $
-          mconcat
-            [ "expecting a computed field; but, ",
-              computedField <<> " is a " <> fieldType <> "; "
-            ]
+          "expecting a computed field; but, "
+            <> computedField <<> " is a "
+            <> fieldType
 
 assertColumnExists ::
   forall backend m.
@@ -1089,11 +1092,9 @@ askRelType m r msg = do
     _ ->
       throwError $
         err400 UnexpectedPayload $
-          mconcat
-            [ "expecting a relationship; but, ",
-              r <<> " is a postgres column; ",
-              msg
-            ]
+          "expecting a relationship; but, "
+            <> r <<> " is a postgres column; "
+            <> msg
 
 askRemoteRel ::
   (MonadError QErr m) =>

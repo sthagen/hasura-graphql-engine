@@ -404,7 +404,6 @@ library
                      , Data.Parser.CacheControl
                      , Data.Parser.Expires
                      , Data.Parser.JSONPath
-                     , Data.Sequence.NESeq
                      , Data.SqlCommenter
                      , Data.SerializableBlob
                      , Data.Text.Casing
@@ -421,7 +420,10 @@ library
                      , Hasura.Metadata.Class
 
                      , Hasura.Base.Error
+                     , Hasura.Base.ErrorMessage
+                     , Hasura.Base.ErrorValue
                      , Hasura.Base.Instances
+                     , Hasura.Base.ToErrorValue
 
                      , Hasura.Backends.BigQuery.Connection
                      , Hasura.Backends.BigQuery.Execute
@@ -564,6 +566,7 @@ library
                      , Hasura.Backends.DataConnector.Adapter.API
                      , Hasura.Backends.DataConnector.Adapter.Backend
                      , Hasura.Backends.DataConnector.Adapter.Execute
+                     , Hasura.Backends.DataConnector.Adapter.ConfigTransform
                      , Hasura.Backends.DataConnector.Adapter.Metadata
                      , Hasura.Backends.DataConnector.Adapter.Schema
                      , Hasura.Backends.DataConnector.Adapter.Transport
@@ -1013,6 +1016,7 @@ test-suite graphql-engine-tests
     Discover
     Hasura.AppSpec
     Hasura.Base.Error.TestInstances
+    Hasura.Base.ErrorMessageSpec
     Hasura.Backends.DataConnector.API.V0.CapabilitiesSpec
     Hasura.Backends.DataConnector.API.V0.ColumnSpec
     Hasura.Backends.DataConnector.API.V0.ConfigSchemaSpec
@@ -1226,6 +1230,7 @@ test-suite tests-hspec
     Test.CustomFieldNamesSpec
     Test.CustomRootFieldsSpec
     Test.DataConnector.MockAgent.BasicQuerySpec
+    Test.DataConnector.MockAgent.TransformedConfigurationSpec
     Test.DataConnector.MockAgent.QueryRelationshipsSpec
     Test.DataConnector.QuerySpec
     Test.DataConnector.SelectPermissionsSpec
@@ -1239,6 +1244,7 @@ test-suite tests-hspec
     Test.DisableRootFields.SelectPermission.EnablePKSpec
     Test.EventTriggersRecreationSpec
     Test.EventTriggersRunSQLSpec
+    Test.EventTriggerDropSourceCleanupSpec
     Test.GatheringUniqueConstraintsSpec
     Test.HelloWorldSpec
     Test.InsertCheckPermissionSpec

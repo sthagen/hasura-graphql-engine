@@ -16,12 +16,13 @@ module Hasura.GraphQL.Schema.Update
   )
 where
 
-import Data.Has (Has)
+import Data.Has (Has (getter))
 import Data.HashMap.Strict qualified as M
 import Data.HashMap.Strict.Extended qualified as M
 import Data.List.NonEmpty qualified as NE
-import Data.Text.Extended (commaSeparated, dquote, (<>>))
+import Data.Text.Extended ((<>>))
 import Hasura.Base.Error (QErr)
+import Hasura.Base.ToErrorValue
 import Hasura.GraphQL.Schema.Backend (BackendSchema (..), BackendTableSelectSchema (..), MonadBuildSchema, columnParser)
 import Hasura.GraphQL.Schema.BoolExp (boolExp)
 import Hasura.GraphQL.Schema.Common (Scenario (..), mapField, partialSQLExpToUnpreparedValue)
@@ -122,20 +123,6 @@ runUpdateOperator tableInfo UpdateOperator {..} = do
   (sequenceA :: Maybe (m a) -> m (Maybe a))
     (applicableCols <&> updateOperatorParser tableGQLName tableName)
 
--- | Ensure that /some/ updates have been specified in a mutation.
-ensureNonEmpty ::
-  forall b m t.
-  (P.MonadParse m, Backend b) =>
-  [Text] ->
-  [HashMap (Column b) t] ->
-  m ()
-ensureNonEmpty allowedOperators parsedResults =
-  when (null $ M.unions parsedResults) $
-    P.parseError $
-      "At least any one of "
-        <> commaSeparated allowedOperators
-        <> " is expected"
-
 -- | Merge the results of parsed update operators. Throws an error if the same
 -- column has been specified in multiple operators.
 mergeDisjoint ::
@@ -150,7 +137,7 @@ mergeDisjoint parsedResults = do
   unless (null duplicates) $
     P.parseError
       ( "Column found in multiple operators: "
-          <> commaSeparated (map dquote duplicates)
+          <> toErrorValue duplicates
           <> "."
       )
 
@@ -290,10 +277,11 @@ updateTable backendUpdate scenario sourceInfo tableInfo fieldName description = 
   guard $ not $ scenario == Frontend && upiBackendOnly updatePerms
   whereArg <- lift $ P.field whereName (Just whereDesc) <$> boolExp sourceInfo tableInfo
   selection <- lift $ mutationSelectionSet sourceInfo tableInfo
+  tCase <- asks getter
   let argsParser = liftA2 (,) backendUpdate whereArg
   pure $
     P.subselection fieldName description argsParser selection
-      <&> mkUpdateObject tableName columns updatePerms . fmap MOutMultirowFields
+      <&> mkUpdateObject tableName columns updatePerms (Just tCase) . fmap MOutMultirowFields
 
 -- | Construct a root field, normally called 'update_tablename_by_pk', that can be used
 -- to update a single in a DB table, specified by primary key. Only returns a
@@ -326,6 +314,7 @@ updateTableByPk backendUpdate scenario sourceInfo tableInfo fieldName descriptio
   guard $ not $ scenario == Frontend && upiBackendOnly updatePerms
   pkArgs <- MaybeT $ primaryKeysArguments tableInfo
   selection <- MaybeT $ tableSelectionSet sourceInfo tableInfo
+  tCase <- asks getter
   lift $ do
     tableGQLName <- getTableGQLName tableInfo
     pkObjectName <- mkTypename $ tableGQLName <> $$(litName "_pk_columns_input")
@@ -335,20 +324,21 @@ updateTableByPk backendUpdate scenario sourceInfo tableInfo fieldName descriptio
         argsParser = (,) <$> backendUpdate <*> P.field pkFieldName Nothing pkParser
     pure $
       P.subselection fieldName description argsParser selection
-        <&> mkUpdateObject tableName columns updatePerms . fmap MOutSinglerowObject
+        <&> mkUpdateObject tableName columns updatePerms (Just tCase) . fmap MOutSinglerowObject
 
 mkUpdateObject ::
   Backend b =>
   TableName b ->
   [ColumnInfo b] ->
   UpdPermInfo b ->
+  (Maybe NamingCase) ->
   ( ( BackendUpdate b (UnpreparedValue b),
       AnnBoolExp b (UnpreparedValue b)
     ),
     MutationOutputG b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b)
   ) ->
   AnnotatedUpdateG b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b)
-mkUpdateObject _auTable _auAllCols updatePerms ((_auBackend, whereExp), _auOutput) =
+mkUpdateObject _auTable _auAllCols updatePerms _auNamingConvention ((_auBackend, whereExp), _auOutput) =
   AnnotatedUpdateG {..}
   where
     permissionFilter = fmap partialSQLExpToUnpreparedValue <$> upiFilter updatePerms

@@ -35,10 +35,10 @@ import Data.Has
 import Data.HashMap.Strict.Extended qualified as Map
 import Data.Int (Int64)
 import Data.List.NonEmpty qualified as NE
-import Data.Sequence.NESeq qualified as NESeq
 import Data.Text.Extended
 import Hasura.Backends.Postgres.SQL.Types qualified as PG
 import Hasura.Base.Error
+import Hasura.Base.ErrorMessage (toErrorMessage)
 import Hasura.GraphQL.Parser.Class
 import Hasura.GraphQL.Parser.Internal.Parser qualified as P
 import Hasura.GraphQL.Schema.Backend
@@ -102,6 +102,7 @@ defaultSelectTable ::
   Maybe G.Description ->
   m (Maybe (FieldParser n (SelectExp b)))
 defaultSelectTable sourceInfo tableInfo fieldName description = runMaybeT do
+  tCase <- asks getter
   selectPermissions <- MaybeT $ tableSelectPermissions tableInfo
   selectionSetParser <- MaybeT $ tableSelectionList sourceInfo tableInfo
   lift $ memoizeOn 'defaultSelectTable (_siName sourceInfo, tableName, fieldName) do
@@ -116,7 +117,8 @@ defaultSelectTable sourceInfo tableInfo fieldName description = runMaybeT do
                 IR._asnFrom = IR.FromTable tableName,
                 IR._asnPerm = tablePermissionsInfo selectPermissions,
                 IR._asnArgs = args,
-                IR._asnStrfyNum = stringifyNumbers
+                IR._asnStrfyNum = stringifyNumbers,
+                IR._asnNamingConvention = Just tCase
               }
   where
     tableName = tableInfoName tableInfo
@@ -156,6 +158,7 @@ selectTableConnection ::
   PrimaryKeyColumns b ->
   m (Maybe (FieldParser n (ConnectionSelectExp b)))
 selectTableConnection sourceInfo tableInfo fieldName description pkeyColumns = runMaybeT do
+  tCase <- asks getter
   xRelayInfo <- hoistMaybe $ relayExtension @b
   selectPermissions <- MaybeT $ tableSelectPermissions tableInfo
   selectionSetParser <- fmap P.nonNullableParser <$> MaybeT $ tableConnectionSelectionSet sourceInfo tableInfo
@@ -176,7 +179,8 @@ selectTableConnection sourceInfo tableInfo fieldName description pkeyColumns = r
                     IR._asnFrom = IR.FromTable tableName,
                     IR._asnPerm = tablePermissionsInfo selectPermissions,
                     IR._asnArgs = args,
-                    IR._asnStrfyNum = stringifyNumbers
+                    IR._asnStrfyNum = stringifyNumbers,
+                    IR._asnNamingConvention = Just tCase
                   }
             }
   where
@@ -204,6 +208,7 @@ selectTableByPk ::
   Maybe G.Description ->
   m (Maybe (FieldParser n (SelectExp b)))
 selectTableByPk sourceInfo tableInfo fieldName description = runMaybeT do
+  tCase <- asks getter
   selectPermissions <- MaybeT $ tableSelectPermissions tableInfo
   primaryKeys <- hoistMaybe $ fmap _pkColumns . _tciPrimaryKey . _tiCoreInfo $ tableInfo
   selectionSetParser <- MaybeT $ tableSelectionSet sourceInfo tableInfo
@@ -229,7 +234,8 @@ selectTableByPk sourceInfo tableInfo fieldName description = runMaybeT do
                     IR._asnFrom = IR.FromTable tableName,
                     IR._asnPerm = permissions,
                     IR._asnArgs = IR.noSelectArgs {IR._saWhere = whereExpr},
-                    IR._asnStrfyNum = stringifyNumbers
+                    IR._asnStrfyNum = stringifyNumbers,
+                    IR._asnNamingConvention = Just tCase
                   }
   where
     tableName = tableInfoName tableInfo
@@ -256,6 +262,7 @@ defaultSelectTableAggregate ::
   Maybe G.Description ->
   m (Maybe (FieldParser n (AggSelectExp b)))
 defaultSelectTableAggregate sourceInfo tableInfo fieldName description = runMaybeT $ do
+  tCase <- asks getter
   selectPermissions <- MaybeT $ tableSelectPermissions tableInfo
   guard $ spiAllowAgg selectPermissions
   xNodesAgg <- hoistMaybe $ nodesAggExtension @b
@@ -284,7 +291,8 @@ defaultSelectTableAggregate sourceInfo tableInfo fieldName description = runMayb
                 IR._asnFrom = IR.FromTable tableName,
                 IR._asnPerm = tablePermissionsInfo selectPermissions,
                 IR._asnArgs = args,
-                IR._asnStrfyNum = stringifyNumbers
+                IR._asnStrfyNum = stringifyNumbers,
+                IR._asnNamingConvention = Just tCase
               }
   where
     tableName = tableInfoName tableInfo
@@ -757,7 +765,7 @@ tableConnectionArgs pkeyColumns sourceInfo tableInfo = do
     parseConnectionSplit maybeOrderBys splitKind cursorSplit = do
       cursorValue <- J.eitherDecode cursorSplit `onLeft` const throwInvalidCursor
       case maybeOrderBys of
-        Nothing -> forM (NESeq.toNonEmpty pkeyColumns) $
+        Nothing -> forM (nonEmptySeqToNonEmptyList pkeyColumns) $
           \columnInfo -> do
             let columnJsonPath = [J.Key $ K.fromText $ toTxt $ ciColumn columnInfo]
                 columnType = ciType columnInfo
@@ -783,7 +791,7 @@ tableConnectionArgs pkeyColumns sourceInfo tableInfo = do
                 IR.OrderByItemG orderType annObCol nullsOrder
       where
         throwInvalidCursor = parseError "the \"after\" or \"before\" cursor is invalid"
-        liftQErr = either (parseError . qeError) pure . runExcept
+        liftQErr = either (parseError . toErrorMessage . qeError) pure . runExcept
 
         mkAggregateOrderByPath = \case
           IR.AAOCount -> ["count"]

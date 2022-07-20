@@ -12,6 +12,7 @@ import Autodocodec.Extended (ValueWrapper (..))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
 import Data.List.NonEmpty qualified as NE
+import Harness.Backend.DataConnector (TestCase (..))
 import Harness.Backend.DataConnector qualified as DataConnector
 import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Yaml (yaml, yamlObjects)
@@ -91,57 +92,61 @@ tests opts = do
   describe "Basic Tests" $ do
     it "works with simple object query" $
       DataConnector.runMockedTest opts $
-        DataConnector.TestCase
-          { _given =
-              let albums =
-                    [yamlObjects|
-            - id: 1
-              title: For Those About To Rock We Salute You
-            |]
-               in DataConnector.chinookMock {DataConnector._queryResponse = \_ -> API.QueryResponse albums},
-            _whenRequest =
-              [graphql|
-            query getAlbum {
-              albums(limit: 1) {
-                id
-                title
+        let required =
+              DataConnector.TestCaseRequired
+                { _givenRequired =
+                    let albums =
+                          [yamlObjects|
+                            - id: 1
+                              title: For Those About To Rock We Salute You
+                          |]
+                     in DataConnector.chinookMock {DataConnector._queryResponse = \_ -> API.QueryResponse albums},
+                  _whenRequestRequired =
+                    [graphql|
+                      query getAlbum {
+                        albums(limit: 1) {
+                          id
+                          title
+                        }
+                      }
+                    |],
+                  _thenRequired =
+                    [yaml|
+                      data:
+                        albums:
+                          - id: 1
+                            title: For Those About To Rock We Salute You
+                    |]
+                }
+         in (DataConnector.defaultTestCase required)
+              { _whenQuery =
+                  Just
+                    ( API.QueryRequest
+                        { _qrTable = API.TableName {unTableName = "Album"},
+                          _qrTableRelationships = [],
+                          _qrQuery =
+                            API.Query
+                              { _qFields =
+                                  KM.fromList
+                                    [ ("id", API.ColumnField (ValueWrapper {getValue = API.ColumnName {unColumnName = "AlbumId"}})),
+                                      ("title", API.ColumnField (ValueWrapper {getValue = API.ColumnName {unColumnName = "Title"}}))
+                                    ],
+                                _qLimit = Just 1,
+                                _qOffset = Nothing,
+                                _qWhere = Just (API.And (ValueWrapper {getValue = []})),
+                                _qOrderBy = Nothing
+                              }
+                        }
+                    )
               }
-            }
-          |],
-            _whenQuery =
-              Just
-                ( API.QueryRequest
-                    { _qrTable = API.TableName {unTableName = "Album"},
-                      _qrTableRelationships = [],
-                      _qrQuery =
-                        API.Query
-                          { _qFields =
-                              KM.fromList
-                                [ ("id", API.ColumnField (ValueWrapper {getValue = API.ColumnName {unColumnName = "AlbumId"}})),
-                                  ("title", API.ColumnField (ValueWrapper {getValue = API.ColumnName {unColumnName = "Title"}}))
-                                ],
-                            _qLimit = Just 1,
-                            _qOffset = Nothing,
-                            _qWhere = Just (API.And (ValueWrapper {getValue = []})),
-                            _qOrderBy = Nothing
-                          }
-                    }
-                ),
-            _then =
-              [yaml|
-              data:
-                albums:
-                  - id: 1
-                    title: For Those About To Rock We Salute You
-            |]
-          }
 
     it "works with order_by id" $
       DataConnector.runMockedTest opts $
-        DataConnector.TestCase
-          { _given =
-              let albums =
-                    [yamlObjects|
+        let required =
+              DataConnector.TestCaseRequired
+                { _givenRequired =
+                    let albums =
+                          [yamlObjects|
               - id: 1
                 title: For Those About To Rock We Salute You
               - id: 2
@@ -149,9 +154,9 @@ tests opts = do
               - id: 3
                 title: Restless and Wild
             |]
-               in DataConnector.chinookMock {DataConnector._queryResponse = \_ -> API.QueryResponse albums},
-            _whenRequest =
-              [graphql|
+                     in DataConnector.chinookMock {DataConnector._queryResponse = \_ -> API.QueryResponse albums},
+                  _whenRequestRequired =
+                    [graphql|
               query getAlbum {
                 albums(limit: 3, order_by: {id: asc}) {
                   id
@@ -159,27 +164,8 @@ tests opts = do
                 }
               }
               |],
-            _whenQuery =
-              Just
-                ( API.QueryRequest
-                    { _qrTable = API.TableName {unTableName = "Album"},
-                      _qrTableRelationships = [],
-                      _qrQuery =
-                        API.Query
-                          { _qFields =
-                              KM.fromList
-                                [ ("id", API.ColumnField (ValueWrapper {getValue = API.ColumnName {unColumnName = "AlbumId"}})),
-                                  ("title", API.ColumnField (ValueWrapper {getValue = API.ColumnName {unColumnName = "Title"}}))
-                                ],
-                            _qLimit = Just 3,
-                            _qOffset = Nothing,
-                            _qWhere = Just (API.And (ValueWrapper {getValue = []})),
-                            _qOrderBy = Just (API.OrderBy {column = API.ColumnName {unColumnName = "AlbumId"}, ordering = API.Ascending} NE.:| [])
-                          }
-                    }
-                ),
-            _then =
-              [yaml|
+                  _thenRequired =
+                    [yaml|
               data:
                 albums:
                   - id: 1
@@ -189,4 +175,25 @@ tests opts = do
                   - id: 3
                     title: Restless and Wild
             |]
-          }
+                }
+         in (DataConnector.defaultTestCase required)
+              { _whenQuery =
+                  Just
+                    ( API.QueryRequest
+                        { _qrTable = API.TableName {unTableName = "Album"},
+                          _qrTableRelationships = [],
+                          _qrQuery =
+                            API.Query
+                              { _qFields =
+                                  KM.fromList
+                                    [ ("id", API.ColumnField (ValueWrapper {getValue = API.ColumnName {unColumnName = "AlbumId"}})),
+                                      ("title", API.ColumnField (ValueWrapper {getValue = API.ColumnName {unColumnName = "Title"}}))
+                                    ],
+                                _qLimit = Just 3,
+                                _qOffset = Nothing,
+                                _qWhere = Just (API.And (ValueWrapper {getValue = []})),
+                                _qOrderBy = Just (API.OrderBy {column = API.ColumnName {unColumnName = "AlbumId"}, ordering = API.Ascending} NE.:| [])
+                              }
+                        }
+                    )
+              }

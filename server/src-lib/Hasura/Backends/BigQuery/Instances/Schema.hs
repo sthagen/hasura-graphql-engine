@@ -14,6 +14,7 @@ import Data.Text.Extended
 import Hasura.Backends.BigQuery.Name
 import Hasura.Backends.BigQuery.Types qualified as BigQuery
 import Hasura.Base.Error
+import Hasura.Base.ErrorMessage (toErrorMessage)
 import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.BoolExp
 import Hasura.GraphQL.Schema.Build qualified as GSB
@@ -216,7 +217,7 @@ bqColumnParser columnType (G.Nullability isNullable) =
             { pType = schemaType,
               pParser =
                 P.valueToJSON (P.toGraphQLType schemaType)
-                  >=> either (P.parseErrorWith ParseFailed . qeError) pure . runAesonParser J.parseJSON
+                  >=> either (P.parseErrorWith ParseFailed . toErrorMessage . qeError) pure . runAesonParser J.parseJSON
             }
     stringBased :: MonadParse m => G.Name -> Parser 'Both m Text
     stringBased scalarName =
@@ -438,7 +439,8 @@ bqComputedField sourceName ComputedFieldInfo {..} tableName tableInfo = runMaybe
                     IR._asnFrom = IR.FromFunction (_cffName _cfiFunction) functionArgs' Nothing,
                     IR._asnPerm = tablePermissionsInfo returnTablePermissions,
                     IR._asnArgs = args,
-                    IR._asnStrfyNum = stringifyNumbers
+                    IR._asnStrfyNum = stringifyNumbers,
+                    IR._asnNamingConvention = Nothing
                   }
     BigQuery.ReturnTableSchema returnFields -> do
       -- Check if the computed field is available in the select permission
@@ -464,7 +466,8 @@ bqComputedField sourceName ComputedFieldInfo {..} tableName tableInfo = runMaybe
                     IR._asnFrom = IR.FromFunction (_cffName _cfiFunction) functionArgs' Nothing,
                     IR._asnPerm = IR.noTablePermissions,
                     IR._asnArgs = IR.noSelectArgs,
-                    IR._asnStrfyNum = stringifyNumbers
+                    IR._asnStrfyNum = stringifyNumbers,
+                    IR._asnNamingConvention = Nothing
                   }
   where
     fieldDescription :: Maybe G.Description
