@@ -199,7 +199,7 @@ Please submit any feedback you may have for this feature at https://github.com/h
 ### Bug fixes and improvements
 
 - server: fix bug where hasura SQL trigger was not dropped when MSSQL source is dropped
-- server: Kriti `basicFunctions` now available for REST Connectors
+- server: Kriti `basicFunctions` now available for REST Connectors and Webhook Transforms
 - server: use `root_field_namespace` as prefix for remote schema (fixes #8438)
 - server: allow all argument types for BigQuery routines
 - server: fix prefix/suffix behaviour for `graphql-default` naming convention (fixes #8544)
@@ -218,6 +218,14 @@ Please submit any feedback you may have for this feature at https://github.com/h
   - Debian graphql-engine docker images (`hasura/graphql-engine:<VERSION>`) now use a ubuntu base instead of debian.
   - Debian flavour of images (`hasura/graphql-engine:<VERSION>.debian`) are still published to Docker Hub.
   - Centos flavour of images (`hasura/graphql-engine:<VERSION>.centos`) are no longer supported.
+
+## v2.9.0-beta.3
+
+### Bug fixes and improvements
+
+- server: Fix bug where Hasura SQL trigger was not dropped when an MS SQL Server database is dropped
+- server: Allow all argument types for BigQuery routines
+- console: Fix notifications not being shown in certain cases on the console on Hasura Cloud
 
 ## v2.9.0-beta.2
 
