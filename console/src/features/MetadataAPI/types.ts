@@ -25,6 +25,7 @@ export const allowedMetadataTypesArr = [
   'pg_create_delete_permission',
   'pg_drop_delete_permission',
   'pg_set_permission_comment',
+  'pg_track_table',
   'mssql_create_insert_permission',
   'mssql_drop_insert_permission',
   'mssql_create_select_permission',
@@ -68,16 +69,14 @@ export interface TableRelationship {
   name: string;
   comment: string;
   type: 'object' | 'array';
-  tableRelationships?: {
-    from: {
-      table: string;
-      column: string[];
-    };
-    to: {
-      table: string;
-      column: string[];
-    };
-  }[];
+  from: {
+    table: string;
+    column: string[];
+  };
+  to: {
+    table: string;
+    column: string[];
+  };
 }
 
 export type AllMetadataQueries = `${SupportedDataSourcesPrefix}${MetadataQueryType}`;
