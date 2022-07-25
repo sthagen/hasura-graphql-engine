@@ -286,6 +286,7 @@ common lib-depends
                      -- for capturing various metrics
                      , ekg-core
                      , ekg-json
+                     , ekg-prometheus
 
                      -- metrics for CI integration
                      , ci-info
@@ -635,6 +636,7 @@ library
 
                      , Hasura.Server.API.Config
                      , Hasura.Server.Metrics
+                     , Hasura.Server.Prometheus
                      , Hasura.Server.Telemetry
                      , Hasura.Server.Telemetry.Types
                      , Hasura.Server.Telemetry.Counters
@@ -760,6 +762,7 @@ library
                      , Hasura.RQL.IR.Root
                      , Hasura.RQL.IR
                      , Hasura.GraphQL.Analyse
+                     , Hasura.GraphQL.ApolloFederation
                      , Hasura.GraphQL.Context
                      , Hasura.GraphQL.Execute
                      , Hasura.GraphQL.Execute.Action
@@ -901,13 +904,14 @@ executable graphql-engine
   build-depends:     base
                    , graphql-engine
                    , bytestring
+                   , ekg-core
+                   , ekg-prometheus
                    , kan-extensions
                    , pg-client
                    , text
                    , text-conversions
                    , time
                    , unix
-                   , ekg-core
 
 -- The OpenAPI specification for metadata is experimental and incomplete. Please
 -- do not incorporate it into essential workflows at this time.
@@ -1224,7 +1228,6 @@ test-suite tests-hspec
 
  -- Test
     Test.ArrayParamPermissionSpec
-    Test.ArrayRelationshipsSpec
     Test.BackendOnlyPermissionsSpec
     Test.BasicFieldsSpec
     Test.BigQuery.ComputedFieldSpec
@@ -1261,11 +1264,11 @@ test-suite tests-hspec
     Test.LongIdentifiersSpec
     Test.NestedRelationshipsSpec
     Test.ObjectRelationshipsLimitSpec
-    Test.ObjectRelationshipsSpec
     Test.Queries.FilterSearchSpec
     Test.OrderingSpec
     Test.PostgresTypesSpec
     Test.PrimaryKeySpec
+    Test.Queries.Simple.ObjectQueriesSpec
     Test.RemoteRelationship.FromRemoteSchemaSpec
     Test.RemoteRelationship.MetadataAPI.ClearMetadataSpec
     Test.RemoteRelationship.MetadataAPI.Common
@@ -1276,6 +1279,9 @@ test-suite tests-hspec
     Test.RemoteRelationship.XToRemoteSchemaRelationshipSpec
     Test.RequestHeadersSpec
     Test.RunSQLSpec
+    Test.Schema.TableRelationships.ArrayRelationshipsSpec
+    Test.Schema.TableRelationships.ObjectRelationshipsSpec
+    Test.Schema.DataValidation.PermissionSpec
     Test.SQLServer.InsertVarcharColumnSpec
     Test.SelectSpec
     Test.SerializationSpec

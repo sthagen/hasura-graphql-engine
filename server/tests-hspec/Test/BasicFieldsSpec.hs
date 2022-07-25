@@ -91,28 +91,6 @@ author =
 
 tests :: Context.Options -> SpecWith TestEnvironment
 tests opts = describe "BasicFieldsSpec" $ do
-  it "Author fields" $ \testEnvironment ->
-    shouldReturnYaml
-      opts
-      ( GraphqlEngine.postGraphql
-          testEnvironment
-          [graphql|
-query {
-  hasura_author(order_by:[{id:asc}]) {
-    name
-    id
-  }
-}
-|]
-      )
-      [yaml|
-data:
-  hasura_author:
-  - name: Author 1
-    id: 1
-  - name: Author 2
-    id: 2
-|]
   it "Use operationName" $ \testEnvironment ->
     shouldReturnYaml
       opts

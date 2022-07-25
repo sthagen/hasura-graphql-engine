@@ -156,7 +156,8 @@ instance FromEnv [API] where
         "PGDUMP" -> Right PGDUMP
         "DEVELOPER" -> Right DEVELOPER
         "CONFIG" -> Right CONFIG
-        _ -> Left "Only expecting list of comma separated API types metadata,graphql,pgdump,developer,config"
+        "METRICS" -> Right METRICS
+        _ -> Left "Only expecting list of comma separated API types metadata,graphql,pgdump,developer,config,metrics"
 
 instance FromEnv NamingCase where
   fromEnv = parseNamingConventionFromText . T.pack
@@ -169,10 +170,11 @@ instance FromEnv [ExperimentalFeature] where
         "streaming_subscriptions" -> Right EFStreamingSubscriptions
         "optimize_permission_filters" -> Right EFOptimizePermissionFilters
         "naming_convention" -> Right EFNamingConventions
+        "apollo_federation" -> Right EFApolloFederation
         _ ->
           Left $
             "Only expecting list of comma separated experimental features, options are:"
-              ++ "inherited_roles, streaming_subscriptions, optimize_permission_filters, naming_convention"
+              ++ "inherited_roles, streaming_subscriptions, optimize_permission_filters, naming_convention, apollo_federation"
 
 instance FromEnv ES.BatchSize where
   fromEnv s = do
