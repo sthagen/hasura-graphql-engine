@@ -8,6 +8,7 @@ module Hasura.Server.Init.Config
     HGECommand (..),
     _HCServe,
     HGEOptions (..),
+    hoCommand,
     HGEOptionsRaw (..),
     horDatabaseUrl,
     horMetadataDbUrl,
@@ -21,6 +22,7 @@ module Hasura.Server.Init.Config
     PostgresRawConnInfo (..),
     _PGConnDatabaseUrl,
     _PGConnDetails,
+    mkUrlConnInfo,
     RawAuthHook,
     RawConnParams (..),
     RawServeOptions (..),
@@ -38,7 +40,6 @@ where
 
 --------------------------------------------------------------------------------
 
---------------------------------------------------------------------------------
 import Control.Lens (Lens', Prism', lens, prism')
 import Data.Aeson
 import Data.Aeson qualified as J
@@ -327,6 +328,9 @@ data PostgresRawConnInfo
   | PGConnDetails !PostgresRawConnDetails
   deriving (Show, Eq)
 
+mkUrlConnInfo :: String -> PostgresRawConnInfo
+mkUrlConnInfo = PGConnDatabaseUrl . mkPlainURLTemplate . T.pack
+
 _PGConnDatabaseUrl :: Prism' PostgresRawConnInfo URLTemplate
 _PGConnDatabaseUrl = prism' PGConnDatabaseUrl $ \case
   PGConnDatabaseUrl template -> Just template
@@ -390,7 +394,10 @@ horCommand = lens _horCommand $ \hdu a -> hdu {_horCommand = a}
 
 -- | The final processed HGE options.
 data HGEOptions impl = HGEOptions
-  { hoDatabaseUrl :: !(PostgresConnInfo (Maybe UrlConf)),
-    hoMetadataDbUrl :: !(Maybe String),
-    hoCommand :: !(HGECommand impl)
+  { _hoDatabaseUrl :: !(PostgresConnInfo (Maybe UrlConf)),
+    _hoMetadataDbUrl :: !(Maybe String),
+    _hoCommand :: !(HGECommand impl)
   }
+
+hoCommand :: Lens' (HGEOptions impl) (HGECommand impl)
+hoCommand = lens _hoCommand $ \hdu a -> hdu {_hoCommand = a}

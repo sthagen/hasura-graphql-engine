@@ -1036,8 +1036,6 @@ test-suite graphql-engine-tests
     Hasura.Backends.DataConnector.API.V0.Scalar.ValueSpec
     Hasura.Backends.DataConnector.API.V0.SchemaSpec
     Hasura.Backends.DataConnector.API.V0.TableSpec
-    Hasura.Backends.DataConnector.API.V0Spec
-    Hasura.Backends.DataConnector.API.V0Spec
     Hasura.Backends.DataConnector.RQLGenerator
     Hasura.Backends.DataConnector.RQLGenerator.GenAnnSelectG
     Hasura.Backends.DataConnector.RQLGenerator.GenCommon
@@ -1231,7 +1229,6 @@ test-suite tests-hspec
     Test.BackendOnlyPermissionsSpec
     Test.BasicFieldsSpec
     Test.BigQuery.ComputedFieldSpec
-    Test.BigQuery.GraphQLQueryBasicSpec
     Test.BigQuery.Metadata.ComputedFieldSpec
     Test.ColumnPresetsSpec
     Test.CustomFieldNamesSpec
@@ -1255,7 +1252,6 @@ test-suite tests-hspec
     Test.EventTriggersRunSQLSpec
     Test.EventTriggerDropSourceCleanupSpec
     Test.GatheringUniqueConstraintsSpec
-    Test.HelloWorldSpec
     Test.InsertCheckPermissionSpec
     Test.InsertDefaultsSpec
     Test.InsertEnumColumnSpec
@@ -1268,6 +1264,7 @@ test-suite tests-hspec
     Test.OrderingSpec
     Test.PostgresTypesSpec
     Test.PrimaryKeySpec
+    Test.Queries.Paginate.LimitSpec
     Test.Queries.Simple.ObjectQueriesSpec
     Test.RemoteRelationship.FromRemoteSchemaSpec
     Test.RemoteRelationship.MetadataAPI.ClearMetadataSpec
@@ -1283,7 +1280,6 @@ test-suite tests-hspec
     Test.Schema.TableRelationships.ObjectRelationshipsSpec
     Test.Schema.DataValidation.PermissionSpec
     Test.SQLServer.InsertVarcharColumnSpec
-    Test.SelectSpec
     Test.SerializationSpec
     Test.ServiceLivenessSpec
     Test.UpdateManySpec
