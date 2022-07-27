@@ -158,6 +158,7 @@ common lib-depends
                      , dc-api
                      , free
                      , hashable
+                     , hasura-error-message
                      , http-client-tls
                      , http-conduit
                      , http-media
@@ -352,6 +353,7 @@ library dc-api
                      , base
                      , bytestring
                      , deepseq
+                     , extra
                      , hashable
                      , insert-ordered-containers
                      , lens
@@ -424,10 +426,7 @@ library
                      , Hasura.Metadata.Class
 
                      , Hasura.Base.Error
-                     , Hasura.Base.ErrorMessage
-                     , Hasura.Base.ErrorValue
                      , Hasura.Base.Instances
-                     , Hasura.Base.ToErrorValue
 
                      , Hasura.Backends.BigQuery.Connection
                      , Hasura.Backends.BigQuery.Execute
@@ -800,6 +799,7 @@ library
                      , Hasura.GraphQL.Parser.Collect
                      , Hasura.GraphQL.Parser.DirectiveName
                      , Hasura.GraphQL.Parser.Directives
+                     , Hasura.GraphQL.Parser.ErrorCode
                      , Hasura.GraphQL.Parser.Internal.Convert
                      , Hasura.GraphQL.Parser.Internal.Input
                      , Hasura.GraphQL.Parser.Internal.Parser
@@ -1023,7 +1023,6 @@ test-suite graphql-engine-tests
     Discover
     Hasura.AppSpec
     Hasura.Base.Error.TestInstances
-    Hasura.Base.ErrorMessageSpec
     Hasura.Backends.DataConnector.API.V0.AggregateSpec
     Hasura.Backends.DataConnector.API.V0.CapabilitiesSpec
     Hasura.Backends.DataConnector.API.V0.ColumnSpec
@@ -1059,6 +1058,7 @@ test-suite graphql-engine-tests
     Hasura.GraphQL.NamespaceSpec
     Hasura.GraphQL.Parser.DirectivesTest
     Hasura.GraphQL.Parser.MonadParseTest
+    Hasura.GraphQL.Parser.TestInstances
     Hasura.GraphQL.Parser.TestUtils
     Hasura.GraphQL.Schema.Build.UpdateSpec
     Hasura.GraphQL.Schema.RemoteTest
@@ -1088,7 +1088,6 @@ test-suite graphql-engine-tests
     Hasura.StreamingSubscriptionSuite
     Network.HTTP.Client.TransformableSpec
     Test.Aeson.Utils
-    Test.Autodocodec.Extended
     Test.Parser.Expectation
     Test.Parser.Field
     Test.Parser.Internal
@@ -1227,7 +1226,6 @@ test-suite tests-hspec
  -- Test
     Test.ArrayParamPermissionSpec
     Test.BackendOnlyPermissionsSpec
-    Test.BasicFieldsSpec
     Test.BigQuery.ComputedFieldSpec
     Test.BigQuery.Metadata.ComputedFieldSpec
     Test.ColumnPresetsSpec
@@ -1248,24 +1246,27 @@ test-suite tests-hspec
     Test.DisableRootFields.SelectPermission.EnableAggSpec
     Test.DisableRootFields.SelectPermission.EnableAllRootFieldsSpec
     Test.DisableRootFields.SelectPermission.EnablePKSpec
-    Test.EventTriggersRecreationSpec
-    Test.EventTriggersRunSQLSpec
-    Test.EventTriggerDropSourceCleanupSpec
+    Test.EventTrigger.EventTriggersRecreationSpec
+    Test.EventTrigger.EventTriggersRunSQLSpec
+    Test.EventTrigger.EventTriggerDropSourceCleanupSpec
+    Test.EventTrigger.EventTriggersPGUntrackTableCleanupSpec
+    Test.EventTrigger.EventTriggersMSSQLUntrackTableCleanupSpec
     Test.GatheringUniqueConstraintsSpec
     Test.InsertCheckPermissionSpec
     Test.InsertDefaultsSpec
     Test.InsertEnumColumnSpec
     Test.InsertOnConflictSpec
-    Test.LimitOffsetSpec
     Test.LongIdentifiersSpec
     Test.NestedRelationshipsSpec
     Test.ObjectRelationshipsLimitSpec
     Test.Queries.FilterSearchSpec
-    Test.OrderingSpec
+    Test.Queries.SortSpec
     Test.PostgresTypesSpec
-    Test.PrimaryKeySpec
     Test.Queries.Paginate.LimitSpec
+    Test.Queries.Paginate.OffsetSpec
     Test.Queries.Simple.ObjectQueriesSpec
+    Test.Queries.Simple.OperationNameSpec
+    Test.Queries.Simple.PrimaryKeySpec
     Test.RemoteRelationship.FromRemoteSchemaSpec
     Test.RemoteRelationship.MetadataAPI.ClearMetadataSpec
     Test.RemoteRelationship.MetadataAPI.Common

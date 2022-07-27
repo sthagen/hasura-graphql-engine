@@ -327,6 +327,15 @@ initialiseServeCtx env GlobalCtx {..} so@ServeOptions {..} serverMetrics = do
   instanceId <- liftIO generateInstanceId
   latch <- liftIO newShutdownLatch
   loggers@(Loggers loggerCtx logger pgLogger) <- mkLoggers soEnabledLogTypes soLogLevel
+  when (null soAdminSecret) $ do
+    let errMsg :: Text
+        errMsg = "WARNING: No admin secret provided"
+    unLogger logger $
+      StartupLog
+        { slLogLevel = LevelWarn,
+          slKind = "no_admin_secret",
+          slInfo = A.toJSON errMsg
+        }
   -- log serve options
   unLogger logger $ serveOptsToLog so
 
@@ -997,7 +1006,7 @@ instance (Monad m) => Tracing.HasReporter (PGMetadataStorageAppT m)
 
 instance (Monad m) => HasResourceLimits (PGMetadataStorageAppT m) where
   askHTTPHandlerLimit = pure $ ResourceLimits id
-  askGraphqlOperationLimit = pure $ \_ _ -> ResourceLimits id
+  askGraphqlOperationLimit _ = pure $ \_ _ -> ResourceLimits id
 
 instance (MonadIO m) => HttpLog (PGMetadataStorageAppT m) where
   type ExtraHttpLogMetadata (PGMetadataStorageAppT m) = ()
