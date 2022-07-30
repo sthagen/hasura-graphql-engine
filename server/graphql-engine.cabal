@@ -207,6 +207,7 @@ common lib-depends
                      , vector-instances
                      , wai
                      , witch
+                     , witherable >= 0.4
 
                      -- Encoder related
                      , uuid
@@ -405,7 +406,6 @@ library
                      , Data.HashMap.Strict.Multi
                      , Data.HashMap.Strict.NonEmpty
                      , Data.HashMap.Strict.InsOrd.Extended
-                     , Data.IntMap.Strict.Extended
                      , Data.List.Extended
                      , Data.Parser.CacheControl
                      , Data.Parser.Expires
@@ -674,6 +674,7 @@ library
                      , Hasura.RQL.Types.Instances
                      , Hasura.RQL.Types.Metadata
                      , Hasura.RQL.Types.Metadata.Backend
+                     , Hasura.RQL.Types.Metadata.Common
                      , Hasura.RQL.Types.Metadata.Instances
                      , Hasura.RQL.Types.Metadata.Object
                      , Hasura.RQL.Types.Network
@@ -1095,7 +1096,7 @@ test-suite graphql-engine-tests
     Test.QuickCheck.Extended
 
 test-suite tests-hspec
-  import: common-all, common-exe
+  import: common-all
   type: exitcode-stdio-1.0
   build-tool-depends: hspec-discover:hspec-discover
   build-depends:
@@ -1183,7 +1184,11 @@ test-suite tests-hspec
   hs-source-dirs: tests-hspec
   -- Turning off optimizations is intentional; tests aren't
   -- performance sensitive and waiting for compilation is a problem.
-  ghc-options: -Wall -O0 -threaded
+  ghc-options:
+    -Wall -O0
+    -threaded
+    -rtsopts "-with-rtsopts=-N"
+
   main-is: Spec.hs
   other-modules:
     SpecHook
@@ -1228,6 +1233,7 @@ test-suite tests-hspec
     Test.BackendOnlyPermissionsSpec
     Test.BigQuery.ComputedFieldSpec
     Test.BigQuery.Metadata.ComputedFieldSpec
+    Test.BigQuery.TypeInterpretationSpec
     Test.ColumnPresetsSpec
     Test.CustomFieldNamesSpec
     Test.CustomRootFieldsSpec
@@ -1257,11 +1263,12 @@ test-suite tests-hspec
     Test.InsertEnumColumnSpec
     Test.InsertOnConflictSpec
     Test.LongIdentifiersSpec
+    Test.Mutations.MultiplePerRequest.UpdateManySpec
     Test.NestedRelationshipsSpec
     Test.ObjectRelationshipsLimitSpec
+    Test.Postgres.TimestampSpec
     Test.Queries.FilterSearchSpec
     Test.Queries.SortSpec
-    Test.PostgresTypesSpec
     Test.Queries.Paginate.LimitSpec
     Test.Queries.Paginate.OffsetSpec
     Test.Queries.Simple.ObjectQueriesSpec
@@ -1281,9 +1288,7 @@ test-suite tests-hspec
     Test.Schema.TableRelationships.ObjectRelationshipsSpec
     Test.Schema.DataValidation.PermissionSpec
     Test.SQLServer.InsertVarcharColumnSpec
-    Test.SerializationSpec
     Test.ServiceLivenessSpec
-    Test.UpdateManySpec
     Test.ViewsSpec
 
 test-suite tests-dc-api
@@ -1333,6 +1338,7 @@ test-suite tests-dc-api
     , Test.CapabilitiesSpec
     , Test.HealthSpec
     , Test.QuerySpec
+    , Test.QuerySpec.AggregatesSpec
     , Test.QuerySpec.BasicSpec
     , Test.QuerySpec.RelationshipsSpec
     , Test.SchemaSpec

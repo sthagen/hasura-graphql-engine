@@ -155,42 +155,54 @@ rawConnInfoToUrlConf maybeRawConnInfo = do
 -- corresponding values from the 'WithEnv' context.
 mkServeOptions :: L.EnabledLogTypes impl => RawServeOptions impl -> WithEnv (ServeOptions impl)
 mkServeOptions rso = do
-  port <-
-    fromMaybe 8080
-      <$> withEnv (rsoPort rso) (fst servePortEnv)
-  host <-
-    fromMaybe "*"
-      <$> withEnv (rsoHost rso) (fst serveHostEnv)
+  port <- fromMaybe 8080 <$> withEnv (rsoPort rso) (fst servePortEnv)
+
+  host <- fromMaybe "*" <$> withEnv (rsoHost rso) (fst serveHostEnv)
 
   connParams <- mkConnParams $ rsoConnParams rso
+
   txIso <- fromMaybe Q.ReadCommitted <$> withEnv (rsoTxIso rso) (fst txIsolationEnv)
+
   adminScrt <- fmap (maybe mempty Set.singleton) $ withEnvs (rsoAdminSecret rso) $ map fst [adminSecretEnv, accessKeyEnv]
+
   authHook <- mkAuthHook $ rsoAuthHook rso
+
   jwtSecret <- (`onNothing` mempty) <$> withEnv (rsoJwtSecret rso) (fst jwtSecretEnv)
 
   unAuthRole <- withEnv (rsoUnAuthRole rso) $ fst unAuthRoleEnv
+
   corsCfg <- mkCorsConfig $ rsoCorsConfig rso
-  enableConsole <-
-    withEnvBool (rsoEnableConsole rso) $
-      fst enableConsoleEnv
+
+  enableConsole <- withEnvBool (rsoEnableConsole rso) $ fst enableConsoleEnv
+
   consoleAssetsDir <- withEnv (rsoConsoleAssetsDir rso) (fst consoleAssetsDirEnv)
-  enableTelemetry <-
-    fromMaybe True
-      <$> withEnv (rsoEnableTelemetry rso) (fst enableTelemetryEnv)
-  strfyNum <- bool Options.Don'tStringifyNumbers Options.StringifyNumbers <$> withEnvBool (rsoStringifyNum rso) (fst stringifyNumEnv)
+
+  enableTelemetry <- fromMaybe True <$> withEnv (rsoEnableTelemetry rso) (fst enableTelemetryEnv)
+
+  strfyNum <-
+    case rsoStringifyNum rso of
+      Options.Don'tStringifyNumbers -> fmap (fromMaybe Options.Don'tStringifyNumbers) $ considerEnv (fst stringifyNumEnv)
+      stringifyNums -> pure stringifyNums
+
   dangerousBooleanCollapse <-
     fromMaybe False <$> withEnv (rsoDangerousBooleanCollapse rso) (fst dangerousBooleanCollapseEnv)
+
   enabledAPIs <-
     Set.fromList . fromMaybe defaultEnabledAPIs
       <$> withEnv (rsoEnabledAPIs rso) (fst enabledAPIsEnv)
+
   lqOpts <- mkLQOpts
+
   streamQOpts <- mkStreamQueryOpts
+
   enableAL <- withEnvBool (rsoEnableAllowlist rso) $ fst enableAllowlistEnv
-  enabledLogs <-
-    maybe L.defaultEnabledLogTypes Set.fromList
-      <$> withEnv (rsoEnabledLogTypes rso) (fst enabledLogsEnv)
+
+  enabledLogs <- maybe L.defaultEnabledLogTypes Set.fromList <$> withEnv (rsoEnabledLogTypes rso) (fst enabledLogsEnv)
+
   serverLogLevel <- fromMaybe L.LevelInfo <$> withEnv (rsoLogLevel rso) (fst logLevelEnv)
+
   devMode <- withEnvBool (rsoDevMode rso) $ fst graphqlDevModeEnv
+
   adminInternalErrors <-
     fromMaybe True
       <$> withEnv (rsoAdminInternalErrors rso) (fst graphqlAdminInternalErrorsEnv) -- Default to `true` to enable backwards compatibility
@@ -201,17 +213,21 @@ mkServeOptions rso = do
             | otherwise -> InternalErrorsDisabled
 
   eventsHttpPoolSize <- withEnv (rsoEventsHttpPoolSize rso) (fst graphqlEventsHttpPoolSizeEnv)
+
   eventsFetchInterval <- withEnv (rsoEventsFetchInterval rso) (fst graphqlEventsFetchIntervalEnv)
-  maybeAsyncActionsFetchInterval <- withEnv (rsoAsyncActionsFetchInterval rso) (fst asyncActionsFetchIntervalEnv)
+
+  asyncActionsFetchInterval <- fromMaybe defaultAsyncActionsFetchInterval <$> withEnv (rsoAsyncActionsFetchInterval rso) (fst asyncActionsFetchIntervalEnv)
+
   enableRemoteSchemaPerms <-
-    bool Options.DisableRemoteSchemaPermissions Options.EnableRemoteSchemaPermissions
-      <$> withEnvBool (rsoEnableRemoteSchemaPermissions rso) (fst enableRemoteSchemaPermsEnv)
+    case rsoEnableRemoteSchemaPermissions rso of
+      Options.DisableRemoteSchemaPermissions -> fmap (fromMaybe Options.DisableRemoteSchemaPermissions) $ considerEnv (fst enableRemoteSchemaPermsEnv)
+      enableRemoteSchemaPermissions -> pure enableRemoteSchemaPermissions
 
   webSocketCompressionFromEnv <-
     withEnvBool (rsoWebSocketCompression rso) $
       fst webSocketCompressionEnv
 
-  maybeSchemaPollInterval <- withEnv (rsoSchemaPollInterval rso) (fst schemaPollIntervalEnv)
+  schemaPollInterval <- fromMaybe defaultSchemaPollInterval <$> withEnv (rsoSchemaPollInterval rso) (fst schemaPollIntervalEnv)
 
   let connectionOptions =
         WS.defaultConnectionOptions
@@ -220,20 +236,15 @@ mkServeOptions rso = do
                 then WS.PermessageDeflateCompression WS.defaultPermessageDeflate
                 else WS.NoCompression
           }
-      asyncActionsFetchInterval = maybe defaultAsyncActionsFetchInterval msToOptionalInterval maybeAsyncActionsFetchInterval
-      schemaPollInterval = maybe defaultSchemaPollInterval msToOptionalInterval maybeSchemaPollInterval
-  webSocketKeepAlive <-
-    KeepAliveDelay . fromIntegral . fromMaybe 5
-      <$> withEnv (rsoWebSocketKeepAlive rso) (fst webSocketKeepAliveEnv)
+  webSocketKeepAlive <- fromMaybe defaultKeepAliveDelay <$> withEnv (rsoWebSocketKeepAlive rso) (fst webSocketKeepAliveEnv)
 
   experimentalFeatures <- maybe mempty Set.fromList <$> withEnv (rsoExperimentalFeatures rso) (fst experimentalFeaturesEnv)
-  inferFunctionPerms <-
-    maybe Options.InferFunctionPermissions (bool Options.Don'tInferFunctionPermissions Options.InferFunctionPermissions)
-      <$> withEnv (rsoInferFunctionPermissions rso) (fst inferFunctionPermsEnv)
 
-  maintenanceMode <-
-    bool Types.MaintenanceModeDisabled (Types.MaintenanceModeEnabled ())
-      <$> withEnvBool (rsoEnableMaintenanceMode rso) (fst enableMaintenanceModeEnv)
+  inferFunctionPerms <- fromMaybe Options.InferFunctionPermissions <$> withEnv (rsoInferFunctionPermissions rso) (fst inferFunctionPermsEnv)
+
+  maintenanceMode <- case rsoEnableMaintenanceMode rso of
+    Types.MaintenanceModeDisabled -> fmap (fromMaybe Types.MaintenanceModeDisabled) $ considerEnv (fst enableMaintenanceModeEnv)
+    maintenanceModeEnabled -> pure maintenanceModeEnabled
 
   eventsFetchBatchSize <-
     fromMaybe EventTrigger.defaultFetchBatchSize
@@ -243,12 +254,11 @@ mkServeOptions rso = do
     fromMaybe 60 <$> withEnv (rsoGracefulShutdownTimeout rso) (fst gracefulShutdownEnv)
 
   webSocketConnectionInitTimeout <-
-    WSConnectionInitTimeout . fromIntegral . fromMaybe 3
-      <$> withEnv (rsoWebSocketConnectionInitTimeout rso) (fst webSocketConnectionInitTimeoutEnv)
+    fromMaybe defaultWSConnectionInitTimeout <$> withEnv (rsoWebSocketConnectionInitTimeout rso) (fst webSocketConnectionInitTimeoutEnv)
 
-  enableMetadataQueryLogging <-
-    bool Logging.MetadataQueryLoggingDisabled Logging.MetadataQueryLoggingEnabled
-      <$> withEnvBool (rsoEnableMetadataQueryLoggingEnv rso) (fst enableMetadataQueryLoggingEnv)
+  enableMetadataQueryLogging <- case rsoEnableMetadataQueryLoggingEnv rso of
+    Logging.MetadataQueryLoggingDisabled -> fromMaybe Logging.MetadataQueryLoggingDisabled <$> considerEnv (fst enableMetadataQueryLoggingEnv)
+    metadataQueryLoggingEnabled -> pure metadataQueryLoggingEnabled
 
   globalDefaultNamingCase <- withEnv (rsoDefaultNamingConvention rso) $ fst defaultNamingConventionEnv
 

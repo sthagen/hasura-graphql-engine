@@ -89,6 +89,8 @@ export interface CustomRootFields {
   select_by_pk?: string | CustomRootField | null;
   /** Customise the `<table-name>_aggregate` root field */
   select_aggregate?: string | CustomRootField | null;
+  /** Customise the `<table-name>_stream` root field */
+  select_stream?: string | CustomRootField | null;
   /** Customise the `insert_<table-name>` root field */
   insert?: string | CustomRootField | null;
   /** Customise the `insert_<table-name>_one` root field */
@@ -520,6 +522,8 @@ export interface CronTrigger {
   include_in_metadata: boolean;
   /**	Custom comment. */
   comment?: string;
+  /** Rest connectors. */
+  request_transform?: RequestTransform;
 }
 
 /**
@@ -925,6 +929,9 @@ interface RequestTransformFields {
   template_engine?: Nullable<RequestTransformTemplateEngine>;
 }
 
+/**
+ * https://hasura.io/docs/latest/graphql/core/api-reference/syntax-defs/#requesttransformation
+ */
 interface RequestTransformV1 extends RequestTransformFields {
   version: 1;
   body?: string;
