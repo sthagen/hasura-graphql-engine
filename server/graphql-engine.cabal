@@ -677,6 +677,7 @@ library
                      , Hasura.RQL.Types.Metadata.Common
                      , Hasura.RQL.Types.Metadata.Instances
                      , Hasura.RQL.Types.Metadata.Object
+                     , Hasura.RQL.Types.Metadata.Serialization
                      , Hasura.RQL.Types.Network
                      , Hasura.RQL.Types.Permission
                      , Hasura.RQL.Types.QueryCollection
@@ -1244,7 +1245,6 @@ test-suite tests-hspec
     Test.DataConnector.AggregateQuerySpec
     Test.DataConnector.QuerySpec
     Test.DataConnector.SelectPermissionsSpec
-    Test.DirectivesSpec
     Test.DisableRootFields.Common
     Test.DisableRootFields.DefaultRootFieldsSpec
     Test.DisableRootFields.SelectPermission.DisableAllRootFieldsRelationshipSpec
@@ -1264,16 +1264,20 @@ test-suite tests-hspec
     Test.InsertOnConflictSpec
     Test.LongIdentifiersSpec
     Test.Mutations.MultiplePerRequest.UpdateManySpec
-    Test.NestedRelationshipsSpec
     Test.ObjectRelationshipsLimitSpec
     Test.Postgres.TimestampSpec
+    Test.Queries.DirectivesSpec
+    Test.Queries.Directives.IncludeSpec
+    Test.Queries.Directives.IncludeAndSkipSpec
+    Test.Queries.Directives.SkipSpec
     Test.Queries.FilterSearchSpec
-    Test.Queries.SortSpec
+    Test.Queries.NestedObjectSpec
     Test.Queries.Paginate.LimitSpec
     Test.Queries.Paginate.OffsetSpec
     Test.Queries.Simple.ObjectQueriesSpec
     Test.Queries.Simple.OperationNameSpec
     Test.Queries.Simple.PrimaryKeySpec
+    Test.Queries.SortSpec
     Test.RemoteRelationship.FromRemoteSchemaSpec
     Test.RemoteRelationship.MetadataAPI.ClearMetadataSpec
     Test.RemoteRelationship.MetadataAPI.Common
