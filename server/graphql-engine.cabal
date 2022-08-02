@@ -1218,6 +1218,7 @@ test-suite tests-hspec
  -- Harness.Test
     Harness.Test.BackendType
     Harness.Test.Context
+    Harness.Test.CustomOptions
     Harness.Test.Fixture
     Harness.Test.Hspec.Extended
     Harness.Test.Introspection
@@ -1228,6 +1229,7 @@ test-suite tests-hspec
     Harness.Quoter.Graphql
     Harness.Quoter.Sql
     Harness.Quoter.Yaml
+    Harness.Quoter.Yaml.InterpolateYaml
 
  -- Test
     Test.ArrayParamPermissionSpec
@@ -1260,11 +1262,11 @@ test-suite tests-hspec
     Test.GatheringUniqueConstraintsSpec
     Test.InsertCheckPermissionSpec
     Test.InsertDefaultsSpec
-    Test.InsertEnumColumnSpec
     Test.InsertOnConflictSpec
     Test.LongIdentifiersSpec
     Test.Mutations.MultiplePerRequest.UpdateManySpec
     Test.ObjectRelationshipsLimitSpec
+    Test.Postgres.EnumSpec
     Test.Postgres.TimestampSpec
     Test.Queries.DirectivesSpec
     Test.Queries.Directives.IncludeSpec
@@ -1294,6 +1296,7 @@ test-suite tests-hspec
     Test.SQLServer.InsertVarcharColumnSpec
     Test.ServiceLivenessSpec
     Test.ViewsSpec
+    Test.Quoter.YamlSpec
 
 test-suite tests-dc-api
   import: common-all, common-exe
