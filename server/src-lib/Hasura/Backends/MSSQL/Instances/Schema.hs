@@ -30,8 +30,8 @@ import Hasura.GraphQL.Schema.Parser
   ( FieldParser,
     InputFieldsParser,
     Kind (..),
+    MonadMemoize,
     MonadParse,
-    MonadSchema,
     Parser,
   )
 import Hasura.GraphQL.Schema.Parser qualified as P
@@ -50,6 +50,7 @@ import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.SourceCustomization (MkRootFieldName (..))
 import Hasura.RQL.Types.Table
 import Hasura.SQL.Backend
 import Language.GraphQL.Draft.Syntax qualified as G
@@ -99,13 +100,14 @@ instance BackendTableSelectSchema 'MSSQL where
 
 msBuildTableRelayQueryFields ::
   MonadBuildSchema 'MSSQL r m n =>
+  MkRootFieldName ->
   SourceInfo 'MSSQL ->
   TableName 'MSSQL ->
   TableInfo 'MSSQL ->
   C.GQLNameIdentifier ->
   NESeq (ColumnInfo 'MSSQL) ->
-  m [a]
-msBuildTableRelayQueryFields _sourceName _tableName _tableInfo _gqlName _pkeyColumns =
+  m [P.FieldParser n a]
+msBuildTableRelayQueryFields _mkRootFieldName _sourceName _tableName _tableInfo _gqlName _pkeyColumns =
   pure []
 
 backendInsertParser ::
@@ -123,13 +125,14 @@ backendInsertParser sourceName tableInfo = do
 
 msBuildTableUpdateMutationFields ::
   MonadBuildSchema 'MSSQL r m n =>
+  MkRootFieldName ->
   Scenario ->
   SourceInfo 'MSSQL ->
   TableName 'MSSQL ->
   TableInfo 'MSSQL ->
   C.GQLNameIdentifier ->
   m [FieldParser n (AnnotatedUpdateG 'MSSQL (RemoteRelationshipField UnpreparedValue) (UnpreparedValue 'MSSQL))]
-msBuildTableUpdateMutationFields scenario sourceName tableName tableInfo gqlName = do
+msBuildTableUpdateMutationFields mkRootFieldName scenario sourceName tableName tableInfo gqlName = do
   roleName <- retrieve scRole
   fieldParsers <- runMaybeT do
     updatePerms <- hoistMaybe $ _permUpd $ getRolePermInfo roleName tableInfo
@@ -144,6 +147,7 @@ msBuildTableUpdateMutationFields scenario sourceName tableName tableInfo gqlName
     lift $
       GSB.buildTableUpdateMutationFields
         mkBackendUpdate
+        mkRootFieldName
         scenario
         sourceName
         tableName
@@ -151,52 +155,38 @@ msBuildTableUpdateMutationFields scenario sourceName tableName tableInfo gqlName
         gqlName
   pure . fold @Maybe @[_] $ fieldParsers
 
-{-
-NOTE: We currently use 'GSB.buildTableDeleteMutationFields' instead of
-this. Should we save it?
-
-msBuildTableDeleteMutationFields ::
-  MonadBuildSchema 'MSSQL r m n =>
-  SourceInfo 'MSSQL ->
-  TableName 'MSSQL ->
-  TableInfo 'MSSQL ->
-  G.Name ->
-  DelPermInfo 'MSSQL ->
-  Maybe (SelPermInfo 'MSSQL) ->
-  m [a]
-msBuildTableDeleteMutationFields _sourceName _tableName _tableInfo _gqlName _delPerns _selPerms =
-  pure []
--}
-
 msBuildFunctionQueryFields ::
   MonadBuildSchema 'MSSQL r m n =>
+  MkRootFieldName ->
   SourceInfo 'MSSQL ->
   FunctionName 'MSSQL ->
   FunctionInfo 'MSSQL ->
   TableName 'MSSQL ->
-  m [a]
-msBuildFunctionQueryFields _ _ _ _ =
+  m [P.FieldParser n a]
+msBuildFunctionQueryFields _ _ _ _ _ =
   pure []
 
 msBuildFunctionRelayQueryFields ::
   MonadBuildSchema 'MSSQL r m n =>
+  MkRootFieldName ->
   SourceInfo 'MSSQL ->
   FunctionName 'MSSQL ->
   FunctionInfo 'MSSQL ->
   TableName 'MSSQL ->
   NESeq (ColumnInfo 'MSSQL) ->
-  m [a]
-msBuildFunctionRelayQueryFields _sourceName _functionName _functionInfo _tableName _pkeyColumns =
+  m [P.FieldParser n a]
+msBuildFunctionRelayQueryFields _mkRootFieldName _sourceName _functionName _functionInfo _tableName _pkeyColumns =
   pure []
 
 msBuildFunctionMutationFields ::
   MonadBuildSchema 'MSSQL r m n =>
+  MkRootFieldName ->
   SourceInfo 'MSSQL ->
   FunctionName 'MSSQL ->
   FunctionInfo 'MSSQL ->
   TableName 'MSSQL ->
-  m [a]
-msBuildFunctionMutationFields _ _ _ _ =
+  m [P.FieldParser n a]
+msBuildFunctionMutationFields _ _ _ _ _ =
   pure []
 
 ----------------------------------------------------------------
@@ -251,7 +241,7 @@ msMkRelationshipParser _sourceName _relationshipInfo = do
 -- * Individual components
 
 msColumnParser ::
-  (MonadSchema n m, MonadError QErr m, MonadReader r m, Has MkTypename r) =>
+  (MonadParse n, MonadError QErr m, MonadReader r m, Has MkTypename r) =>
   ColumnType 'MSSQL ->
   G.Nullability ->
   m (Parser 'Both n (ValueWithOrigin (ColumnValue 'MSSQL)))
@@ -350,7 +340,8 @@ msOrderByOperators _tCase =
 msComparisonExps ::
   forall m n r.
   ( BackendSchema 'MSSQL,
-    MonadSchema n m,
+    MonadMemoize m,
+    MonadParse n,
     MonadError QErr m,
     MonadReader r m,
     Has SchemaOptions r,
@@ -365,10 +356,7 @@ msComparisonExps = P.memoize 'comparisonExps \columnType -> do
 
   -- parsers used for individual values
   typedParser <- columnParser columnType (G.Nullability False)
-  _nullableTextParser <- columnParser (ColumnScalar @'MSSQL MSSQL.VarcharType) (G.Nullability True)
-  textParser <- columnParser (ColumnScalar @'MSSQL MSSQL.VarcharType) (G.Nullability False)
   let columnListParser = fmap openValueOrigin <$> P.list typedParser
-      _textListParser = fmap openValueOrigin <$> P.list textParser
 
   -- field info
   let name = P.getName typedParser <> Name.__MSSQL_comparison_exp

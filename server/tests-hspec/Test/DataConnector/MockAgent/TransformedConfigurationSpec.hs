@@ -10,6 +10,7 @@ where
 
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
+import Data.List.NonEmpty qualified as NE
 import Harness.Backend.DataConnector (TestCase (..))
 import Harness.Backend.DataConnector qualified as DataConnector
 import Harness.Quoter.Graphql (graphql)
@@ -18,22 +19,24 @@ import Harness.Test.BackendType (BackendType (..), defaultBackendTypeString, def
 import Harness.Test.Context qualified as Context
 import Harness.TestEnvironment (TestEnvironment)
 import Hasura.Backends.DataConnector.API qualified as API
+import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
-import Prelude
 
 --------------------------------------------------------------------------------
 
 spec :: SpecWith TestEnvironment
 spec =
   Context.runWithLocalTestEnvironment
-    [ Context.Context
-        { name = Context.Backend Context.DataConnector,
-          mkLocalTestEnvironment = DataConnector.mkLocalTestEnvironmentMock,
-          setup = DataConnector.setupMock sourceMetadata DataConnector.mockBackendConfig,
-          teardown = DataConnector.teardownMock,
-          customOptions = Nothing
-        }
-    ]
+    ( NE.fromList
+        [ Context.Context
+            { name = Context.Backend Context.DataConnector,
+              mkLocalTestEnvironment = DataConnector.mkLocalTestEnvironmentMock,
+              setup = DataConnector.setupMock sourceMetadata DataConnector.mockBackendConfig,
+              teardown = DataConnector.teardownMock,
+              customOptions = Nothing
+            }
+        ]
+    )
     tests
 
 sourceMetadata :: Aeson.Value
@@ -44,7 +47,7 @@ sourceMetadata =
         name : *source
         kind: *backendType
         tables:
-          - table: Album
+          - table: [Album]
             configuration:
               custom_root_fields:
                 select: albums
@@ -60,10 +63,10 @@ sourceMetadata =
               - name: artist
                 using:
                   manual_configuration:
-                    remote_table: Artist
+                    remote_table: [Artist]
                     column_mapping:
                       ArtistId: ArtistId
-          - table: Artist
+          - table: [Artist]
             configuration:
               custom_root_fields:
                 select: artists
@@ -77,7 +80,7 @@ sourceMetadata =
               - name: albums
                 using:
                   manual_configuration:
-                    remote_table: Album
+                    remote_table: [Album]
                     column_mapping:
                       ArtistId: ArtistId
         configuration:
@@ -129,7 +132,7 @@ tests opts = do
               { _whenQuery =
                   Just
                     ( API.QueryRequest
-                        { _qrTable = API.TableName "Album",
+                        { _qrTable = API.TableName ("Album" :| []),
                           _qrTableRelationships = [],
                           _qrQuery =
                             API.Query

@@ -55,11 +55,10 @@ import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.SourceCustomization (MkRootFieldName)
 import Hasura.SQL.Backend
 import Hasura.Server.Types (StreamingSubscriptionsCtx)
 import Language.GraphQL.Draft.Syntax qualified as G
-
--- TODO: Might it make sense to add those constraints to MonadSchema directly?
 
 -- | Bag of constraints available to the methods of @BackendSchema@.
 --
@@ -98,6 +97,7 @@ class
   -- top level parsers
   buildTableQueryAndSubscriptionFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     SourceInfo b ->
     TableName b ->
     TableInfo b ->
@@ -110,6 +110,7 @@ class
       )
   buildTableStreamingSubscriptionFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     SourceInfo b ->
     TableName b ->
     TableInfo b ->
@@ -117,6 +118,7 @@ class
     m [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
   buildTableRelayQueryFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     SourceInfo b ->
     TableName b ->
     TableInfo b ->
@@ -125,6 +127,7 @@ class
     m [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
   buildTableInsertMutationFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     Scenario ->
     SourceInfo b ->
     TableName b ->
@@ -140,6 +143,7 @@ class
   -- its namesake @GSB.@'Hasura.GraphQL.Schema.Build.buildTableUpdateMutationFields'.
   buildTableUpdateMutationFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     Scenario ->
     -- | The source that the table lives in
     SourceInfo b ->
@@ -153,6 +157,7 @@ class
 
   buildTableDeleteMutationFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     Scenario ->
     SourceInfo b ->
     TableName b ->
@@ -162,6 +167,7 @@ class
 
   buildFunctionQueryFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     SourceInfo b ->
     FunctionName b ->
     FunctionInfo b ->
@@ -170,6 +176,7 @@ class
 
   buildFunctionRelayQueryFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     SourceInfo b ->
     FunctionName b ->
     FunctionInfo b ->
@@ -179,6 +186,7 @@ class
 
   buildFunctionMutationFields ::
     MonadBuildSchema b r m n =>
+    MkRootFieldName ->
     SourceInfo b ->
     FunctionName b ->
     FunctionInfo b ->
@@ -201,7 +209,7 @@ class
 
   -- individual components
   columnParser ::
-    (MonadSchema n m, MonadError QErr m, MonadReader r m, Has MkTypename r, Has NamingCase r) =>
+    (MonadParse n, MonadError QErr m, MonadReader r m, Has MkTypename r, Has NamingCase r) =>
     ColumnType b ->
     G.Nullability -> -- TODO maybe use Hasura.GraphQL.Parser.Schema.Nullability instead?
     m (Parser 'Both n (ValueWithOrigin (ColumnValue b)))

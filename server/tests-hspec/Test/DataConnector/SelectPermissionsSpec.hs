@@ -8,6 +8,7 @@ where
 
 import Data.Aeson (Value)
 import Data.ByteString (ByteString)
+import Data.List.NonEmpty qualified as NE
 import Harness.Backend.DataConnector (defaultBackendConfig)
 import Harness.Backend.DataConnector qualified as DataConnector
 import Harness.GraphqlEngine qualified as GraphqlEngine
@@ -16,8 +17,8 @@ import Harness.Quoter.Yaml (shouldReturnYaml, yaml)
 import Harness.Test.BackendType (BackendType (..), defaultBackendTypeString, defaultSource)
 import Harness.Test.Context qualified as Context
 import Harness.TestEnvironment (TestEnvironment)
+import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
-import Prelude
 
 --------------------------------------------------------------------------------
 -- Preamble
@@ -25,14 +26,16 @@ import Prelude
 spec :: SpecWith TestEnvironment
 spec =
   Context.runWithLocalTestEnvironment
-    [ Context.Context
-        { name = Context.Backend Context.DataConnector,
-          mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-          setup = DataConnector.setupFixture sourceMetadata defaultBackendConfig,
-          teardown = DataConnector.teardown,
-          customOptions = Nothing
-        }
-    ]
+    ( NE.fromList
+        [ Context.Context
+            { name = Context.Backend Context.DataConnector,
+              mkLocalTestEnvironment = Context.noLocalTestEnvironment,
+              setup = DataConnector.setupFixture sourceMetadata defaultBackendConfig,
+              teardown = DataConnector.teardown,
+              customOptions = Nothing
+            }
+        ]
+    )
     tests
 
 testRoleName :: ByteString
@@ -46,12 +49,12 @@ sourceMetadata =
         name : *source
         kind: *backendType
         tables:
-          - table: Employee
+          - table: [Employee]
             array_relationships:
               - name: SupportRepForCustomers
                 using:
                   manual_configuration:
-                    remote_table: Customer
+                    remote_table: [Customer]
                     column_mapping:
                       EmployeeId: SupportRepId
             select_permissions:
@@ -66,12 +69,12 @@ sourceMetadata =
                     SupportRepForCustomers:
                       Country:
                         _ceq: [ "$", "Country" ]
-          - table: Customer
+          - table: [Customer]
             object_relationships:
               - name: SupportRep
                 using:
                   manual_configuration:
-                    remote_table: Employee
+                    remote_table: [Employee]
                     column_mapping:
                       SupportRepId: EmployeeId
             select_permissions:

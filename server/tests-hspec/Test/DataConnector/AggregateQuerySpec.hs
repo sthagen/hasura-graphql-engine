@@ -6,6 +6,7 @@ module Test.DataConnector.AggregateQuerySpec
 where
 
 import Data.Aeson qualified as Aeson
+import Data.List.NonEmpty qualified as NE
 import Harness.Backend.DataConnector qualified as DataConnector
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql (graphql)
@@ -13,20 +14,22 @@ import Harness.Quoter.Yaml (shouldReturnYaml, yaml)
 import Harness.Test.BackendType (BackendType (..), defaultBackendTypeString, defaultSource)
 import Harness.Test.Context qualified as Context
 import Harness.TestEnvironment (TestEnvironment)
+import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
-import Prelude
 
 spec :: SpecWith TestEnvironment
 spec =
   Context.runWithLocalTestEnvironment
-    [ Context.Context
-        { name = Context.Backend Context.DataConnector,
-          mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-          setup = DataConnector.setupFixture sourceMetadata DataConnector.defaultBackendConfig,
-          teardown = DataConnector.teardown,
-          customOptions = Nothing
-        }
-    ]
+    ( NE.fromList
+        [ Context.Context
+            { name = Context.Backend Context.DataConnector,
+              mkLocalTestEnvironment = Context.noLocalTestEnvironment,
+              setup = DataConnector.setupFixture sourceMetadata DataConnector.defaultBackendConfig,
+              teardown = DataConnector.teardown,
+              customOptions = Nothing
+            }
+        ]
+    )
     tests
 
 sourceMetadata :: Aeson.Value
@@ -37,36 +40,36 @@ sourceMetadata =
         name : *source
         kind: *backendType
         tables:
-          - table: Album
+          - table: [Album]
             object_relationships:
               - name: Artist
                 using:
                   manual_configuration:
-                    remote_table: Artist
+                    remote_table: [Artist]
                     column_mapping:
                       ArtistId: ArtistId
-          - table: Artist
+          - table: [Artist]
             array_relationships:
               - name: Albums
                 using:
                   manual_configuration:
-                    remote_table: Album
+                    remote_table: [Album]
                     column_mapping:
                       ArtistId: ArtistId
-          - table: Invoice
+          - table: [Invoice]
             array_relationships:
               - name: InvoiceLines
                 using:
                   manual_configuration:
-                    remote_table: InvoiceLine
+                    remote_table: [InvoiceLine]
                     column_mapping:
                       InvoiceId: InvoiceId
-          - table: InvoiceLine
+          - table: [InvoiceLine]
             object_relationships:
               - name: Invoice
                 using:
                   manual_configuration:
-                    remote_table: Invoice
+                    remote_table: [Invoice]
                     column_mapping:
                       InvoiceId: InvoiceId
         configuration: {}
