@@ -4,15 +4,16 @@
 module Test.ViewsSpec (spec) where
 
 import Data.List.NonEmpty qualified as NE
+import Database.PG.Query.Pool (sql)
 import Harness.Backend.Mysql as Mysql
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql
-import Harness.Quoter.Sql
 import Harness.Quoter.Yaml
 import Harness.Test.Context qualified as Context
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (TestEnvironment)
+import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec
 
