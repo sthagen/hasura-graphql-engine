@@ -5,28 +5,28 @@ import { bigquery } from './bigquery';
 import { citus } from './citus';
 import { mssql } from './mssql';
 import { gdc } from './gdc';
+import * as utils from './common/utils';
 import type {
   Property,
   Ref,
   OneOf,
   IntrospectedTable,
+  MetadataTable,
   Table,
   SupportedDrivers,
+  TableColumn,
 } from './types';
-import { getZodSchema } from './common/utils';
+
+import { createZodSchema } from './common/createZodSchema';
 import { exportMetadata } from './api';
 
 export enum Feature {
   NotImplemented = 'Not Implemented',
 }
 
-export const supportedDrivers = [
-  'postgres',
-  'bigquery',
-  'mssql',
-  'citus',
-  'gdc',
-];
+const nativeDrivers = ['postgres', 'bigquery', 'mssql', 'citus'];
+
+export const supportedDrivers = [...nativeDrivers, 'gdc'];
 
 export type Database = {
   introspection?: {
@@ -40,6 +40,11 @@ export type Database = {
       dataSourceName: string,
       configuration: any
     ) => Promise<IntrospectedTable[] | Feature.NotImplemented>;
+    getDatabaseHierarchy: () => Promise<string[] | Feature.NotImplemented>;
+    getTableColumns: (
+      dataSourceName: string,
+      table: Table
+    ) => Promise<TableColumn[] | Feature.NotImplemented>;
   };
   query?: {
     getTableData: () => void;
@@ -55,11 +60,30 @@ const drivers: Record<SupportedDrivers, Database> = {
   gdc,
 };
 
+const getDatabaseMethods = async (dataSourceName: string) => {
+  const metadata = await exportMetadata();
+
+  const dataSource = metadata.sources.find(
+    source => source.name === dataSourceName
+  );
+
+  if (!dataSource) {
+    throw Error(
+      'DataSource.introspectTables data source not found in metadata'
+    );
+  }
+
+  return drivers[dataSource.kind];
+};
+
 export const DataSource = (hasuraFetch: AxiosInstance) => ({
   driver: {
     getSupportedDrivers: async () => {
       return supportedDrivers;
     },
+  },
+  getNativeDrivers: async () => {
+    return nativeDrivers;
   },
   connectDB: {
     getConfigSchema: async (driver: SupportedDrivers) => {
@@ -79,34 +103,23 @@ export const DataSource = (hasuraFetch: AxiosInstance) => ({
       schemas.forEach(schema => {
         if (schema === Feature.NotImplemented || !schema) return;
 
+        const postgresSchema = z.object({
+          driver: z.literal('postgres'),
+          name: z.string().min(1, 'Name is a required field!'),
+          replace_configuration: z.preprocess(x => {
+            if (!x) return false;
+            return true;
+          }, z.boolean()),
+          configuration: createZodSchema(
+            schema.configSchema,
+            schema.otherSchemas
+          ),
+        });
+
         if (!res) {
-          res = z.object({
-            driver: z.literal('postgres'),
-            name: z.string().min(1, 'Name is a required field!'),
-            replace_configuration: z.preprocess(x => {
-              if (!x) return false;
-              return true;
-            }, z.boolean()),
-            configuration: getZodSchema(
-              schema.configSchema,
-              schema.otherSchemas
-            ),
-          });
+          res = postgresSchema;
         } else {
-          res = res.or(
-            z.object({
-              driver: z.literal('postgres'),
-              name: z.string().min(1, 'Name is a required field!'),
-              replace_configuration: z.preprocess(x => {
-                if (!x) return false;
-                return true;
-              }, z.boolean()),
-              configuration: getZodSchema(
-                schema.configSchema,
-                schema.otherSchemas
-              ),
-            })
-          );
+          res = res.or(postgresSchema);
         }
       });
 
@@ -139,9 +152,55 @@ export const DataSource = (hasuraFetch: AxiosInstance) => ({
       );
     return Feature.NotImplemented;
   },
+  getDatabaseHierarchy: async ({
+    dataSourceName,
+  }: {
+    dataSourceName: string;
+  }) => {
+    const metadata = await exportMetadata();
+
+    const dataSource = metadata.sources.find(
+      source => source.name === dataSourceName
+    );
+
+    if (!dataSource) {
+      throw Error(
+        'DataSource.introspectTables data source not found in metadata'
+      );
+    }
+
+    const database = drivers[dataSource.kind];
+    if (!database) return [];
+
+    const introspection = database.introspection;
+    if (!introspection) return [];
+
+    const result = await introspection.getDatabaseHierarchy();
+    if (result === Feature.NotImplemented) return [];
+
+    return result;
+  },
+  getTableColumns: async ({
+    dataSourceName,
+    table,
+  }: {
+    dataSourceName: string;
+    table: Table;
+  }) => {
+    const database = await getDatabaseMethods(dataSourceName);
+    if (!database) return [];
+
+    const introspection = database.introspection;
+    if (!introspection) return [];
+
+    const result = await introspection.getTableColumns(dataSourceName, table);
+    if (result === Feature.NotImplemented) return [];
+
+    return result;
+  },
 });
 
-export { exportMetadata };
+export { exportMetadata, utils };
 export type {
   Property,
   Ref,
@@ -149,4 +208,5 @@ export type {
   SupportedDrivers,
   IntrospectedTable,
   Table,
+  MetadataTable,
 };

@@ -1,6 +1,9 @@
 import { Database, Feature } from '..';
 import { runSQL } from '../api';
 import { adaptIntrospectedTables } from '../common/utils';
+import { getTableColumns } from './introspection';
+
+export type CitusTable = { name: string; schema: string };
 
 export const citus: Database = {
   introspection: {
@@ -35,5 +38,9 @@ export const citus: Database = {
 
       return adaptIntrospectedTables(tables);
     },
+    getDatabaseHierarchy: async () => {
+      return ['schema', 'name'];
+    },
+    getTableColumns,
   },
 };
