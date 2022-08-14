@@ -26,6 +26,7 @@ import {
 import {
   addToPrefix,
   boolOperators,
+  deprecatedColumnOperators,
   existOperators,
   getOperatorInputType,
   getPermissionOperators,
@@ -45,7 +46,7 @@ import {
   getComputedFieldsWithoutArgs,
 } from '../../../../../dataSources/services/postgresql';
 import { QualifiedTable } from '../../../../../metadata/types';
-import styles from './PermissionBuilder.scss';
+import styles from './PermissionBuilder.module.scss';
 import { ComputedField, Table } from '../../../../../dataSources/types';
 import { Nullable } from '../../../../Common/utils/tsUtils';
 import { PGFunction } from '../../../../../dataSources/services/postgresql/types';
@@ -62,11 +63,11 @@ interface PermissionBuilderProps {
 }
 
 class PermissionBuilder extends React.Component<PermissionBuilderProps> {
-  componentDidMount() {
+  override componentDidMount() {
     this.loadMissingSchemas();
   }
 
-  componentDidUpdate(prevProps: PermissionBuilderProps) {
+  override componentDidUpdate(prevProps: PermissionBuilderProps) {
     // check for and fetch any missing schemas if
     // either permission filter or available table schemas have changed
     if (
@@ -178,7 +179,7 @@ class PermissionBuilder extends React.Component<PermissionBuilderProps> {
     }
   }
 
-  render() {
+  override render() {
     const wrapDoubleQuotes = (value: JSX.Element) => {
       return (
         <span>
@@ -792,15 +793,19 @@ class PermissionBuilder extends React.Component<PermissionBuilderProps> {
 
       const currentTypeMap = dataSource.permissionColumnDataTypes;
       const rootValueType = getRootType(valueType, currentTypeMap);
-      const operators = (getPermissionOperators(
-        dataSource.supportedColumnOperators,
-        currentTypeMap
-      ) as Record<string, string[]>)[rootValueType];
+      const operators = (
+        getPermissionOperators(
+          dataSource.supportedColumnOperators,
+          currentTypeMap
+        ) as Record<string, string[]>
+      )[rootValueType];
 
       const operatorSelect = renderSelect(
         dispatchColumnOperatorSelect,
         operator,
-        operators,
+        deprecatedColumnOperators.includes(operator)
+          ? operators.concat(operator)
+          : operators,
         prefix
       );
 

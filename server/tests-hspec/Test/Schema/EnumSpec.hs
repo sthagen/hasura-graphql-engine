@@ -13,7 +13,7 @@ import Harness.Backend.Postgres qualified as Postgres
 import Harness.GraphqlEngine (postGraphql)
 import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Yaml (yaml)
-import Harness.Test.Context qualified as Context
+import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (TestEnvironment)
@@ -23,21 +23,29 @@ import Test.Hspec (SpecWith, describe, it)
 
 spec :: SpecWith TestEnvironment
 spec =
-  Context.run
+  Fixture.run
     ( NE.fromList
-        [ Context.Context
-            { name = Context.Backend Context.Postgres,
-              mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-              setup = const (Postgres.run_ setup) <> Postgres.setup schema,
-              teardown = Postgres.teardown schema <> const (Postgres.run_ teardown),
-              customOptions = Nothing
+        [ (Fixture.fixture $ Fixture.Backend Fixture.Postgres)
+            { Fixture.setupTeardown = \(testEnvironment, _) ->
+                [ Fixture.SetupAction
+                    { Fixture.setupAction =
+                        Postgres.run_ setup,
+                      Fixture.teardownAction = \_ ->
+                        Postgres.run_ teardown
+                    },
+                  Postgres.setupTablesAction schema testEnvironment
+                ]
             },
-          Context.Context
-            { name = Context.Backend Context.Citus,
-              mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-              setup = const (Citus.run_ setup) <> Citus.setup schema,
-              teardown = Citus.teardown schema <> const (Citus.run_ teardown),
-              customOptions = Nothing
+          (Fixture.fixture $ Fixture.Backend Fixture.Citus)
+            { Fixture.setupTeardown = \(testEnvironment, _) ->
+                [ Fixture.SetupAction
+                    { Fixture.setupAction =
+                        Citus.run_ setup,
+                      Fixture.teardownAction = \_ ->
+                        Citus.run_ teardown
+                    },
+                  Citus.setupTablesAction schema testEnvironment
+                ]
             }
         ]
     )
@@ -73,7 +81,7 @@ teardown = "drop type \"role\""
 --------------------------------------------------------------------------------
 -- Tests
 
-tests :: Context.Options -> SpecWith TestEnvironment
+tests :: Fixture.Options -> SpecWith TestEnvironment
 tests opts = do
   let shouldBe :: IO Value -> Value -> IO ()
       shouldBe = shouldReturnYaml opts

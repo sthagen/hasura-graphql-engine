@@ -84,7 +84,8 @@ const columnDataTypes = {
 };
 
 // eslint-disable-next-line no-useless-escape
-const createSQLRegex = /create\s*(?:|or\s*replace)\s*(?<type>view|table|function)\s*(?:\s*if*\s*not\s*exists\s*)?((?<schema>\"?\w+\"?)\.(?<nameWithSchema>\"?\w+\"?)|(?<name>\"?\w+\"?))\s*(?<partition>partition\s*of)?/gim;
+const createSQLRegex =
+  /create\s*(?:|or\s*replace)\s*(?<type>view|table|function)\s*(?:\s*if*\s*not\s*exists\s*)?((?<schema>\"?\w+\"?)\.(?<nameWithSchema>\"?\w+\"?)|(?<name>\"?\w+\"?))\s*(?<partition>partition\s*of)?/gim;
 
 export const displayTableName = (table: Table) => {
   const tableName = table.table_name;
@@ -233,6 +234,7 @@ export const supportedFeatures: DeepRequired<SupportedFeaturesType> = {
     isolation_level: false,
     connectionSettings: true,
     retries: false,
+    extensions_schema: false,
     pool_timeout: false,
     connection_lifetime: false,
     ssl_certificates: false,

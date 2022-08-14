@@ -6,13 +6,13 @@
 module Test.LongIdentifiersSpec (spec) where
 
 import Data.List.NonEmpty qualified as NE
-import Harness.Backend.BigQuery qualified as Bigquery
+import Harness.Backend.BigQuery qualified as BigQuery
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.Backend.Sqlserver qualified as Sqlserver
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Yaml (interpolateYaml)
-import Harness.Test.Context qualified as Context
+import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (TestEnvironment)
@@ -24,51 +24,42 @@ import Test.Hspec (SpecWith, it)
 -- Preamble
 
 spec :: SpecWith TestEnvironment
-spec =
-  Context.run
+spec = do
+  Fixture.run
     ( NE.fromList
         [ -- Create table fails currently becasuse we postfix table names for some reason
           -- which makes the valid table name go over the limit
           --
-          -- Context.Context
-          --   { name = Context.Backend Context.MySQL,
-          --     mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-          --     setup = Mysql.setup schema,
-          --     teardown = Mysql.teardown schema,
-          --     customOptions = Nothing
+          -- (Fixture.fixture $ Fixture.Backend Fixture.MySQL)
+          --   { Fixture.setupTeardown = \(testEnv, _) ->
+          --       [ Mysql.setupTablesAction schema testEnv
+          --       ]
           --   },
-          Context.Context
-            { name = Context.Backend Context.Postgres,
-              mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-              setup = Postgres.setup schema,
-              teardown = Postgres.teardown schema,
-              customOptions = Nothing
+          (Fixture.fixture $ Fixture.Backend Fixture.Postgres)
+            { Fixture.setupTeardown = \(testEnv, _) ->
+                [ Postgres.setupTablesAction schema testEnv
+                ]
             },
           -- Create table fails currently on a weird error:
           -- > relation "i_need_a_table_with_a_long_na_i_need_a_column_with_a_long_n_seq" already exists
           --
-          -- Context.Context
-          --   { name = Context.Backend Context.Citus,
-          --     mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-          --     setup = Citus.setup schema,
-          --     teardown = Citus.teardown schema,
-          --     customOptions = Nothing
+          -- (Fixture.fixture $ Fixture.Backend Fixture.Citus)
+          --   { Fixture.setupTeardown = \(testEnv, _) ->
+          --       [ Citus.setupTablesAction schema testEnv
+          --       ]
           --   },
-          Context.Context
-            { name = Context.Backend Context.SQLServer,
-              mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-              setup = Sqlserver.setup schema,
-              teardown = Sqlserver.teardown schema,
-              customOptions = Nothing
+          (Fixture.fixture $ Fixture.Backend Fixture.SQLServer)
+            { Fixture.setupTeardown = \(testEnv, _) ->
+                [ Sqlserver.setupTablesAction schema testEnv
+                ]
             },
-          Context.Context
-            { name = Context.Backend Context.BigQuery,
-              mkLocalTestEnvironment = Context.noLocalTestEnvironment,
-              setup = Bigquery.setup schema,
-              teardown = Bigquery.teardown schema,
-              customOptions =
+          (Fixture.fixture $ Fixture.Backend Fixture.BigQuery)
+            { Fixture.setupTeardown = \(testEnv, _) ->
+                [ BigQuery.setupTablesAction schema testEnv
+                ],
+              Fixture.customOptions =
                 Just $
-                  Context.Options
+                  Fixture.Options
                     { stringifyNumbers = True
                     }
             }
@@ -122,7 +113,7 @@ longtable =
 --------------------------------------------------------------------------------
 -- Tests
 
-tests :: Context.Options -> SpecWith TestEnvironment
+tests :: Fixture.Options -> SpecWith TestEnvironment
 tests opts = do
   it "select long table" $ \testEnvironment -> do
     let schemaName = Schema.getSchemaName testEnvironment
