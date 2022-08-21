@@ -6,20 +6,14 @@ module Hasura.Backends.Postgres.Translate.UpdateSpec
 where
 
 import Database.PG.Query.Pool qualified as QQ
-import Hasura.Backends.Postgres.SQL.Types (PGScalarType (..))
-import Hasura.Backends.Postgres.SQL.Value (PGScalarValue (..))
 import Hasura.Backends.Postgres.Types.Update (UpdateOpExpression (..))
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp (OpExpG (..))
 import Hasura.RQL.IR.Returning (MutFldG (..), MutationOutputG (..))
-import Hasura.RQL.IR.Value (UnpreparedValue (..))
-import Hasura.RQL.Types.Column (ColumnInfo, ColumnType (..), ColumnValue (..))
-import Hasura.SQL.Backend (BackendType (Postgres), PostgresKind (Vanilla))
+import Test.Backend.Postgres.Misc qualified as P
 import Test.Backend.Postgres.Update qualified as Test
 import Test.Hspec
 import Test.Parser.Expectation qualified as Expect
-
-type PG = 'Postgres 'Vanilla
 
 spec :: Spec
 spec =
@@ -28,16 +22,16 @@ spec =
       Test.TestBuilder
         { name = "set field where id",
           table = Expect.mkTable "test",
-          columns = [idColumn, nameColumn],
+          columns = [P.idColumn, P.nameColumn],
           mutationOutput = MOutMultirowFields [("affected_rows", MCount)],
-          where_ = [(idColumn, [AEQ True integerOne])],
-          update = Expect.UpdateTable [(nameColumn, UpdateSet newValue)],
+          where_ = [(P.idColumn, [AEQ True P.integerOne])],
+          update = Expect.UpdateTable [(P.nameColumn, UpdateSet P.textNew)],
           expectedSQL =
             [QQ.sql|
 UPDATE "public"."test"
-  SET "name" = $1
+  SET "name" = ('new name'):: text
   WHERE
-    (("public"."test"."id") = ($0))
+    (("public"."test"."id") = (('1')::integer))
   RETURNING * , ('true')::boolean AS "check__constraint"
               |]
         }
@@ -46,16 +40,20 @@ UPDATE "public"."test"
       Test.TestBuilder
         { name = "set multiple field where id",
           table = Expect.mkTable "test",
-          columns = [idColumn, nameColumn, descColumn],
+          columns = [P.idColumn, P.nameColumn, P.descColumn],
           mutationOutput = MOutMultirowFields [("affected_rows", MCount)],
-          where_ = [(idColumn, [AEQ True integerOne])],
-          update = Expect.UpdateTable [(nameColumn, UpdateSet newValue), (descColumn, UpdateSet newValue)],
+          where_ = [(P.idColumn, [AEQ True P.integerOne])],
+          update =
+            Expect.UpdateTable
+              [ (P.nameColumn, UpdateSet P.textNew),
+                (P.descColumn, UpdateSet P.textOther)
+              ],
           expectedSQL =
             [QQ.sql|
 UPDATE "public"."test"
-  SET "name" = $1, "description" = $2
+  SET "name" = ('new name')::text, "description" = ('other')::text
   WHERE
-    (("public"."test"."id") = ($0))
+    (("public"."test"."id") = (('1')::integer))
   RETURNING * , ('true')::boolean AS "check__constraint"
               |]
         }
@@ -64,21 +62,24 @@ UPDATE "public"."test"
       Test.TestBuilder
         { name = "set field where id and old value",
           table = Expect.mkTable "test",
-          columns = [idColumn, nameColumn, descColumn],
+          columns = [P.idColumn, P.nameColumn, P.descColumn],
           mutationOutput = MOutMultirowFields [("affected_rows", MCount)],
-          where_ = [(idColumn, [AEQ True integerOne]), (nameColumn, [AEQ False oldValue])],
-          update = Expect.UpdateTable [(nameColumn, UpdateSet newValue)],
+          where_ =
+            [ (P.idColumn, [AEQ True P.integerOne]),
+              (P.nameColumn, [AEQ False P.textOld])
+            ],
+          update = Expect.UpdateTable [(P.nameColumn, UpdateSet P.textNew)],
           expectedSQL =
             [QQ.sql|
 UPDATE "public"."test"
-  SET "name" = $2
+  SET "name" = ('new name')::text
   WHERE
-    ((("public"."test"."id") = ($0))
+    ((("public"."test"."id") = (('1')::integer))
       AND
-     ((("public"."test"."name") = ($1))
+     ((("public"."test"."name") = (('old name')::text))
        OR
       ((("public"."test"."name") IS NULL)
-        AND (($1) IS NULL))
+        AND ((('old name')::text) IS NULL))
       ))
   RETURNING * , ('true')::boolean AS "check__constraint"
               |]
@@ -88,94 +89,43 @@ UPDATE "public"."test"
       Test.TestBuilder
         { name = "update_many with two updates",
           table = Expect.mkTable "test",
-          columns = [idColumn, nameColumn, descColumn],
+          columns = [P.idColumn, P.nameColumn, P.descColumn],
           mutationOutput = MOutMultirowFields [("affected_rows", MCount)],
           where_ = [],
           update =
             Expect.UpdateMany $
               [ Expect.MultiRowUpdateBuilder
-                  { mrubWhere = [(idColumn, [AEQ True integerOne]), (nameColumn, [AEQ False oldValue])],
-                    mrubUpdate = [(nameColumn, UpdateSet newValue)]
+                  { mrubWhere =
+                      [ (P.idColumn, [AEQ True P.integerOne]),
+                        (P.nameColumn, [AEQ False P.textNew])
+                      ],
+                    mrubUpdate = [(P.nameColumn, UpdateSet P.textNew)]
                   },
                 Expect.MultiRowUpdateBuilder
-                  { mrubWhere = [(idColumn, [AEQ True integerOne])],
-                    mrubUpdate = [(descColumn, UpdateSet oldValue)]
+                  { mrubWhere = [(P.idColumn, [AEQ True P.integerOne])],
+                    mrubUpdate = [(P.descColumn, UpdateSet P.textNew)]
                   }
               ],
           expectedSQL =
             [ [QQ.sql|
 UPDATE "public"."test"
-  SET "name" = $2
+  SET "name" = ('new name')::text
   WHERE
-    ((("public"."test"."id") = ($0))
+    ((("public"."test"."id") = (('1')::integer))
       AND
-     ((("public"."test"."name") = ($1))
+     ((("public"."test"."name") = (('new name')::text))
        OR
       ((("public"."test"."name") IS NULL)
-        AND (($1) IS NULL))
+        AND ((('new name')::text) IS NULL))
       ))
   RETURNING * , ('true')::boolean AS "check__constraint"
               |],
               [QQ.sql|
 UPDATE "public"."test"
-  SET "description" = $4
+  SET "description" = ('new name')::text
   WHERE
-    (("public"."test"."id") = ($3))
+    (("public"."test"."id") = (('1')::integer))
   RETURNING * , ('true')::boolean AS "check__constraint"
               |]
             ]
         }
-
-idColumn :: ColumnInfo PG
-idColumn =
-  Expect.mkColumnInfo
-    Expect.ColumnInfoBuilder
-      { cibName = "id",
-        cibType = ColumnScalar PGInteger,
-        cibNullable = False,
-        cibIsPrimaryKey = True
-      }
-
-nameColumn :: ColumnInfo PG
-nameColumn =
-  Expect.mkColumnInfo
-    Expect.ColumnInfoBuilder
-      { cibName = "name",
-        cibType = ColumnScalar PGText,
-        cibNullable = False,
-        cibIsPrimaryKey = False
-      }
-
-descColumn :: ColumnInfo PG
-descColumn =
-  Expect.mkColumnInfo
-    Expect.ColumnInfoBuilder
-      { cibName = "description",
-        cibType = ColumnScalar PGText,
-        cibNullable = False,
-        cibIsPrimaryKey = False
-      }
-
-integerOne :: UnpreparedValue PG
-integerOne =
-  UVParameter Nothing $
-    ColumnValue
-      { cvType = ColumnScalar PGInteger,
-        cvValue = PGValInteger 1
-      }
-
-newValue :: UnpreparedValue PG
-newValue =
-  UVParameter Nothing $
-    ColumnValue
-      { cvType = ColumnScalar PGText,
-        cvValue = PGValText "new name"
-      }
-
-oldValue :: UnpreparedValue PG
-oldValue =
-  UVParameter Nothing $
-    ColumnValue
-      { cvType = ColumnScalar PGText,
-        cvValue = PGValText "old name"
-      }

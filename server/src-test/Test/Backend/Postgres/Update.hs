@@ -12,7 +12,6 @@ module Test.Backend.Postgres.Update
   )
 where
 
-import Hasura.Backends.Postgres.SQL.DML qualified as S
 import Hasura.Backends.Postgres.SQL.Types (QualifiedTable)
 import Hasura.Backends.Postgres.Translate.Update qualified as Update
 import Hasura.Prelude
@@ -20,14 +19,13 @@ import Hasura.RQL.IR.BoolExp (OpExpG (..))
 import Hasura.RQL.IR.Returning (MutationOutputG (..))
 import Hasura.RQL.IR.Value (UnpreparedValue (..))
 import Hasura.RQL.Types.Column (ColumnInfo)
-import Hasura.SQL.Backend (BackendType (Postgres), PostgresKind (Vanilla))
+import Hasura.SQL.Backend (PostgresKind (Vanilla))
 import Hasura.SQL.Types (toSQLTxt)
+import Test.Backend.Postgres.Misc
 import Test.HUnit.Base (assertFailure)
 import Test.Hspec
 import Test.Parser.Expectation qualified as Expect
 import Test.SIString qualified as SI
-
-type PG = 'Postgres 'Vanilla
 
 -- | Describes a /mkUpdateCTE/ test.
 data TestBuilder e = TestBuilder
@@ -52,56 +50,36 @@ runTest :: TestBuilder Text -> Spec
 runTest TestBuilder {..} =
   it name do
     let upd =
-          (`evalState` 0) $
-            traverse go $
-              Expect.mkAnnotatedUpdate @Void
-                Expect.AnnotatedUpdateBuilder
-                  { Expect.aubTable = table,
-                    Expect.aubOutput = mutationOutput,
-                    Expect.aubColumns = columns,
-                    Expect.aubWhere = where_,
-                    Expect.aubUpdate = update
-                  }
+          unpreparedValueToSQLExp
+            <$> Expect.mkAnnotatedUpdate @Void
+              Expect.AnnotatedUpdateBuilder
+                { Expect.aubTable = table,
+                  Expect.aubOutput = mutationOutput,
+                  Expect.aubColumns = columns,
+                  Expect.aubWhere = where_,
+                  Expect.aubUpdate = update
+                }
     case Update.mkUpdateCTE @'Vanilla upd of
       (Update.Update cte) ->
         (SI.fromText $ toSQLTxt cte) `shouldBe` SI.fromText expectedSQL
       _ -> assertFailure "expected single update, got multiple updates"
-  where
-    go :: UnpreparedValue PG -> State Int S.SQLExp
-    go = \case
-      UVLiteral sqlExp -> pure sqlExp
-      UVParameter _varInfo _cval -> do
-        index <- get
-        modify (+ 1)
-        pure $ S.SEPrep index
-      _ -> error "unexpected value"
 
 -- | Runs a test for /update_many/
 runMultipleUpdates :: TestBuilder [Text] -> Spec
 runMultipleUpdates TestBuilder {..} =
   it name do
     let upd =
-          (`evalState` 0) $
-            traverse go $
-              Expect.mkAnnotatedUpdate @Void
-                Expect.AnnotatedUpdateBuilder
-                  { Expect.aubTable = table,
-                    Expect.aubOutput = mutationOutput,
-                    Expect.aubColumns = columns,
-                    Expect.aubWhere = where_,
-                    Expect.aubUpdate = update
-                  }
+          unpreparedValueToSQLExp
+            <$> Expect.mkAnnotatedUpdate @Void
+              Expect.AnnotatedUpdateBuilder
+                { Expect.aubTable = table,
+                  Expect.aubOutput = mutationOutput,
+                  Expect.aubColumns = columns,
+                  Expect.aubWhere = where_,
+                  Expect.aubUpdate = update
+                }
     case Update.mkUpdateCTE @'Vanilla upd of
       (Update.MultiUpdate ctes) ->
         SI.fromText . toSQLTxt <$> ctes
           `shouldBe` SI.fromText <$> expectedSQL
       _ -> assertFailure "expedted update_many, got single update"
-  where
-    go :: UnpreparedValue PG -> State Int S.SQLExp
-    go = \case
-      UVLiteral sqlExp -> pure sqlExp
-      UVParameter _varInfo _cval -> do
-        index <- get
-        modify (+ 1)
-        pure $ S.SEPrep index
-      _ -> error "unexpected value"

@@ -6,19 +6,13 @@ module Hasura.Backends.Postgres.Translate.DeleteSpec
 where
 
 import Database.PG.Query.Pool qualified as QQ
-import Hasura.Backends.Postgres.SQL.Types (PGScalarType (..))
-import Hasura.Backends.Postgres.SQL.Value (PGScalarValue (..))
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp (OpExpG (..))
 import Hasura.RQL.IR.Returning (MutFldG (..), MutationOutputG (..))
-import Hasura.RQL.IR.Value (UnpreparedValue (..))
-import Hasura.RQL.Types.Column (ColumnInfo, ColumnType (..), ColumnValue (..))
-import Hasura.SQL.Backend (BackendType (Postgres), PostgresKind (Vanilla))
 import Test.Backend.Postgres.Delete qualified as Test
+import Test.Backend.Postgres.Misc qualified as P
 import Test.Hspec
 import Test.Parser.Expectation as Expect
-
-type PG = 'Postgres 'Vanilla
 
 spec :: Spec
 spec =
@@ -27,14 +21,14 @@ spec =
       Test.TestBuilder
         { name = "delete where id",
           table = Expect.mkTable "test",
-          columns = [idColumn, nameColumn],
+          columns = [P.idColumn, P.nameColumn],
           mutationOutput = MOutMultirowFields [("affected_rows", MCount)],
-          where_ = [(idColumn, [AEQ True integerOne])],
+          where_ = [(P.idColumn, [AEQ True P.integerOne])],
           expectedSQL =
             [QQ.sql|
 DELETE FROM "public"."test"
   WHERE
-    (("public"."test"."id") = ($0))
+    (("public"."test"."id") = (('1')::integer))
   RETURNING *
               |]
         }
@@ -43,50 +37,14 @@ DELETE FROM "public"."test"
       Test.TestBuilder
         { name = "delete where column",
           table = Expect.mkTable "test",
-          columns = [idColumn, nameColumn],
+          columns = [P.idColumn, P.nameColumn],
           mutationOutput = MOutMultirowFields [("affected_rows", MCount)],
-          where_ = [(nameColumn, [AEQ True oldValue])],
+          where_ = [(P.nameColumn, [AEQ True P.textOld])],
           expectedSQL =
             [QQ.sql|
 DELETE FROM "public"."test"
   WHERE
-    (("public"."test"."name") = ($0))
+    (("public"."test"."name") = (('old name')::text))
   RETURNING *
               |]
         }
-
-idColumn :: ColumnInfo PG
-idColumn =
-  Expect.mkColumnInfo
-    Expect.ColumnInfoBuilder
-      { cibName = "id",
-        cibType = ColumnScalar PGInteger,
-        cibNullable = False,
-        cibIsPrimaryKey = True
-      }
-
-nameColumn :: ColumnInfo PG
-nameColumn =
-  Expect.mkColumnInfo
-    Expect.ColumnInfoBuilder
-      { cibName = "name",
-        cibType = ColumnScalar PGText,
-        cibNullable = False,
-        cibIsPrimaryKey = False
-      }
-
-integerOne :: UnpreparedValue PG
-integerOne =
-  UVParameter Nothing $
-    ColumnValue
-      { cvType = ColumnScalar PGInteger,
-        cvValue = PGValInteger 1
-      }
-
-oldValue :: UnpreparedValue PG
-oldValue =
-  UVParameter Nothing $
-    ColumnValue
-      { cvType = ColumnScalar PGText,
-        cvValue = PGValText "old name"
-      }

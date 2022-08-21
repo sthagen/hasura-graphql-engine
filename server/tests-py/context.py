@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 
+import graphql
 from http import HTTPStatus
-from socketserver import ThreadingMixIn
-from urllib.parse import urlparse
-from ruamel.yaml.comments import CommentedMap as OrderedDict # to avoid '!!omap' in yaml
-import threading
 import http.server
 import json
-import queue
-import socket
-import subprocess
-import time
-import string
-import random
 import os
+import queue
+import random
 import re
-
-import ruamel.yaml as yaml
 import requests
+import ruamel.yaml as yaml
+from ruamel.yaml.comments import CommentedMap as OrderedDict # to avoid '!!omap' in yaml
+import socket
+import socketserver
+import sqlalchemy
+import sqlalchemy.schema
+import string
+import subprocess
+import threading
+import time
+from urllib.parse import urlparse
 import websocket
-from sqlalchemy import create_engine
-from sqlalchemy.schema import MetaData
+
 import graphql_server
-import graphql
 
 # pytest has removed the global pytest.config
 # As a solution to this we are going to store it in PyTestConf.config
@@ -711,7 +711,7 @@ class EvtsWebhookHandler(http.server.BaseHTTPRequestHandler):
 # See: https://stackoverflow.com/a/14089457/176841
 #
 # TODO use this elsewhere, or better yet: use e.g. bottle + waitress
-class ThreadedHTTPServer(ThreadingMixIn, http.server.HTTPServer):
+class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     """Handle requests in a separate thread."""
 
 class EvtsWebhookServer(ThreadedHTTPServer):
@@ -783,6 +783,7 @@ class HGECtx:
 
         self.http = requests.Session()
         self.hge_key = config.getoption('--hge-key')
+        self.timeout = 60
         self.hge_url = hge_url
         self.pg_url = pg_url
         self.hge_webhook = config.getoption('--hge-webhook')
@@ -805,8 +806,8 @@ class HGECtx:
         self.streaming_subscriptions = config.getoption('--test-streaming-subscriptions')
 
         # This will be GC'd, but we also explicitly dispose() in teardown()
-        self.engine = create_engine(self.pg_url)
-        self.meta = MetaData()
+        self.engine = sqlalchemy.create_engine(self.pg_url)
+        self.meta = sqlalchemy.schema.MetaData()
 
         self.ws_read_cookie = config.getoption('--test-ws-init-cookie')
 
@@ -851,43 +852,50 @@ class HGECtx:
         if v == 'GET':
           resp = self.http.get(
               self.hge_url + u,
-              headers=h
+              headers=h,
+              timeout=self.timeout,
           )
         elif v == 'POSTJSON' and b:
           resp = self.http.post(
               self.hge_url + u,
               json=b,
-              headers=h
+              headers=h,
+              timeout=self.timeout,
           )
         elif v == 'POST' and b:
           # TODO: Figure out why the requests are failing with a byte object passed in as `data`
           resp = self.http.post(
               self.hge_url + u,
               data=b,
-              headers=h
+              headers=h,
+              timeout=self.timeout,
           )
         elif v == 'PATCH' and b:
           resp = self.http.patch(
               self.hge_url + u,
               data=b,
-              headers=h
+              headers=h,
+              timeout=self.timeout,
            )
         elif v == 'PUT' and b:
           resp = self.http.put(
               self.hge_url + u,
               data=b,
-              headers=h
+              headers=h,
+              timeout=self.timeout,
            )
         elif v == 'DELETE':
           resp = self.http.delete(
               self.hge_url + u,
-              headers=h
+              headers=h,
+              timeout=self.timeout,
            )
         else:
           resp = self.http.post(
               self.hge_url + u,
               json=q,
-              headers=h
+              headers=h,
+              timeout=self.timeout,
            )
         # NOTE: make sure we preserve key ordering so we can test the ordering
         # properties in the graphql spec properly
@@ -895,10 +903,8 @@ class HGECtx:
         return resp.status_code, resp.json(object_pairs_hook=OrderedDict), resp.headers
 
     def sql(self, q):
-        conn = self.engine.connect()
-        res  = conn.execute(q)
-        conn.close()
-        return res
+        with self.engine.connect() as conn:
+            return conn.execute(q)
 
     def execute_query(self, q, url_path, headers = {}, expected_status_code = 200):
         h = headers.copy()
@@ -907,7 +913,8 @@ class HGECtx:
         resp = self.http.post(
             self.hge_url + url_path,
             json=q,
-            headers=h
+            headers=h,
+            timeout=self.timeout,
         )
         # NOTE: make sure we preserve key ordering so we can test the ordering
         # properties in the graphql spec properly
@@ -916,7 +923,7 @@ class HGECtx:
         if expected_status_code:
             assert \
                 resp.status_code == expected_status_code, \
-                f'Expected {resp.status_code} to be {expected_status_code}. Response:\n{json.dumps(resp_obj, indent=2)}'
+                f'Expected {resp.status_code} to be {expected_status_code}.\nRequest:\n{json.dumps(q, indent=2)}\nResponse:\n{json.dumps(resp_obj, indent=2)}'
         return resp_obj
 
     def v1q(self, q, headers = {}, expected_status_code = 200):
