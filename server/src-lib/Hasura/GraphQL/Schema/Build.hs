@@ -59,6 +59,7 @@ import Data.Text.Casing qualified as C
 import Data.Text.Extended
 import Hasura.GraphQL.ApolloFederation
 import Hasura.GraphQL.Schema.Backend (BackendTableSelectSchema (..), MonadBuildSchema)
+import Hasura.GraphQL.Schema.BoolExp (AggregationPredicatesSchema)
 import Hasura.GraphQL.Schema.Common
 import Hasura.GraphQL.Schema.Mutation
 import Hasura.GraphQL.Schema.NamingCase
@@ -78,7 +79,6 @@ import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
-import Hasura.Server.Types (StreamingSubscriptionsCtx (..))
 import Language.GraphQL.Draft.Syntax qualified as G
 
 -- | Builds field name with proper case. Please note that this is a pure
@@ -104,20 +104,20 @@ setFieldNameCase tCase tInfo crf getFieldName tableName =
 buildTableQueryAndSubscriptionFields ::
   forall b r m n.
   ( MonadBuildSchema b r m n,
+    AggregationPredicatesSchema b,
     BackendTableSelectSchema b
   ) =>
   MkRootFieldName ->
   SourceInfo b ->
   TableName b ->
   TableInfo b ->
-  StreamingSubscriptionsCtx ->
   C.GQLNameIdentifier ->
   m
     ( [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))],
       [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))],
       Maybe (G.Name, Parser 'Output n (ApolloFederationParserFunction n))
     )
-buildTableQueryAndSubscriptionFields mkRootFieldName sourceInfo tableName tableInfo streamSubCtx gqlName = do
+buildTableQueryAndSubscriptionFields mkRootFieldName sourceInfo tableName tableInfo gqlName = do
   tCase <- asks getter
   roleName <- retrieve scRole
   let -- select table
@@ -138,7 +138,7 @@ buildTableQueryAndSubscriptionFields mkRootFieldName sourceInfo tableName tableI
     -- Filter the root fields which have been enabled
     Just SelPermInfo {..} -> do
       selectStreamParser <-
-        if (isRootFieldAllowed SRFTSelectStream spiAllowedSubscriptionRootFields && streamSubCtx == StreamingSubscriptionsEnabled)
+        if (isRootFieldAllowed SRFTSelectStream spiAllowedSubscriptionRootFields)
           then buildTableStreamingSubscriptionFields mkRootFieldName sourceInfo tableName tableInfo gqlName
           else pure mempty
 
@@ -200,6 +200,7 @@ buildTableQueryAndSubscriptionFields mkRootFieldName sourceInfo tableName tableI
 buildTableStreamingSubscriptionFields ::
   forall b r m n.
   ( MonadBuildSchema b r m n,
+    AggregationPredicatesSchema b,
     BackendTableSelectSchema b
   ) =>
   MkRootFieldName ->
@@ -276,6 +277,7 @@ buildTableInsertMutationFields backendInsertAction mkRootFieldName scenario sour
 buildTableUpdateMutationFields ::
   forall b r m n.
   ( MonadBuildSchema b r m n,
+    AggregationPredicatesSchema b,
     BackendTableSelectSchema b
   ) =>
   -- | an action that builds @BackendUpdate@ with the
@@ -319,6 +321,7 @@ buildTableUpdateMutationFields mkBackendUpdate mkRootFieldName scenario sourceIn
 buildTableDeleteMutationFields ::
   forall b r m n.
   ( MonadBuildSchema b r m n,
+    AggregationPredicatesSchema b,
     BackendTableSelectSchema b
   ) =>
   MkRootFieldName ->

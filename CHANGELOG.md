@@ -4,11 +4,13 @@
 
 ### Bug fixes and improvements
 
+- server: enable streaming subscriptions by default in the graphql-engine
 - server: add `rename_query_collection` metadata API
 - server: fix behaviour of custom table name for `graphql-default` naming convention
 - server: require non-negative integers for '--stripes', '--connections', '--timeout', 'conn-lifetime', '--pool-timeout', '--events-fetch-interval', '--async-actions-fetch-interval', '--websocket-keepalive', '--schema-sync-poll-interval', '--events-fetch-batch-size', '--graceful-shutdown-timeout', and '--websocket-connection-init-timeout'
 - cli: add  `--disallow-inconsistent-metadata`  flag in `hasura metadata apply`. Setting this flag will prevent applying metadata which can introduce inconsistencies.
 - console: fix browse rows on BigQuery when the data sources are misaligned
+- server: use varchar literals to compare with varchar columns where possible in SQLServer (fix #8735)
 
 ## v2.10.1
 
@@ -17,6 +19,7 @@
 - server: fix long identifiers in insert with parameters (fix #8741)
 - server: fix 'nulls: first' and 'nulls: last' parsing for Postgres
 - server: accept `extensions_schema` while adding a PostgreSQL source for the graphql-engine to install database extensions in the specified schema
+- server: accept a default extensions schema (`HASURA_GRAPHQL_METADATA_DATABASE_EXTENSIONS_SCHEMA`) for the metadata database where graphql-engine will install database extensions
 - console: add support extensions_schema on postgres connect/edit DB form
 
 ## v2.11.0-beta.1

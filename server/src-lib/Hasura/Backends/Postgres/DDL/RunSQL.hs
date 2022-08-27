@@ -27,7 +27,9 @@ import Database.PG.Query qualified as Q
 import Hasura.Backends.Postgres.Connection.MonadTx
 import Hasura.Backends.Postgres.DDL.EventTrigger
 import Hasura.Backends.Postgres.DDL.Source
-  ( ToMetadataFetchQuery,
+  ( FetchFunctionMetadata,
+    FetchTableMetadata,
+    ToMetadataFetchQuery,
     fetchFunctionMetadata,
     fetchTableMetadata,
   )
@@ -140,14 +142,20 @@ the metadata check as well. -}
 -- | Fetch metadata of tracked tables/functions and build @'TableMeta'/@'FunctionMeta'
 -- to calculate diff later in @'withMetadataCheck'.
 fetchTablesFunctionsMetadata ::
-  (ToMetadataFetchQuery pgKind, BackendMetadata ('Postgres pgKind), MonadTx m) =>
+  forall pgKind m.
+  ( ToMetadataFetchQuery pgKind,
+    FetchTableMetadata pgKind,
+    FetchFunctionMetadata pgKind,
+    BackendMetadata ('Postgres pgKind),
+    MonadTx m
+  ) =>
   TableCache ('Postgres pgKind) ->
   [TableName ('Postgres pgKind)] ->
   [FunctionName ('Postgres pgKind)] ->
   m ([TableMeta ('Postgres pgKind)], [FunctionMeta ('Postgres pgKind)])
 fetchTablesFunctionsMetadata tableCache tables functions = do
   tableMetaInfos <- fetchTableMetadata tables
-  functionMetaInfos <- fetchFunctionMetadata functions
+  functionMetaInfos <- fetchFunctionMetadata @pgKind functions
   pure (buildTableMeta tableMetaInfos functionMetaInfos, buildFunctionMeta functionMetaInfos)
   where
     buildTableMeta tableMetaInfos functionMetaInfos =
@@ -172,6 +180,8 @@ runRunSQL ::
   forall (pgKind :: PostgresKind) m.
   ( BackendMetadata ('Postgres pgKind),
     ToMetadataFetchQuery pgKind,
+    FetchTableMetadata pgKind,
+    FetchFunctionMetadata pgKind,
     CacheRWM m,
     HasServerConfigCtx m,
     MetadataM m,
@@ -213,6 +223,8 @@ withMetadataCheck ::
   forall (pgKind :: PostgresKind) a m.
   ( BackendMetadata ('Postgres pgKind),
     ToMetadataFetchQuery pgKind,
+    FetchTableMetadata pgKind,
+    FetchFunctionMetadata pgKind,
     CacheRWM m,
     HasServerConfigCtx m,
     MetadataM m,
@@ -263,6 +275,8 @@ runTxWithMetadataCheck ::
   forall m a (pgKind :: PostgresKind).
   ( BackendMetadata ('Postgres pgKind),
     ToMetadataFetchQuery pgKind,
+    FetchTableMetadata pgKind,
+    FetchFunctionMetadata pgKind,
     CacheRWM m,
     MonadIO m,
     MonadBaseControl IO m,

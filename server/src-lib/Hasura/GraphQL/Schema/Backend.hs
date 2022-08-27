@@ -57,7 +57,6 @@ import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization (MkRootFieldName)
 import Hasura.SQL.Backend
-import Hasura.Server.Types (StreamingSubscriptionsCtx)
 import Language.GraphQL.Draft.Syntax qualified as G
 
 -- | Bag of constraints available to the methods of @BackendSchema@.
@@ -101,7 +100,6 @@ class
     SourceInfo b ->
     TableName b ->
     TableInfo b ->
-    StreamingSubscriptionsCtx ->
     GQLNameIdentifier ->
     m
       ( [FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))],
@@ -340,7 +338,7 @@ type ComparisonExp b = OpExpG b (UnpreparedValue b)
 --
 -- * Pro: You can specify both shared and diverging behavior.
 -- * Pro: You can specify a lot of behavior implicitly, i.e. it's easy to write.
--- * Con: You can specify a lot of behavior implicitly, i.e. it's hard do
+-- * Con: You can specify a lot of behavior implicitly, i.e. it's hard to
 --   understand without tracing through implementations.
 -- * Con: You get a proliferation of type class methods and it's difficult to
 --   understand how they fit together.
@@ -355,7 +353,7 @@ type ComparisonExp b = OpExpG b (UnpreparedValue b)
 -- instead of other type class methods.
 --
 -- When we do this, the function call sites (which will often be in @instance
--- BackendSchema ...@) becomes the centralised place where we decide which behavior
+-- BackendSchema ...@) become the centralised places where we decide which behavior
 -- variation to follow.
 --
 -- When faced with answering the question of "what does this method do, and how does
