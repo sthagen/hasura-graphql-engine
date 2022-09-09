@@ -50,6 +50,10 @@ type FieldWrapperProps = {
    * The field data test id for testing
    */
   dataTest?: string;
+  /**
+   * Removing styling only necessary for the error placeholder
+   */
+  noErrorPlaceholder?: boolean;
 };
 
 export type FieldWrapperPassThroughProps = Omit<
@@ -94,6 +98,7 @@ export const FieldWrapper = (props: FieldWrapperProps) => {
     description,
     tooltip,
     horizontal,
+    noErrorPlaceholder,
   } = props;
   return (
     <div
@@ -105,35 +110,38 @@ export const FieldWrapper = (props: FieldWrapperProps) => {
           : 'max-w-xl'
       )}
     >
-      <label
-        htmlFor={id}
-        className={clsx(
-          'block pt-1 text-gray-600 mb-xs',
-          horizontal && 'pr-8 flex-grow220px'
-        )}
-      >
-        <span
+      {label ? (
+        <label
+          htmlFor={id}
           className={clsx(
-            'flex items-center',
-            horizontal ? 'text-muted' : 'font-semibold'
+            'block pt-1 text-gray-600 mb-xs',
+            horizontal && 'pr-8 flex-grow220px'
           )}
         >
-          <span>
-            {labelIcon
-              ? React.cloneElement(labelIcon, {
-                  className: 'h-4 w-4 mr-xs',
-                })
-              : null}
-            {label}
+          <span
+            className={clsx(
+              'flex items-center',
+              horizontal ? 'text-muted' : 'font-semibold'
+            )}
+          >
+            <span>
+              {labelIcon
+                ? React.cloneElement(labelIcon, {
+                    className: 'h-4 w-4 mr-xs',
+                  })
+                : null}
+              {label}
+            </span>
+            {tooltip ? <IconTooltip message={tooltip} /> : null}
           </span>
-          {tooltip ? <IconTooltip message={tooltip} /> : null}
-        </span>
-        {description ? (
-          <span className="text-muted mb-xs font-normal text-sm">
-            {description}
-          </span>
-        ) : null}
-      </label>
+          {description ? (
+            <span className="text-gray-600 mb-xs font-normal text-sm">
+              {description}
+            </span>
+          ) : null}
+        </label>
+      ) : null}
+
       <div className={clsx(horizontal && 'flex-grow320px')}>
         <div>{children}</div>
         {error ? (
@@ -151,7 +159,7 @@ export const FieldWrapper = (props: FieldWrapperProps) => {
           /* A &nbsp; character is displayed even if there is no error to
           book some space for the error message. It prevents other fields to
           be pushed down when an error is displayed. */
-          <ErrorComponentTemplate label={<>&nbsp;</>} />
+          noErrorPlaceholder ?? <ErrorComponentTemplate label={<>&nbsp;</>} />
         )}
       </div>
     </div>

@@ -44,6 +44,7 @@ import Control.Concurrent.Async qualified as Async
 import Control.Concurrent.Extended (sleep)
 import Control.Monad.Trans.Managed (ManagedT (..), lowerManagedT)
 import Data.Aeson (Value, object, (.=))
+import Data.Aeson.Encode.Pretty as AP
 import Data.Aeson.Types (Pair)
 import Data.Environment qualified as Env
 import Data.Text qualified as T
@@ -52,7 +53,7 @@ import Harness.Constants qualified as Constants
 import Harness.Exceptions (HasCallStack, bracket, withFrozenCallStack)
 import Harness.Http qualified as Http
 import Harness.Quoter.Yaml (yaml)
-import Harness.TestEnvironment (Server (..), TestEnvironment, getServer, serverUrl)
+import Harness.TestEnvironment (Server (..), TestEnvironment, getServer, serverUrl, testLog, testLogBytestring)
 import Hasura.App (Loggers (..), ServeCtx (..))
 import Hasura.App qualified as App
 import Hasura.Logging (Hasura)
@@ -96,7 +97,8 @@ post_ testEnvironment path v = void $ withFrozenCallStack $ postWithHeaders_ tes
 -- Note: We add 'withFrozenCallStack' to reduce stack trace clutter.
 postWithHeaders ::
   HasCallStack => TestEnvironment -> String -> Http.RequestHeaders -> Value -> IO Value
-postWithHeaders v = withFrozenCallStack $ postWithHeadersStatus 200 v
+postWithHeaders =
+  withFrozenCallStack $ postWithHeadersStatus 200
 
 -- | Post some JSON to graphql-engine, getting back more JSON.
 --
@@ -106,8 +108,12 @@ postWithHeaders v = withFrozenCallStack $ postWithHeadersStatus 200 v
 -- Note: We add 'withFrozenCallStack' to reduce stack trace clutter.
 postWithHeadersStatus ::
   HasCallStack => Int -> TestEnvironment -> String -> Http.RequestHeaders -> Value -> IO Value
-postWithHeadersStatus statusCode (getServer -> Server {urlPrefix, port}) path headers v =
-  withFrozenCallStack $ Http.postValueWithStatus statusCode (urlPrefix ++ ":" ++ show port ++ path) headers v
+postWithHeadersStatus statusCode testEnv@(getServer -> Server {urlPrefix, port}) path headers requestBody = do
+  testLog testEnv $ "Posting to " <> path
+  testLogBytestring testEnv $ "Request body: " <> AP.encodePretty requestBody
+  responseBody <- withFrozenCallStack $ Http.postValueWithStatus statusCode (urlPrefix ++ ":" ++ show port ++ path) headers requestBody
+  testLogBytestring testEnv $ "Response body: " <> AP.encodePretty responseBody
+  pure responseBody
 
 -- | Post some JSON to graphql-engine, getting back more JSON.
 --

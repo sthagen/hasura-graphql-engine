@@ -52,6 +52,7 @@ import Hasura.RQL.Types.ApiLimit
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.Endpoint
+import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.Eventing.Backend
 import Hasura.RQL.Types.GraphqlSchemaIntrospection
 import Hasura.RQL.Types.Metadata
@@ -82,6 +83,10 @@ data RQLMetadataV1
   | RMDropSource DropSource
   | RMRenameSource !RenameSource
   | RMUpdateSource !(AnyBackend UpdateSource)
+  | RMListSourceKinds !ListSourceKinds
+  | RMGetSourceKindCapabilities !GetSourceKindCapabilities
+  | RMGetSourceTables !GetSourceTables
+  | RMGetTableInfo !GetTableInfo
   | -- Tables
     RMTrackTable !(AnyBackend TrackTableV2)
   | RMUntrackTable !(AnyBackend UntrackTable)
@@ -124,6 +129,7 @@ data RQLMetadataV1
   | RMDeleteEventTrigger !(AnyBackend DeleteEventTriggerQuery)
   | RMRedeliverEvent !(AnyBackend RedeliverEventQuery)
   | RMInvokeEventTrigger !(AnyBackend InvokeEventTriggerQuery)
+  | RMCleanupEventTriggerLog !TriggerLogCleanupConfig
   | -- Remote schemas
     RMAddRemoteSchema !AddRemoteSchemaQuery
   | RMUpdateRemoteSchema !AddRemoteSchemaQuery
@@ -166,7 +172,6 @@ data RQLMetadataV1
   | -- GraphQL Data Connectors
     RMDCAddAgent !DCAddAgent
   | RMDCDeleteAgent !DCDeleteAgent
-  | RMListSourceKinds !ListSourceKinds
   | -- Custom types
     RMSetCustomTypes !CustomTypes
   | -- Api limits
@@ -222,6 +227,7 @@ instance FromJSON RQLMetadataV1 where
       "create_remote_schema_remote_relationship" -> RMCreateRemoteSchemaRemoteRelationship <$> args
       "update_remote_schema_remote_relationship" -> RMUpdateRemoteSchemaRemoteRelationship <$> args
       "delete_remote_schema_remote_relationship" -> RMDeleteRemoteSchemaRemoteRelationship <$> args
+      "cleanup_event_trigger_logs" -> RMCleanupEventTriggerLog <$> args
       "create_cron_trigger" -> RMCreateCronTrigger <$> args
       "delete_cron_trigger" -> RMDeleteCronTrigger <$> args
       "create_scheduled_event" -> RMCreateScheduledEvent <$> args
@@ -247,6 +253,9 @@ instance FromJSON RQLMetadataV1 where
       "dc_add_agent" -> RMDCAddAgent <$> args
       "dc_delete_agent" -> RMDCDeleteAgent <$> args
       "list_source_kinds" -> RMListSourceKinds <$> args
+      "get_source_kind_capabilities" -> RMGetSourceKindCapabilities <$> args
+      "get_source_tables" -> RMGetSourceTables <$> args
+      "get_table_info" -> RMGetTableInfo <$> args
       "set_custom_types" -> RMSetCustomTypes <$> args
       "set_api_limits" -> RMSetApiLimits <$> args
       "remove_api_limits" -> pure RMRemoveApiLimits
@@ -344,7 +353,8 @@ runMetadataQuery ::
     MonadBaseControl IO m,
     Tracing.MonadTrace m,
     MonadMetadataStorage m,
-    MonadResolveSource m
+    MonadResolveSource m,
+    MonadEventLogCleanup m
   ) =>
   Env.Environment ->
   L.Logger L.Hasura ->
@@ -430,7 +440,8 @@ runMetadataQueryM ::
     MonadMetadataStorageQueryAPI m,
     HasServerConfigCtx m,
     MonadReader r m,
-    Has (L.Logger L.Hasura) r
+    Has (L.Logger L.Hasura) r,
+    MonadEventLogCleanup m
   ) =>
   Env.Environment ->
   MetadataResourceVersion ->
@@ -459,7 +470,8 @@ runMetadataQueryV1M ::
     MonadMetadataStorageQueryAPI m,
     HasServerConfigCtx m,
     MonadReader r m,
-    Has (L.Logger L.Hasura) r
+    Has (L.Logger L.Hasura) r,
+    MonadEventLogCleanup m
   ) =>
   Env.Environment ->
   MetadataResourceVersion ->
@@ -470,6 +482,10 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMDropSource q -> runDropSource q
   RMRenameSource q -> runRenameSource q
   RMUpdateSource q -> dispatchMetadata runUpdateSource q
+  RMListSourceKinds q -> runListSourceKinds q
+  RMGetSourceKindCapabilities q -> runGetSourceKindCapabilities q
+  RMGetSourceTables q -> runGetSourceTables q
+  RMGetTableInfo q -> runGetTableInfo q
   RMTrackTable q -> dispatchMetadata runTrackTableV2Q q
   RMUntrackTable q -> dispatchMetadataAndEventTrigger runUntrackTableQ q
   RMSetFunctionCustomization q -> dispatchMetadata runSetFunctionCustomization q
@@ -509,6 +525,7 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMDeleteEventTrigger q -> dispatchMetadataAndEventTrigger runDeleteEventTriggerQuery q
   RMRedeliverEvent q -> dispatchEventTrigger runRedeliverEvent q
   RMInvokeEventTrigger q -> dispatchEventTrigger runInvokeEventTrigger q
+  RMCleanupEventTriggerLog q -> runCleanupEventTriggerLog q
   RMAddRemoteSchema q -> runAddRemoteSchema env q
   RMUpdateRemoteSchema q -> runUpdateRemoteSchema env q
   RMRemoveRemoteSchema q -> runRemoveRemoteSchema q
@@ -555,7 +572,6 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMDropRestEndpoint q -> runDropEndpoint q
   RMDCAddAgent q -> runAddDataConnectorAgent q
   RMDCDeleteAgent q -> runDeleteDataConnectorAgent q
-  RMListSourceKinds q -> runListSourceKinds q
   RMSetCustomTypes q -> runSetCustomTypes q
   RMSetApiLimits q -> runSetApiLimits q
   RMRemoveApiLimits -> runRemoveApiLimits

@@ -5,7 +5,11 @@ module Harness.Backend.DataConnector
   ( -- * Reference Agent
     setupFixture,
     teardown,
-    defaultBackendConfig,
+    backendConfigs,
+    referenceBackendConfig,
+    sqliteBackendConfig,
+    chinookStockMetadata,
+    TestSourceConfig (..),
 
     -- * Mock Agent
     MockConfig (..),
@@ -30,11 +34,12 @@ import Control.Concurrent.Async (Async)
 import Control.Concurrent.Async qualified as Async
 import Data.Aeson qualified as Aeson
 import Data.IORef qualified as I
+import Data.List.NonEmpty qualified as NE
 import Harness.Backend.DataConnector.MockAgent
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Http (RequestHeaders, healthCheck)
 import Harness.Quoter.Yaml (yaml)
-import Harness.Test.Fixture (BackendType (DataConnector), Options, SetupAction (..), defaultBackendTypeString)
+import Harness.Test.Fixture (BackendType (DataConnectorMock, DataConnectorReference, DataConnectorSqlite), Options, SetupAction (..), defaultBackendTypeString, defaultSource)
 import Harness.TestEnvironment (TestEnvironment)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Backends.DataConnector.API qualified as API
@@ -43,23 +48,54 @@ import Test.Hspec (shouldBe)
 
 --------------------------------------------------------------------------------
 
-defaultBackendConfig :: Aeson.Value
-defaultBackendConfig =
-  let backendType = defaultBackendTypeString $ DataConnector
+data TestSourceConfig = TestSourceConfig
+  { typeConfig :: BackendType,
+    backendConfig :: Aeson.Value,
+    sourceConfig :: Aeson.Value,
+    metadataConfig :: Aeson.Value
+  }
+  deriving (Show, Eq)
+
+backendConfigs :: NE.NonEmpty TestSourceConfig
+backendConfigs =
+  TestSourceConfig DataConnectorReference referenceBackendConfig emptyConfig chinookStockMetadata
+    NE.:| [TestSourceConfig DataConnectorSqlite sqliteBackendConfig sqliteConfig chinookSqliteMetadata]
+
+referenceBackendConfig :: Aeson.Value
+referenceBackendConfig =
+  let backendType = defaultBackendTypeString $ DataConnectorReference
    in [yaml|
 dataconnector:
   *backendType:
     uri: "http://127.0.0.1:65005/"
 |]
 
+sqliteBackendConfig :: Aeson.Value
+sqliteBackendConfig =
+  let backendType = defaultBackendTypeString DataConnectorSqlite
+   in [yaml|
+dataconnector:
+  *backendType:
+    uri: "http://127.0.0.1:65007/"
+|]
+
 mockBackendConfig :: Aeson.Value
 mockBackendConfig =
-  let backendType = defaultBackendTypeString $ DataConnector
+  let backendType = defaultBackendTypeString $ DataConnectorMock
       agentUri = "http://127.0.0.1:" <> show mockAgentPort <> "/"
    in [yaml|
 dataconnector:
   *backendType:
     uri: *agentUri
+|]
+
+emptyConfig :: Aeson.Value
+emptyConfig = [yaml| {} |]
+
+sqliteConfig :: Aeson.Value
+sqliteConfig =
+  [yaml|
+db: "/db.chinook.sqlite"
 |]
 
 --------------------------------------------------------------------------------
@@ -81,6 +117,90 @@ setupFixture sourceMetadata backendConfig (testEnvironment, _) = do
 teardown :: (TestEnvironment, ()) -> IO ()
 teardown (testEnvironment, _) = do
   GraphqlEngine.clearMetadata testEnvironment
+
+chinookStockMetadata :: Aeson.Value
+chinookStockMetadata = chinookMetadata DataConnectorReference emptyConfig
+
+chinookSqliteMetadata :: Aeson.Value
+chinookSqliteMetadata = chinookMetadata DataConnectorSqlite sqliteConfig
+
+chinookMetadata :: BackendType -> Aeson.Value -> Aeson.Value
+chinookMetadata backendType config =
+  let source = defaultSource backendType
+      backendTypeString = defaultBackendTypeString backendType
+   in [yaml|
+name : *source
+kind: *backendTypeString
+tables:
+  - table: [Album]
+    configuration:
+      custom_root_fields:
+        select: albums
+        select_by_pk: albums_by_pk
+      column_config:
+        AlbumId:
+          custom_name: id
+        Title:
+          custom_name: title
+        ArtistId:
+          custom_name: artist_id
+    object_relationships:
+      - name: artist
+        using:
+          manual_configuration:
+            remote_table: [Artist]
+            column_mapping:
+              ArtistId: ArtistId
+  - table: [Artist]
+    configuration:
+      custom_root_fields:
+        select: artists
+        select_by_pk: artists_by_pk
+      column_config:
+        ArtistId:
+          custom_name: id
+        Name:
+          custom_name: name
+    array_relationships:
+      - name: albums
+        using:
+          manual_configuration:
+            remote_table: [Album]
+            column_mapping:
+              ArtistId: ArtistId
+  - table: Playlist
+    array_relationships:
+    - name : Tracks
+      using:
+        foreign_key_constraint_on:
+          column: PlaylistId
+          table:
+          - PlaylistTrack
+  - table: PlaylistTrack
+    object_relationships:
+      - name: Playlist
+        using:
+          foreign_key_constraint_on: PlaylistId
+      - name: Track
+        using:
+          manual_configuration:
+            remote_table: [Track]
+            column_mapping:
+              TrackId: TrackId
+  - table: Track
+  - table: Employee
+    configuration:
+      custom_root_fields:
+        select: employees
+        select_by_pk: employee_by_pk
+      column_config:
+        BirthDate:
+          custom_name: birth_date
+        LastName:
+          custom_name: last_name
+configuration:
+  *config
+|]
 
 --------------------------------------------------------------------------------
 -- Mock Agent

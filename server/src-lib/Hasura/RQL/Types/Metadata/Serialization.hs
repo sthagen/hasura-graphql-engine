@@ -56,7 +56,7 @@ import Hasura.RQL.Types.GraphqlSchemaIntrospection (SetGraphqlIntrospectionOptio
 import Hasura.RQL.Types.Metadata.Common
   ( Actions,
     BackendConfigWrapper (..),
-    BackendSourceMetadata,
+    BackendSourceMetadata (..),
     ComputedFieldMetadata (..),
     CronTriggers,
     Endpoints,
@@ -103,7 +103,7 @@ sourcesToOrdJSONList sources =
     map sourceMetaToOrdJSON $ sortOn getSourceName $ OM.elems sources
   where
     sourceMetaToOrdJSON :: BackendSourceMetadata -> AO.Value
-    sourceMetaToOrdJSON exists =
+    sourceMetaToOrdJSON (BackendSourceMetadata exists) =
       AB.dispatchAnyBackend @Backend exists $ \(SourceMetadata {..} :: SourceMetadata b) ->
         let sourceNamePair = ("name", AO.toOrdered _smName)
             sourceKindPair = ("kind", AO.toOrdered _smKind)
@@ -115,12 +115,14 @@ sourcesToOrdJSONList sources =
             customizationPair =
               guard (_smCustomization /= emptySourceCustomization)
                 *> [("customization", AO.toOrdered _smCustomization)]
+            healthCheckPair = maybe [] (\healthCheckConfig -> [("health_check", AO.toOrdered healthCheckConfig)]) _smHealthCheckConfig
          in AO.object $
               [sourceNamePair, sourceKindPair, tablesPair]
                 <> maybeToList functionsPair
                 <> configurationPair
                 <> queryTagsConfigPair
                 <> customizationPair
+                <> healthCheckPair
 
     tableMetaToOrdJSON :: (Backend b) => TableMetadata b -> AO.Value
     tableMetaToOrdJSON
@@ -307,7 +309,7 @@ sourcesToOrdJSONList sources =
                 <> catMaybes [maybeCommentToMaybeOrdPair comment]
 
           eventTriggerConfToOrdJSON :: Backend b => EventTriggerConf b -> AO.Value
-          eventTriggerConfToOrdJSON (EventTriggerConf name definition webhook webhookFromEnv retryConf headers reqTransform respTransform) =
+          eventTriggerConfToOrdJSON (EventTriggerConf name definition webhook webhookFromEnv retryConf headers reqTransform respTransform cleanupConfig) =
             AO.object $
               [ ("name", AO.toOrdered name),
                 ("definition", AO.toOrdered definition),
@@ -318,7 +320,8 @@ sourcesToOrdJSONList sources =
                     maybeAnyToMaybeOrdPair "webhook_from_env" AO.toOrdered webhookFromEnv,
                     headers >>= listToMaybeOrdPair "headers" AO.toOrdered,
                     fmap (("request_transform",) . AO.toOrdered) reqTransform,
-                    fmap (("response_transform",) . AO.toOrdered) respTransform
+                    fmap (("response_transform",) . AO.toOrdered) respTransform,
+                    maybeAnyToMaybeOrdPair "cleanup_config" AO.toOrdered cleanupConfig
                   ]
 
     functionMetadataToOrdJSON :: Backend b => FunctionMetadata b -> AO.Value

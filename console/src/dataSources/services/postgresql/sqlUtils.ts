@@ -680,6 +680,13 @@ export const getAlterColumnCommentSql: DataSourcesAPI['getAlterColumnCommentSql'
 `;
   };
 
+export const getAlterViewCommentSql: DataSourcesAPI['getAlterViewCommentSql'] =
+  ({ viewName, schemaName, comment }) => {
+    return `comment on view "${schemaName}"."${viewName}" is ${
+      comment ? sqlEscapeText(comment) : 'NULL'
+    }`;
+  };
+
 export const getAlterFunctionCommentSql: DataSourcesAPI['getAlterFunctionCommentSql'] =
   ({ functionName, schemaName, comment }) => {
     return `
@@ -836,7 +843,8 @@ export const getFunctionDefinitionSql = (
   schemaName: string | string[],
   functionName?: string | null,
   type?: keyof typeof functionWhereStatement
-) => `
+) => {
+  return `
 -- test_id = ${Array.isArray(schemaName) ? type ?? 'all' : 'single'}_functions
 SELECT
 COALESCE(
@@ -892,16 +900,17 @@ AND NOT(EXISTS (
     pg_aggregate.aggfnoid::oid = p.oid))) as info
 -- WHERE function_schema='${schemaName}'
 WHERE ${
-  Array.isArray(schemaName)
-    ? `function_schema IN (${schemaName.map(s => `'${s}'`).join(', ')})`
-    : `function_schema='${schemaName}'`
-}
+    Array.isArray(schemaName)
+      ? `function_schema IN (${schemaName.map(s => `'${s}'`).join(', ')})`
+      : `function_schema='${schemaName}'`
+  }
 ${functionName ? `AND function_name='${functionName}'` : ''}
 ${type ? functionWhereStatement[type] : ''}
 ORDER BY function_name ASC
 ${functionName ? 'LIMIT 1' : ''}
 ) as functions;
 `;
+};
 
 export const primaryKeysInfoSql = (options: {
   schemas: string[];

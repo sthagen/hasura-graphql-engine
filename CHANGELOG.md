@@ -1,16 +1,6 @@
 # Hasura GraphQL Engine Changelog
 
-## Next release
-
-### Bug fixes and improvements
-
-- server: enable streaming subscriptions by default in the graphql-engine
-- server: add `rename_query_collection` metadata API
-- server: fix behaviour of custom table name for `graphql-default` naming convention
-- server: require non-negative integers for '--stripes', '--connections', '--timeout', 'conn-lifetime', '--pool-timeout', '--events-fetch-interval', '--async-actions-fetch-interval', '--websocket-keepalive', '--schema-sync-poll-interval', '--events-fetch-batch-size', '--graceful-shutdown-timeout', and '--websocket-connection-init-timeout'
-- cli: add  `--disallow-inconsistent-metadata`  flag in `hasura metadata apply`. Setting this flag will prevent applying metadata which can introduce inconsistencies.
-- console: fix browse rows on BigQuery when the data sources are misaligned
-- server: use varchar literals to compare with varchar columns where possible in SQLServer (fix #8735)
+:warning: This file is deprecated and contains changelog only for older releases. Please visit [this page](https://hasura.io/changelog) or [the github releases page](https://github.com/hasura/graphql-engine/releases) to view the changelog for latest releases :warning:
 
 ## v2.10.1
 
@@ -254,8 +244,29 @@ The way it works is:
 
 Please submit any feedback you may have for this feature at https://github.com/hasura/graphql-engine/issues/2768.
 
-### Bug fixes and improvements
+### Error message syntax
 
+We are slowly standardizing the format of error messages, especially with regards to the way values are quoted.
+
+Any errors generated during the parsing of GraphQL or the construction of the schema might have changed the way they quote certain values. For example, GraphQL names are now always quoted with single quotes, leading to changes such as the following.
+
+_Before:_
+
+```
+field "nonexistent_root_field" not found in type: 'query_root'
+```
+
+_After:_
+
+```
+field 'nonexistent_root_field' not found in type: 'query_root'
+```
+
+If you are depending on the specific text of an error message and/or parsing the message, you may need to update your code accordingly.
+
+Further changes are forthcoming along similar lines.
+
+### Bug fixes and improvements
 
 - server: Kriti `basicFunctions` now available for REST Connectors and Webhook Transforms
 - server: Fix bug where Hasura SQL trigger was not dropped when MS SQL Server source is dropped
@@ -281,7 +292,6 @@ Please submit any feedback you may have for this feature at https://github.com/h
 - build: Changes to the `hasura/graphql-engine` Docker image:
   - Default graphql-engine docker images (`hasura/graphql-engine:<VERSION>`) now use an Ubuntu base instead of Debian.
   - Debian flavour of images (`hasura/graphql-engine:<VERSION>.debian`) are still published to Docker Hub.
-  - CentOS flavour of images (`hasura/graphql-engine:<VERSION>.centos`) are no longer supported.
 
 ## v2.10.0-beta.1
 
@@ -549,7 +559,8 @@ Please submit any feedback you may have for this feature at https://github.com/h
   - Default graphql-engine docker images (`hasura/graphql-engine:<VERSION>`) now use an Ubuntu base instead of Debian.
   - Debian flavour of images (`hasura/graphql-engine:<VERSION>.debian`) are still published to Docker Hub.
   - CentOS flavour of images (`hasura/graphql-engine:<VERSION>.centos`) are no longer supported.
-
+- docs: Kriti templating documentation sections added
+  
 ## v2.9.0
 
 ### Event Triggers for MS SQL Server

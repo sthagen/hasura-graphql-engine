@@ -8,18 +8,16 @@ where
 
 --------------------------------------------------------------------------------
 
-import Data.Aeson qualified as Aeson
-import Data.List.NonEmpty qualified as NE
 import Harness.Backend.DataConnector qualified as DataConnector
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Yaml (yaml)
-import Harness.Test.BackendType (BackendType (DataConnector), defaultBackendTypeString, defaultSource)
 import Harness.Test.Fixture qualified as Fixture
 import Harness.TestEnvironment (TestEnvironment)
+import Harness.TestEnvironment qualified as TE
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
-import Test.Hspec (SpecWith, describe, it)
+import Test.Hspec (SpecWith, describe, it, pendingWith)
 
 --------------------------------------------------------------------------------
 -- Reference Agent Query Tests
@@ -27,81 +25,19 @@ import Test.Hspec (SpecWith, describe, it)
 spec :: SpecWith TestEnvironment
 spec =
   Fixture.runWithLocalTestEnvironment
-    ( NE.fromList
-        [ (Fixture.fixture $ Fixture.Backend Fixture.DataConnector)
+    ( ( \(DataConnector.TestSourceConfig backendType backendConfig _sourceConfig md) ->
+          (Fixture.fixture $ Fixture.Backend backendType)
             { Fixture.setupTeardown = \(testEnv, _) ->
                 [ DataConnector.setupFixtureAction
-                    sourceMetadata
-                    DataConnector.defaultBackendConfig
+                    md
+                    backendConfig
                     testEnv
                 ]
             }
-        ]
+      )
+        <$> DataConnector.backendConfigs
     )
     tests
-
-sourceMetadata :: Aeson.Value
-sourceMetadata =
-  let source = defaultSource DataConnector
-      backendType = defaultBackendTypeString DataConnector
-   in [yaml|
-name : *source
-kind: *backendType
-tables:
-  - table: [Album]
-    configuration:
-      custom_root_fields:
-        select: albums
-        select_by_pk: albums_by_pk
-      column_config:
-        AlbumId:
-          custom_name: id
-        Title:
-          custom_name: title
-        ArtistId:
-          custom_name: artist_id
-    object_relationships:
-      - name: artist
-        using:
-          manual_configuration:
-            remote_table: [Artist]
-            column_mapping:
-              ArtistId: ArtistId
-  - table: [Artist]
-    configuration:
-      custom_root_fields:
-        select: artists
-        select_by_pk: artists_by_pk
-      column_config:
-        ArtistId:
-          custom_name: id
-        Name:
-          custom_name: name
-    array_relationships:
-      - name: albums
-        using:
-          manual_configuration:
-            remote_table: [Album]
-            column_mapping:
-              ArtistId: ArtistId
-  - table: [Playlist]
-  - table: [PlaylistTrack]
-    object_relationships:
-      - name: Playlist
-        using:
-          manual_configuration:
-            remote_table: [Playlist]
-            column_mapping:
-              PlaylistId: PlaylistId
-      - name: Track
-        using:
-          manual_configuration:
-            remote_table: [Track]
-            column_mapping:
-              TrackId: TrackId
-  - table: Track
-configuration: {}
-|]
 
 --------------------------------------------------------------------------------
 
@@ -196,14 +132,15 @@ tests opts = describe "Queries" $ do
                 Name: "Balls to the Wall"
         |]
 
-    it "works with pagination" $ \(testEnvironment, _) ->
+    it "works with pagination" $ \(testEnvironment, _) -> do
+      -- NOTE: We order by in this pagination test to ensure that the rows are ordered correctly (which they are not in db.chinook.sqlite)
       shouldReturnYaml
         opts
         ( GraphqlEngine.postGraphql
             testEnvironment
             [graphql|
               query getAlbum {
-                albums (limit: 3, offset: 2) {
+                albums (limit: 3, offset: 2, order_by: {id: asc}) {
                   id
                 }
               }
@@ -218,59 +155,110 @@ tests opts = describe "Queries" $ do
         |]
 
   describe "Array Relationships" $ do
-    it "joins on album id" $ \(testEnvironment, _) ->
-      shouldReturnYaml
-        opts
-        ( GraphqlEngine.postGraphql
-            testEnvironment
-            [graphql|
-              query getArtist {
-                artists_by_pk(id: 1) {
-                  id
-                  name
-                  albums {
-                    title
-                  }
-                }
-              }
-            |]
-        )
-        [yaml|
-          data:
-            artists_by_pk:
-              name: AC/DC
-              id: 1
-              albums:
-                - title: For Those About To Rock We Salute You
-                - title: Let There Be Rock
-        |]
-
-  describe "Object Relationships" $ do
-    it "joins on artist id" $ \(testEnvironment, _) ->
-      shouldReturnYaml
-        opts
-        ( GraphqlEngine.postGraphql
-            testEnvironment
-            [graphql|
-              query getAlbum {
-                albums_by_pk(id: 1) {
-                  id
-                  title
-                  artist {
+    describe "Manual" $ do
+      it "joins on album id" $ \(testEnvironment, _) ->
+        shouldReturnYaml
+          opts
+          ( GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+                query getArtist {
+                  artists_by_pk(id: 1) {
+                    id
                     name
+                    albums {
+                      title
+                    }
                   }
                 }
-              }
-            |]
-        )
-        [yaml|
-          data:
-            albums_by_pk:
-              id: 1
-              title: "For Those About To Rock We Salute You"
-              artist:
-                name: "AC/DC"
-        |]
+              |]
+          )
+          [yaml|
+            data:
+              artists_by_pk:
+                name: AC/DC
+                id: 1
+                albums:
+                  - title: For Those About To Rock We Salute You
+                  - title: Let There Be Rock
+          |]
+
+    describe "Foreign Key Constraint On" do
+      it "joins on PlaylistId" $ \(testEnvironment, _) -> do
+        -- NOTE: Ordering is used for the query due to inconsistencies in data-set ordering.
+        shouldReturnYaml
+          opts
+          ( GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+                query getPlaylist {
+                    Playlist_by_pk(PlaylistId: 1) {
+                      Tracks (order_by: {TrackId: desc}, limit: 3) {
+                        TrackId
+                      }
+                    }
+                }
+              |]
+          )
+          [yaml|
+            data:
+              Playlist_by_pk:
+                Tracks:
+                  - TrackId: 3503
+                  - TrackId: 3502
+                  - TrackId: 3501
+          |]
+
+  describe "Object Relationships" do
+    describe "Manual" do
+      it "joins on artist id" $ \(testEnvironment, _) ->
+        shouldReturnYaml
+          opts
+          ( GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+                query getAlbum {
+                  albums_by_pk(id: 1) {
+                    id
+                    title
+                    artist {
+                      name
+                    }
+                  }
+                }
+              |]
+          )
+          [yaml|
+            data:
+              albums_by_pk:
+                id: 1
+                title: "For Those About To Rock We Salute You"
+                artist:
+                  name: "AC/DC"
+          |]
+
+    describe "Foreign Key Constraint On" $ do
+      it "joins on PlaylistId" $ \(testEnvironment, _) ->
+        shouldReturnYaml
+          opts
+          ( GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+                query getPlaylist {
+                    PlaylistTrack_by_pk(PlaylistId: 1, TrackId: 2) {
+                      Playlist {
+                        Name
+                      }
+                    }
+                }
+              |]
+          )
+          [yaml|
+            data:
+              PlaylistTrack_by_pk:
+                Playlist:
+                  Name: "Music"
+          |]
 
   describe "Where Clause Tests" $ do
     it "works with '_in' predicate" $ \(testEnvironment, _) ->
@@ -504,7 +492,8 @@ tests opts = describe "Queries" $ do
                 title: 'Monteverdi: L''Orfeo'
         |]
 
-    it "can order by an aggregate" $ \(testEnvironment, _) ->
+    it "can order by an aggregate" $ \(testEnvironment, _) -> do
+      when (TE.backendType testEnvironment == Just Fixture.DataConnectorSqlite) (pendingWith "TODO: Test currently broken for SQLite DataConnector")
       shouldReturnYaml
         opts
         ( GraphqlEngine.postGraphql
@@ -539,7 +528,8 @@ tests opts = describe "Queries" $ do
                     count: 11
         |]
 
-    it "can order by a related field" $ \(testEnvironment, _) ->
+    it "can order by a related field" $ \(testEnvironment, _) -> do
+      when (TE.backendType testEnvironment == Just Fixture.DataConnectorSqlite) (pendingWith "TODO: Test currently broken for SQLite DataConnector")
       shouldReturnYaml
         opts
         ( GraphqlEngine.postGraphql
@@ -570,4 +560,27 @@ tests opts = describe "Queries" $ do
               - artist:
                   name: Aaron Goldberg
                 title: Worlds
+        |]
+  describe "Custom scalar types and operators" $ do
+    it "works with custom scalar types and comparison operators" $ \(testEnvironment, _) -> do
+      when (TE.backendType testEnvironment == Just Fixture.DataConnectorSqlite) do
+        pendingWith "TODO: Test currently broken for SQLite DataConnector"
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postGraphql
+            testEnvironment
+            [graphql|
+              query MyQuery {
+                employees(where: {birth_date: {in_year: 1965}}) {
+                  birth_date
+                  last_name
+                }
+              }
+            |]
+        )
+        [yaml|
+          data:
+            employees:
+            - birth_date: '1965-03-03T00:00:00-08:00'
+              last_name: Johnson
         |]
