@@ -45,7 +45,7 @@ import Hasura.Metadata.Class
 import Hasura.Prelude
 import Hasura.RQL.DDL.Action
 import Hasura.RQL.DDL.CustomTypes
-import Hasura.RQL.DDL.EventTrigger (MonadEventLogCleanup (runLogCleaner), buildEventTriggerInfo)
+import Hasura.RQL.DDL.EventTrigger (MonadEventLogCleanup (..), buildEventTriggerInfo)
 import Hasura.RQL.DDL.InheritedRoles (resolveInheritedRole)
 import Hasura.RQL.DDL.RemoteRelationship (CreateRemoteSchemaRemoteRelationship (..), PartiallyResolvedSource (..), buildRemoteFieldInfo, getRemoteSchemaEntityJoinColumns)
 import Hasura.RQL.DDL.RemoteSchema
@@ -179,6 +179,7 @@ newtype CacheRWT m a
 
 instance (MonadEventLogCleanup m) => MonadEventLogCleanup (CacheRWT m) where
   runLogCleaner conf = lift $ runLogCleaner conf
+  generateCleanupSchedules sourceInfo triggerName cleanupConfig = lift $ generateCleanupSchedules sourceInfo triggerName cleanupConfig
 
 runCacheRWT ::
   Functor m =>
@@ -368,7 +369,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
         }
   where
     resolveBackendInfo' ::
-      forall arr m b x.
+      forall arr m b.
       ( BackendMetadata b,
         ArrowChoice arr,
         Inc.ArrowCache m arr,
@@ -377,9 +378,13 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
         MonadIO m,
         HasHttpManagerM m
       ) =>
-      (BackendConfigWrapper b, x) `arr` BackendCache
-    resolveBackendInfo' = proc (backendConfigWrapper, _) -> do
-      backendInfo <- resolveBackendInfo @b logger -< unBackendConfigWrapper backendConfigWrapper
+      (BackendConfigWrapper b, Inc.Dependency (BackendMap BackendInvalidationKeysWrapper)) `arr` BackendCache
+    resolveBackendInfo' = proc (backendConfigWrapper, backendInvalidationMap) -> do
+      let backendInvalidationKeys =
+            Inc.selectD #unBackendInvalidationKeysWrapper $
+              Inc.selectMaybeD $
+                BackendMap.lookupD @b backendInvalidationMap
+      backendInfo <- resolveBackendInfo @b logger -< (backendInvalidationKeys, unBackendConfigWrapper backendConfigWrapper)
       returnA -< BackendMap.singleton (BackendInfoWrapper @b backendInfo)
 
     resolveBackendCache ::
@@ -391,14 +396,14 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
         MonadIO m,
         HasHttpManagerM m
       ) =>
-      [AB.AnyBackend BackendConfigWrapper] `arr` BackendCache
-    resolveBackendCache = proc (backendConfigs) -> do
+      (Inc.Dependency (BackendMap BackendInvalidationKeysWrapper), [AB.AnyBackend BackendConfigWrapper]) `arr` BackendCache
+    resolveBackendCache = proc (backendInvalidationMap, backendConfigs) -> do
       case backendConfigs of
         [] -> returnA -< mempty
         (anyBackendConfig : backendConfigs') -> do
           backendInfo <-
-            AB.dispatchAnyBackendArrow @BackendMetadata @HasTag resolveBackendInfo' -< (anyBackendConfig, ())
-          backendInfos <- resolveBackendCache -< backendConfigs'
+            AB.dispatchAnyBackendArrow @BackendMetadata @HasTag resolveBackendInfo' -< (anyBackendConfig, backendInvalidationMap)
+          backendInfos <- resolveBackendCache -< (backendInvalidationMap, backendConfigs')
           returnA -< backendInfo <> backendInfos
 
     getSourceConfigIfNeeded ::
@@ -579,8 +584,17 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
             )
           |) (tableCoreInfos `alignTableMap` mapFromL _tpiTable permissions `alignTableMap` eventTriggerInfoMaps)
 
+      -- not forcing the evaluation here results in a measurable negative impact
+      -- on memory residency as measured by our benchmark
       !defaultNC <- bindA -< _sccDefaultNamingConvention <$> askServerConfigCtx
       !isNamingConventionEnabled <- bindA -< ((EFNamingConventions `elem`) . _sccExperimentalFeatures) <$> askServerConfigCtx
+      !namingConv <-
+        bindA
+          -<
+            if isNamingConventionEnabled
+              then getNamingCase sourceCustomization (namingConventionSupport @b) defaultNC
+              else pure HasuraCase
+      let resolvedCustomization = mkResolvedSourceCustomization sourceCustomization namingConv
 
       -- sql functions
       functionCache <-
@@ -611,7 +625,6 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
                                     rawfunctionInfo <- bindErrorA -< handleMultipleFunctions @b qf funcDefs
                                     let metadataPermissions = mapFromL _fpmRole functionPermissions
                                         permissionsMap = mkBooleanPermissionMap FunctionPermissionInfo metadataPermissions orderedRoles
-                                    let !namingConv = if isNamingConventionEnabled then getNamingConvention sourceCustomization defaultNC else HasuraCase
                                     (functionInfo, dep) <- bindErrorA -< buildFunctionInfo sourceName qf systemDefined config permissionsMap rawfunctionInfo comment namingConv
                                     recordDependencies -< (metadataObject, schemaObject, [dep])
                                     returnA -< functionInfo
@@ -623,7 +636,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
               |)
           >-> (\infos -> catMaybes infos >- returnA)
 
-      returnA -< AB.mkAnyBackend $ SourceInfo sourceName tableCache functionCache sourceConfig queryTagsConfig sourceCustomization
+      returnA -< AB.mkAnyBackend $ SourceInfo sourceName tableCache functionCache sourceConfig queryTagsConfig resolvedCustomization
 
     buildAndCollectInfo ::
       forall arr m.
@@ -698,7 +711,8 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
       !defaultNC <- bindA -< _sccDefaultNamingConvention <$> askServerConfigCtx
       !isNamingConventionEnabled <- bindA -< ((EFNamingConventions `elem`) . _sccExperimentalFeatures) <$> askServerConfigCtx
 
-      backendCache <- resolveBackendCache -< BackendMap.elems backendConfigs
+      let backendInvalidationKeys = Inc.selectD #_ikBackends invalidationKeys
+      backendCache <- resolveBackendCache -< (backendInvalidationKeys, BackendMap.elems backendConfigs)
 
       let backendInfoAndSourceMetadata = joinBackendInfosToSources backendCache sources
 

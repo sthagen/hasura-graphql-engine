@@ -11,7 +11,7 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Hasura.Base.Error
 import Hasura.Metadata.Class
 import Hasura.Prelude
-import Hasura.RQL.DDL.EventTrigger (MonadEventLogCleanup (runLogCleaner))
+import Hasura.RQL.DDL.EventTrigger (MonadEventLogCleanup (..))
 import Hasura.RQL.Types.Source
 import Hasura.Server.Types
 import Hasura.Session
@@ -55,6 +55,7 @@ instance (MonadResolveSource m) => MonadResolveSource (RunT m) where
 
 instance (MonadEventLogCleanup m) => MonadEventLogCleanup (RunT m) where
   runLogCleaner conf = RunT . lift . lift $ runLogCleaner conf
+  generateCleanupSchedules sInfo tName cConf = RunT . lift . lift $ generateCleanupSchedules sInfo tName cConf
 
 peelRun ::
   RunCtx ->

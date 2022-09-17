@@ -34,15 +34,21 @@ module Hasura.RQL.DDL.EventTrigger
     cetqResponseTrasnform,
     cteqCleanupConfig,
     runCleanupEventTriggerLog,
+    runEventTriggerStartCleanup,
+    runEventTriggerPauseCleanup,
     MonadEventLogCleanup (..),
+    getAllEventTriggersWithCleanupConfig,
+    getAllETWithCleanupConfigInTableMetadata,
   )
 where
 
-import Control.Lens (makeLenses, (.~))
+import Control.Lens (ifor_, makeLenses, (.~))
 import Data.Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Environment qualified as Env
+import Data.Has (Has)
 import Data.HashMap.Strict qualified as HM
+import Data.HashMap.Strict qualified as Map
 import Data.HashMap.Strict.InsOrd qualified as OMap
 import Data.HashSet qualified as Set
 import Data.Text qualified as T
@@ -50,6 +56,8 @@ import Data.Text.Extended
 import Data.URL.Template (printURLTemplate)
 import Hasura.Base.Error
 import Hasura.EncJSON
+import Hasura.Eventing.EventTrigger (logQErr)
+import Hasura.Logging qualified as L
 import Hasura.Metadata.Class (MetadataStorageT)
 import Hasura.Prelude
 import Hasura.RQL.DDL.Headers
@@ -171,20 +179,29 @@ instance Backend b => FromJSON (InvokeEventTriggerQuery b) where
 
 -- | This typeclass have the implementation logic for the event trigger log cleanup
 class Monad m => MonadEventLogCleanup m where
+  -- Deletes the logs of event triggers
   runLogCleaner ::
     TriggerLogCleanupConfig -> m (Either QErr EncJSON)
 
+  -- Generates the cleanup schedules for event triggers which have log cleaners installed
+  generateCleanupSchedules ::
+    AB.AnyBackend SourceInfo -> TriggerName -> AutoTriggerLogCleanupConfig -> m (Either QErr ())
+
 instance (MonadEventLogCleanup m) => MonadEventLogCleanup (ReaderT r m) where
   runLogCleaner conf = lift $ runLogCleaner conf
+  generateCleanupSchedules sourceInfo triggerName cleanupConfig = lift $ generateCleanupSchedules sourceInfo triggerName cleanupConfig
 
 instance (MonadEventLogCleanup m) => MonadEventLogCleanup (MetadataT m) where
   runLogCleaner conf = lift $ runLogCleaner conf
+  generateCleanupSchedules sourceInfo triggerName cleanupConfig = lift $ generateCleanupSchedules sourceInfo triggerName cleanupConfig
 
 instance (MonadEventLogCleanup m) => MonadEventLogCleanup (MetadataStorageT m) where
   runLogCleaner conf = lift $ runLogCleaner conf
+  generateCleanupSchedules sourceInfo triggerName cleanupConfig = lift $ generateCleanupSchedules sourceInfo triggerName cleanupConfig
 
 instance (MonadEventLogCleanup m) => MonadEventLogCleanup (TraceT m) where
   runLogCleaner conf = lift $ runLogCleaner conf
+  generateCleanupSchedules sourceInfo triggerName cleanupConfig = lift $ generateCleanupSchedules sourceInfo triggerName cleanupConfig
 
 resolveEventTriggerQuery ::
   forall b m.
@@ -222,8 +239,18 @@ droppedTriggerOps oldEventTriggerOps newEventTriggerOps =
     isDroppedOp old new = isJust old && isNothing new
 
 createEventTriggerQueryMetadata ::
-  forall b m.
-  (BackendMetadata b, QErrM m, UserInfoM m, CacheRWM m, MetadataM m, BackendEventTrigger b, MonadIO m) =>
+  forall b m r.
+  ( BackendMetadata b,
+    QErrM m,
+    UserInfoM m,
+    CacheRWM m,
+    MetadataM m,
+    BackendEventTrigger b,
+    MonadIO m,
+    MonadEventLogCleanup m,
+    MonadReader r m,
+    Has (L.Logger L.Hasura) r
+  ) =>
   CreateEventTriggerQuery b ->
   m ()
 createEventTriggerQueryMetadata q = do
@@ -238,6 +265,7 @@ createEventTriggerQueryMetadata q = do
               MTOTrigger triggerName
   sourceInfo <- askSourceInfo @b source
   let sourceConfig = (_siConfiguration sourceInfo)
+      newConfig = _cteqCleanupConfig q
 
   -- Check for existence of a trigger with 'triggerName' only when 'replace' is not set
   if replace
@@ -245,10 +273,19 @@ createEventTriggerQueryMetadata q = do
       existingEventTriggerOps <- etiOpsDef <$> askEventTriggerInfo @b source triggerName
       let droppedOps = droppedTriggerOps existingEventTriggerOps (etcDefinition triggerConf)
       dropDanglingSQLTrigger @b (_siConfiguration sourceInfo) triggerName table droppedOps
+
+      -- check if cron schedule for the cleanup config has changed then delete the scheduled cleanups
+      oldConfig <- etiCleanupConfig <$> askEventTriggerInfo @b source triggerName
+      when (hasCleanupCronScheduleUpdated oldConfig newConfig) do
+        deleteAllScheduledCleanups @b sourceConfig triggerName
+        onJust newConfig \cleanupConfig -> do
+          (`onLeft` logQErr) =<< generateCleanupSchedules (AB.mkAnyBackend sourceInfo) triggerName cleanupConfig
     else do
       doesTriggerExists <- checkIfTriggerExists @b sourceConfig triggerName (Set.fromList [INSERT, UPDATE, DELETE])
-      when doesTriggerExists $
-        throw400 AlreadyExists ("Event trigger with name " <> triggerNameToTxt triggerName <<> " already exists")
+      if doesTriggerExists
+        then throw400 AlreadyExists ("Event trigger with name " <> triggerNameToTxt triggerName <<> " already exists")
+        else onJust newConfig \cleanupConfig -> do
+          (`onLeft` logQErr) =<< generateCleanupSchedules (AB.mkAnyBackend sourceInfo) triggerName cleanupConfig
 
   buildSchemaCacheFor metadataObj $
     MetadataModifier $
@@ -258,8 +295,18 @@ createEventTriggerQueryMetadata q = do
           else OMap.insert triggerName triggerConf
 
 runCreateEventTriggerQuery ::
-  forall b m.
-  (BackendMetadata b, BackendEventTrigger b, QErrM m, UserInfoM m, CacheRWM m, MetadataM m, MonadIO m) =>
+  forall b m r.
+  ( BackendMetadata b,
+    BackendEventTrigger b,
+    QErrM m,
+    UserInfoM m,
+    CacheRWM m,
+    MetadataM m,
+    MonadIO m,
+    MonadEventLogCleanup m,
+    MonadReader r m,
+    Has (L.Logger L.Hasura) r
+  ) =>
   CreateEventTriggerQuery b ->
   m EncJSON
 runCreateEventTriggerQuery q = do
@@ -281,6 +328,8 @@ runDeleteEventTriggerQuery (DeleteEventTriggerQuery sourceName triggerName) = do
         tableMetadataSetter @b sourceName tableName %~ dropEventTriggerInMetadata triggerName
 
   dropTriggerAndArchiveEvents @b sourceConfig triggerName tableName
+
+  deleteAllScheduledCleanups @b sourceConfig triggerName
 
   pure successMsg
 
@@ -481,3 +530,116 @@ runCleanupEventTriggerLog ::
   TriggerLogCleanupConfig ->
   m EncJSON
 runCleanupEventTriggerLog conf = runLogCleaner conf >>= (flip onLeft) throwError
+
+-- | Updates the cleanup switch in metadata given the source, table and trigger name
+-- The Bool value represents the status of the cleaner, whether to start or pause it
+updateCleanupStatusInMetadata ::
+  forall b m.
+  (Backend b, QErrM m, CacheRWM m, MetadataM m) =>
+  AutoTriggerLogCleanupConfig ->
+  EventTriggerCleanupStatus ->
+  SourceName ->
+  TableName b ->
+  TriggerName ->
+  m ()
+updateCleanupStatusInMetadata cleanupConfig cleanupSwitch sourceName tableName triggerName = do
+  let newCleanupConfig = Just $ cleanupConfig {_atlccPaused = cleanupSwitch}
+      metadataObj =
+        MOSourceObjId sourceName $
+          AB.mkAnyBackend $
+            SMOTableObj @b tableName $
+              MTOTrigger triggerName
+
+  buildSchemaCacheFor metadataObj $
+    MetadataModifier $
+      tableMetadataSetter @b sourceName tableName . tmEventTriggers . ix triggerName %~ updateCleanupConfig newCleanupConfig
+
+-- | Function to start/stop the cleanup action based on the event triggers supplied in
+-- TriggerLogCleanupToggleConfig conf
+toggleEventTriggerCleanupAction ::
+  forall m.
+  (MonadIO m, QErrM m, CacheRWM m, MetadataM m) =>
+  TriggerLogCleanupToggleConfig ->
+  EventTriggerCleanupStatus ->
+  m EncJSON
+toggleEventTriggerCleanupAction conf cleanupSwitch = do
+  schemaCache <- askSchemaCache
+  case conf of
+    TriggerLogCleanupSources tlcs -> do
+      case tlcs of
+        TriggerAllSource -> do
+          ifor_ (scSources schemaCache) $ \sourceName backendSourceInfo -> do
+            AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo _ tableCache _ _ _ _ :: SourceInfo b) -> do
+              traverseTableHelper tableCache cleanupSwitch sourceName
+        TriggerSource sourceNameLst -> do
+          forM_ sourceNameLst $ \sourceName -> do
+            backendSourceInfo <-
+              HM.lookup sourceName (scSources schemaCache)
+                `onNothing` throw400 NotExists ("source with name " <> sourceNameToText sourceName <> " does not exists")
+
+            AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo _ tableCache _ _ _ _ :: SourceInfo b) -> do
+              traverseTableHelper tableCache cleanupSwitch sourceName
+    TriggerQualifier qualifierLst -> do
+      forM_ qualifierLst $ \qualifier -> do
+        let sourceName = _etqSourceName qualifier
+            triggerNames = _etqEventTriggers qualifier
+
+        backendSourceInfo <-
+          HM.lookup sourceName (scSources schemaCache)
+            `onNothing` throw400 NotExists ("source with name " <> sourceNameToText sourceName <> " does not exists")
+
+        AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo {} :: SourceInfo b) -> do
+          forM_ triggerNames $ \triggerName -> do
+            eventTriggerInfo <- askEventTriggerInfo @b sourceName triggerName
+            tableName <- getTableNameFromTrigger @b schemaCache sourceName triggerName
+            cleanupConfig <-
+              (etiCleanupConfig eventTriggerInfo)
+                `onNothing` throw400 NotExists ("cleanup config does not exist for " <> triggerNameToTxt triggerName)
+            updateCleanupStatusInMetadata @b cleanupConfig cleanupSwitch sourceName tableName triggerName
+  pure successMsg
+  where
+    traverseTableHelper ::
+      forall b.
+      (Backend b) =>
+      TableCache b ->
+      EventTriggerCleanupStatus ->
+      SourceName ->
+      m ()
+    traverseTableHelper tableCache switch sourceName = forM_ tableCache $ \tableInfo -> do
+      let tableName = (_tciName . _tiCoreInfo) tableInfo
+          eventTriggerInfoMap = _tiEventTriggerInfoMap tableInfo
+      ifor_ eventTriggerInfoMap $ \triggerName eventTriggerInfo -> do
+        onJust (etiCleanupConfig eventTriggerInfo) $ \cleanupConfig ->
+          updateCleanupStatusInMetadata @b cleanupConfig switch sourceName tableName triggerName
+
+runEventTriggerStartCleanup ::
+  forall m.
+  (MonadIO m, QErrM m, CacheRWM m, MetadataM m) =>
+  TriggerLogCleanupToggleConfig ->
+  m EncJSON
+runEventTriggerStartCleanup conf = toggleEventTriggerCleanupAction conf ETCSUnpaused
+
+runEventTriggerPauseCleanup ::
+  (MonadError QErr m, CacheRWM m, MonadIO m, MetadataM m) =>
+  TriggerLogCleanupToggleConfig ->
+  m EncJSON
+runEventTriggerPauseCleanup conf = toggleEventTriggerCleanupAction conf ETCSPaused
+
+-- | Collects and returns all the event triggers with cleanup config
+getAllEventTriggersWithCleanupConfig :: TableInfo b -> [(TriggerName, AutoTriggerLogCleanupConfig)]
+getAllEventTriggersWithCleanupConfig tInfo = mapMaybe (\(triggerName, triggerInfo) -> (triggerName,) <$> etiCleanupConfig triggerInfo) $ Map.toList $ _tiEventTriggerInfoMap tInfo
+
+hasCleanupCronScheduleUpdated :: Maybe AutoTriggerLogCleanupConfig -> Maybe AutoTriggerLogCleanupConfig -> Bool
+hasCleanupCronScheduleUpdated Nothing _ = False
+hasCleanupCronScheduleUpdated _ Nothing = True
+hasCleanupCronScheduleUpdated (Just oldConfig) (Just newConfig) =
+  _atlccSchedule oldConfig /= _atlccSchedule newConfig
+
+getAllETWithCleanupConfigInTableMetadata :: TableMetadata b -> [(TriggerName, AutoTriggerLogCleanupConfig)]
+getAllETWithCleanupConfigInTableMetadata tMetadata =
+  mapMaybe
+    ( \(triggerName, triggerConf) ->
+        (triggerName,)
+          <$> etcCleanupConfig triggerConf
+    )
+    $ OMap.toList $ _tmEventTriggers tMetadata

@@ -152,6 +152,7 @@ common lib-depends
                      , deepseq
                      , dependent-map >=0.4 && <0.5
                      , dependent-sum
+                     , dependent-sum-template
                      , either
                      , exceptions
                      , fast-logger
@@ -394,7 +395,8 @@ library dc-api
 library
   import: common-all, lib-depends
   hs-source-dirs:      src-lib
-  exposed-modules:     Control.Arrow.Extended
+  exposed-modules:     Autodocodec.Extended
+                     , Control.Arrow.Extended
                      , Control.Arrow.Interpret
                      , Control.Arrow.Trans
                      , Control.Concurrent.Extended
@@ -997,6 +999,7 @@ test-suite graphql-engine-tests
     , uuid
     , vector
     , yaml
+    , shakespeare
     -- mssql support
     , odbc
     , resource-pool
@@ -1062,6 +1065,7 @@ test-suite graphql-engine-tests
     Hasura.Backends.Postgres.Translate.UpdateSpec
     Hasura.EncJSONSpec
     Hasura.EventingSpec
+    Hasura.EventTriggerCleanupSuite
     Hasura.Generator.Common
     Hasura.GraphQL.NamespaceSpec
     Hasura.GraphQL.Schema.BoolExp.AggregationPredicatesSpec
@@ -1282,6 +1286,7 @@ test-suite tests-hspec
     Test.EventTrigger.PG.EventTriggersUntrackTableCleanupSpec
     Test.EventTrigger.PG.EventTriggersUniqueNameSpec
     Test.EventTrigger.PG.EventTriggersExtensionSchemaSpec
+    Test.EventTrigger.PG.EventTriggersReplaceMetadataCleanupSpec
     Test.EventTrigger.MSSQL.EventTriggerDropSourceCleanupSpec
     Test.EventTrigger.MSSQL.EventTriggersUntrackTableCleanupSpec
     Test.EventTrigger.MSSQL.EventTiggersUniqueNameSpec
@@ -1293,10 +1298,12 @@ test-suite tests-hspec
     Test.Postgres.DefaultValuesSpec
     Test.Postgres.TimestampSpec
     Test.Postgres.UniqueConstraintsSpec
+    Test.Postgres.JsonbSpec
     Test.Queries.Directives.IncludeAndSkipSpec
     Test.Queries.Directives.IncludeSpec
     Test.Queries.Directives.SkipSpec
     Test.Queries.DirectivesSpec
+    Test.Queries.AggregationPredicatesSpec
     Test.Queries.FilterSearchSpec
     Test.Queries.MultiColumnObjectRelationshipsSpec
     Test.Queries.NestedObjectSpec
@@ -1353,6 +1360,7 @@ test-suite tests-dc-api
     , base
     , bytestring
     , case-insensitive
+    , data-fix
     , deepseq
     , dc-api
     , file-embed

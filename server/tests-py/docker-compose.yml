@@ -30,6 +30,9 @@ services:
         condition: service_completed_successfully
 
   tests-py-on-postgres:
+    build:
+      context: ../..
+      dockerfile: ./.buildkite/dockerfiles/server-pytest-runner/Dockerfile
     image: hasura/graphql-engine-server-pytest-runner:${HASURA_GRAPHQL_ENGINE_SERVER_PYTEST_RUNNER_SHA}
     command:
       - ./oss-.circleci/test-server.sh
@@ -55,7 +58,10 @@ services:
 
   postgres:
     image: cimg/postgres:14.4-postgis@sha256:492a389895568e2f89a03c0c45c19350888611001123514623551a014e83a625
-    expose:
+    command:
+      - -F # turn fsync off for speed
+      - -N 1000 # increase max connections from 100 so we can run more HGEs
+    ports:
       - 5432
     environment:
       POSTGRES_PASSWORD: "hasura"
