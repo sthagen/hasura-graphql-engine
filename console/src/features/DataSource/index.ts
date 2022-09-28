@@ -1,5 +1,6 @@
 import { AxiosInstance } from 'axios';
 import { z } from 'zod';
+import { OpenApiSchema } from '@hasura/dc-api-types';
 import { DataNode } from 'antd/lib/tree';
 import { Source, SupportedDrivers, Table } from '@/features/MetadataAPI';
 import { postgres } from './postgres';
@@ -10,7 +11,7 @@ import { gdc } from './gdc';
 import { cockroach } from './cockroach';
 import * as utils from './common/utils';
 import type {
-  Property,
+  // Property,
   IntrospectedTable,
   TableColumn,
   GetTrackableTablesProps,
@@ -19,15 +20,19 @@ import type {
   GetFKRelationshipProps,
   DriverInfoResponse,
   GetTablesListAsTreeProps,
+  TableRow,
+  GetTableRowsProps,
+  WhereClause,
+  OrderBy,
 } from './types';
 
-import { createZodSchema } from './common/createZodSchema';
 import {
   exportMetadata,
   NetworkArgs,
   RunSQLResponse,
   getDriverPrefix,
 } from './api';
+import { transformSchemaToZodObject } from '../OpenApi3Form/utils';
 
 export enum Feature {
   NotImplemented = 'Not Implemented',
@@ -55,10 +60,13 @@ export type Database = {
   introspection?: {
     getDriverInfo: () => Promise<DriverInfoResponse | Feature.NotImplemented>;
     getDatabaseConfiguration: (
-      fetch: AxiosInstance,
+      httpClient: AxiosInstance,
       driver?: string
     ) => Promise<
-      | { configSchema: Property; otherSchemas: Record<string, Property> }
+      | {
+          configSchema: OpenApiSchema;
+          otherSchemas: Record<string, OpenApiSchema>;
+        }
       | Feature.NotImplemented
     >;
     getTrackableTables: (
@@ -76,7 +84,9 @@ export type Database = {
     ) => Promise<DataNode | Feature.NotImplemented>;
   };
   query?: {
-    getTableData: () => void;
+    getTableRows: (
+      props: GetTableRowsProps
+    ) => Promise<TableRow[] | Feature.NotImplemented>;
   };
   modify?: null;
 };
@@ -169,7 +179,7 @@ export const DataSource = (httpClient: AxiosInstance) => ({
           if (!x) return false;
           return true;
         }, z.boolean()),
-        configuration: createZodSchema(
+        configuration: transformSchemaToZodObject(
           schema.configSchema,
           schema.otherSchemas
         ),
@@ -194,13 +204,17 @@ export const DataSource = (httpClient: AxiosInstance) => ({
       NOTE: We need a set of metadata types. Until then dataSource is type-casted to `any` because `configuration` varies from DB to DB and the old metadata types contain 
       only pg databases at the moment. Changing the old types will require us to modify multiple legacy files
     */
+
     const getTrackableTables = drivers[kind].introspection?.getTrackableTables;
-    if (getTrackableTables)
+
+    if (getTrackableTables) {
       return getTrackableTables({
         dataSourceName: dataSource.name,
-        configuration: (dataSource as any).configuration,
+        configuration: dataSource.configuration,
         httpClient,
       });
+    }
+
     return Feature.NotImplemented;
   },
   getDatabaseHierarchy: async ({
@@ -253,7 +267,6 @@ export const DataSource = (httpClient: AxiosInstance) => ({
       httpClient,
     });
     if (result === Feature.NotImplemented) return [];
-
     return result;
   },
   getTableFkRelationships: async ({
@@ -300,6 +313,40 @@ export const DataSource = (httpClient: AxiosInstance) => ({
     if (treeData === Feature.NotImplemented) return null;
 
     return treeData;
+  },
+  getTableRows: async ({
+    dataSourceName,
+    table,
+    columns,
+    options,
+  }: {
+    dataSourceName: string;
+    table: Table;
+    columns: string[];
+    options?: {
+      where?: WhereClause;
+      offset?: number;
+      limit?: number;
+      order_by?: OrderBy[];
+    };
+  }) => {
+    const database = await getDatabaseMethods({ dataSourceName, httpClient });
+
+    if (!database) throw Error('Database not found!');
+
+    const query = database.query;
+
+    if (!query) return Feature.NotImplemented;
+
+    const tableRows = await query.getTableRows({
+      dataSourceName,
+      table,
+      columns,
+      httpClient,
+      options,
+    });
+
+    return tableRows;
   },
 });
 

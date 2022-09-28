@@ -11,9 +11,13 @@ module Harness.Test.Permissions
     dropPermission,
     setup,
     teardown,
+    selectPermission,
+    updatePermission,
+    insertPermission,
   )
 where
 
+import Data.Aeson qualified as Aeson
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
 import Harness.TestEnvironment
@@ -27,20 +31,55 @@ data Permission
       { permissionTable :: Text,
         permissionSource :: Text,
         permissionRole :: Text,
-        permissionColumns :: [Text]
+        permissionColumns :: [Text],
+        permissionRows :: Aeson.Value,
+        permissionAllowAggregations :: Bool
       }
   | UpdatePermission
       { permissionTable :: Text,
         permissionSource :: Text,
         permissionRole :: Text,
-        permissionColumns :: [Text]
+        permissionColumns :: [Text],
+        permissionRows :: Aeson.Value
       }
   | InsertPermission
       { permissionTable :: Text,
         permissionSource :: Text,
         permissionRole :: Text,
-        permissionColumns :: [Text]
+        permissionColumns :: [Text],
+        permissionRows :: Aeson.Value
       }
+
+selectPermission :: Permission
+selectPermission =
+  SelectPermission
+    { permissionTable = mempty,
+      permissionSource = mempty,
+      permissionRole = mempty,
+      permissionColumns = mempty,
+      permissionRows = [yaml|{}|],
+      permissionAllowAggregations = False
+    }
+
+updatePermission :: Permission
+updatePermission =
+  UpdatePermission
+    { permissionTable = mempty,
+      permissionSource = mempty,
+      permissionRole = mempty,
+      permissionColumns = mempty,
+      permissionRows = [yaml|{}|]
+    }
+
+insertPermission :: Permission
+insertPermission =
+  InsertPermission
+    { permissionTable = mempty,
+      permissionSource = mempty,
+      permissionRole = mempty,
+      permissionColumns = mempty,
+      permissionRows = [yaml|{}|]
+    }
 
 -- | Send a JSON payload of the common `*_create_*_permission` form.
 -- Backends where the format of this api call deviates significantly from this
@@ -63,6 +102,7 @@ createPermission backendPrefix env InsertPermission {..} = do
         role:  *permissionRole
         permission:
           columns: *permissionColumns
+          filter: *permissionRows
           check: {}
           set: {}
     |]
@@ -83,7 +123,7 @@ createPermission backendPrefix env UpdatePermission {..} = do
         role:  *permissionRole
         permission:
           columns: *permissionColumns
-          filter: {}
+          filter: *permissionRows
           check: {}
           set: {}
     |]
@@ -104,7 +144,8 @@ createPermission backendPrefix env SelectPermission {..} = do
         role:  *permissionRole
         permission:
           columns: *permissionColumns
-          filter: {}
+          filter: *permissionRows
+          allow_aggregations: *permissionAllowAggregations
     |]
 
 dropPermission :: Text -> TestEnvironment -> Permission -> IO ()

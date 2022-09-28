@@ -23,7 +23,7 @@ module Hasura.RQL.Types.SchemaCache.Build
     buildSchemaCacheWithInvalidations,
     buildSchemaCache,
     buildSchemaCacheFor,
-    buildSchemaCacheStrict,
+    throwOnInconsistencies,
     withNewInconsistentObjsCheck,
     getInconsistentQueryCollections,
   )
@@ -43,7 +43,7 @@ import Data.Sequence qualified as Seq
 import Data.Text.Extended
 import Data.Text.NonEmpty (unNonEmptyText)
 import Data.Trie qualified as Trie
-import Database.PG.Query qualified as Q
+import Database.PG.Query qualified as PG
 import Hasura.Backends.DataConnector.Adapter.Types (DataConnectorName)
 import Hasura.Backends.Postgres.Connection
 import Hasura.Base.Error
@@ -237,7 +237,7 @@ instance (CacheRWM m) => CacheRWM (TraceT m) where
   buildSchemaCacheWithOptions a b c = lift $ buildSchemaCacheWithOptions a b c
   setMetadataResourceVersionInSchemaCache = lift . setMetadataResourceVersionInSchemaCache
 
-instance (CacheRWM m) => CacheRWM (Q.TxET QErr m) where
+instance (CacheRWM m) => CacheRWM (PG.TxET QErr m) where
   buildSchemaCacheWithOptions a b c = lift $ buildSchemaCacheWithOptions a b c
   setMetadataResourceVersionInSchemaCache = lift . setMetadataResourceVersionInSchemaCache
 
@@ -313,10 +313,9 @@ buildSchemaCacheFor objectId metadataModifier = do
         { qeInternal = Just $ ExtraInternal $ toJSON (L.nub . concatMap toList $ Map.elems newInconsistentObjects)
         }
 
--- | Like 'buildSchemaCache', but fails if there is any inconsistent metadata.
-buildSchemaCacheStrict :: (QErrM m, CacheRWM m, MetadataM m) => m ()
-buildSchemaCacheStrict = do
-  buildSchemaCache mempty
+-- | Requests the schema cache, and fails if there is any inconsistent metadata.
+throwOnInconsistencies :: (QErrM m, CacheRWM m) => m ()
+throwOnInconsistencies = do
   sc <- askSchemaCache
   let inconsObjs = scInconsistentObjs sc
   unless (null inconsObjs) $ do

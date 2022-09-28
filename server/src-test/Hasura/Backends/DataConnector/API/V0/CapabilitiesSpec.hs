@@ -25,10 +25,10 @@ spec = do
     jsonOpenApiProperties genCapabilities
   describe "CapabilitiesResponse" $ do
     testToFromJSON
-      (CapabilitiesResponse (emptyCapabilities {cRelationships = Just RelationshipCapabilities {}}) emptyConfigSchemaResponse)
-      [aesonQQ|{"capabilities": {"relationships": {}}, "configSchemas": {"configSchema": {}, "otherSchemas": {}}}|]
+      (CapabilitiesResponse (emptyCapabilities {_cRelationships = Just RelationshipCapabilities {}}) emptyConfigSchemaResponse)
+      [aesonQQ|{"capabilities": {"relationships": {}}, "config_schemas": {"config_schema": {}, "other_schemas": {}}}|]
   describe "ScalarTypeCapabilities" $ do
-    testToFromJSONToSchema (ScalarTypeCapabilities $ Just [G.name|DateTimeComparisons|]) [aesonQQ|{"comparisonType": "DateTimeComparisons"}|]
+    testToFromJSONToSchema (ScalarTypeCapabilities $ Just [G.name|DateTimeComparisons|]) [aesonQQ|{"comparison_type": "DateTimeComparisons"}|]
   describe "GraphQLTypeDefinitions" $ do
     testToFromJSONToSchema sampleGraphQLTypeDefinitions sampleGraphQLTypeDefinitionsJSON
 
@@ -117,11 +117,24 @@ genGraphQLTypeDefinitions =
 genRelationshipCapabilities :: MonadGen m => m RelationshipCapabilities
 genRelationshipCapabilities = pure RelationshipCapabilities {}
 
+genComparisonCapabilities :: MonadGen m => m ComparisonCapabilities
+genComparisonCapabilities =
+  ComparisonCapabilities
+    <$> Gen.maybe genSubqueryComparisonCapabilities
+
+genSubqueryComparisonCapabilities :: MonadGen m => m SubqueryComparisonCapabilities
+genSubqueryComparisonCapabilities =
+  SubqueryComparisonCapabilities
+    <$> Gen.bool
+
 genMetricsCapabilities :: MonadGen m => m MetricsCapabilities
 genMetricsCapabilities = pure MetricsCapabilities {}
 
 genExplainCapabilities :: MonadGen m => m ExplainCapabilities
 genExplainCapabilities = pure ExplainCapabilities {}
+
+genRawCapabilities :: MonadGen m => m RawCapabilities
+genRawCapabilities = pure RawCapabilities {}
 
 genCapabilities :: Gen Capabilities
 genCapabilities =
@@ -132,8 +145,10 @@ genCapabilities =
     <*> Gen.maybe genScalarTypesCapabilities
     <*> Gen.maybe genGraphQLTypeDefinitions
     <*> Gen.maybe genRelationshipCapabilities
+    <*> Gen.maybe genComparisonCapabilities
     <*> Gen.maybe genMetricsCapabilities
     <*> Gen.maybe genExplainCapabilities
+    <*> Gen.maybe genRawCapabilities
 
 emptyConfigSchemaResponse :: ConfigSchemaResponse
 emptyConfigSchemaResponse = ConfigSchemaResponse mempty mempty

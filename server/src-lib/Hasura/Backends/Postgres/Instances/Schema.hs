@@ -22,9 +22,9 @@ import Data.List.NonEmpty qualified as NE
 import Data.Parser.JSONPath
 import Data.Text.Casing qualified as C
 import Data.Text.Extended
-import Hasura.Backends.Postgres.SQL.DML as PG hiding (CountType, incOp)
-import Hasura.Backends.Postgres.SQL.Types as PG hiding (FunctionName, TableName)
-import Hasura.Backends.Postgres.SQL.Value as PG
+import Hasura.Backends.Postgres.SQL.DML as Postgres hiding (CountType, incOp)
+import Hasura.Backends.Postgres.SQL.Types as Postgres hiding (FunctionName, TableName)
+import Hasura.Backends.Postgres.SQL.Value as Postgres
 import Hasura.Backends.Postgres.Schema.OnConflict
 import Hasura.Backends.Postgres.Schema.Select
 import Hasura.Backends.Postgres.Types.BoolExp
@@ -139,36 +139,53 @@ instance PostgresSchema 'Cockroach where
 
 -- postgres schema
 
--- Not implemented yet: Pending https://github.com/hasura/graphql-engine-mono/issues/5174"
-instance AggregationPredicatesSchema ('Postgres pgKind) where
-  aggregationPredicatesParser _ _ = return Nothing
-
--- instance (BackendSchema ('Postgres pgKind)) => AggregationPredicatesSchema ('Postgres pgKind) where
---   aggregationPredicatesParser = Agg.defaultAggregationPredicatesParser aggregationFunctions
+instance (BackendSchema ('Postgres pgKind)) => AggregationPredicatesSchema ('Postgres pgKind) where
+  aggregationPredicatesParser = Agg.defaultAggregationPredicatesParser aggregationFunctions
 
 -- | The aggregation functions that are supported by postgres variants.
--- TODO: Add more.
-_aggregationFunctions :: [Agg.FunctionSignature ('Postgres pgKind)]
-_aggregationFunctions =
+aggregationFunctions :: [Agg.FunctionSignature ('Postgres pgKind)]
+aggregationFunctions =
   [ Agg.FunctionSignature
+      { fnName = "avg",
+        fnGQLName = [G.name|avg|],
+        fnReturnType = PGDouble,
+        fnArguments = Agg.SingleArgument PGDouble
+      },
+    Agg.FunctionSignature
+      { fnName = "bool_and",
+        fnGQLName = [G.name|bool_and|],
+        fnReturnType = PGBoolean,
+        fnArguments = Agg.SingleArgument PGBoolean
+      },
+    Agg.FunctionSignature
+      { fnName = "bool_or",
+        fnGQLName = [G.name|bool_or|],
+        fnReturnType = PGBoolean,
+        fnArguments = Agg.SingleArgument PGBoolean
+      },
+    Agg.FunctionSignature
       { fnName = "count",
         fnGQLName = [G.name|count|],
         fnReturnType = PGInteger,
         fnArguments = Agg.ArgumentsStar
       },
     Agg.FunctionSignature
-      { fnName = "bool_and",
-        fnGQLName = [G.name|bool_and|],
-        fnReturnType = PGBoolean,
-        fnArguments =
-          Agg.Arguments
-            ( NE.fromList
-                [ Agg.ArgumentSignature
-                    { argType = PGBoolean,
-                      argName = [G.name|arg0|]
-                    }
-                ]
-            )
+      { fnName = "max",
+        fnGQLName = [G.name|max|],
+        fnReturnType = PGDouble,
+        fnArguments = Agg.SingleArgument PGDouble
+      },
+    Agg.FunctionSignature
+      { fnName = "min",
+        fnGQLName = [G.name|min|],
+        fnReturnType = PGDouble,
+        fnArguments = Agg.SingleArgument PGDouble
+      },
+    Agg.FunctionSignature
+      { fnName = "sum",
+        fnGQLName = [G.name|sum|],
+        fnReturnType = PGDouble,
+        fnArguments = Agg.SingleArgument PGDouble
       },
     Agg.FunctionSignature
       { fnName = "corr",
@@ -187,6 +204,36 @@ _aggregationFunctions =
                     }
                 ]
             )
+      },
+    Agg.FunctionSignature
+      { fnName = "covar_samp",
+        fnGQLName = [G.name|covar_samp|],
+        fnReturnType = PGDouble,
+        fnArguments =
+          Agg.Arguments
+            ( NE.fromList
+                [ Agg.ArgumentSignature
+                    { argType = PGDouble,
+                      argName = [G.name|Y|]
+                    },
+                  Agg.ArgumentSignature
+                    { argType = PGDouble,
+                      argName = [G.name|X|]
+                    }
+                ]
+            )
+      },
+    Agg.FunctionSignature
+      { fnName = "stddev_samp",
+        fnGQLName = [G.name|stddev_samp|],
+        fnReturnType = PGDouble,
+        fnArguments = Agg.SingleArgument PGDouble
+      },
+    Agg.FunctionSignature
+      { fnName = "var_samp",
+        fnGQLName = [G.name|var_samp|],
+        fnReturnType = PGDouble,
+        fnArguments = Agg.SingleArgument PGDouble
       }
   ]
 
@@ -242,7 +289,7 @@ instance
     GraphqlCase -> orderByOperatorsGraphqlCase
   comparisonExps = const comparisonExps
   countTypeInput = countTypeInput
-  aggregateOrderByCountType = PG.PGInteger
+  aggregateOrderByCountType = Postgres.PGInteger
   computedField = computedFieldPG
 
 backendInsertParser ::
@@ -294,6 +341,8 @@ pgkBuildTableUpdateMutationFields ::
   C.GQLNameIdentifier ->
   SchemaT r m [FieldParser n (IR.AnnotatedUpdateG ('Postgres pgKind) (RemoteRelationshipField IR.UnpreparedValue) (IR.UnpreparedValue ('Postgres pgKind)))]
 pgkBuildTableUpdateMutationFields mkRootFieldName scenario sourceInfo tableName tableInfo gqlName = do
+  -- check in schema options whether we should include multiple updates field
+  Options.SchemaOptions {soIncludeUpdateManyFields} <- retrieve id
   roleName <- retrieve scRole
   concat . maybeToList <$> runMaybeT do
     updatePerms <- hoistMaybe $ _permUpd $ getRolePermInfo roleName tableInfo
@@ -319,7 +368,13 @@ pgkBuildTableUpdateMutationFields mkRootFieldName scenario sourceInfo tableName 
           tableInfo
           gqlName
 
-      pure $ singleUpdates ++ maybeToList multiUpdate
+      -- we only include the multiUpdate field if the
+      -- experimental feature 'hide_update_many_fields' is off
+      pure $ case soIncludeUpdateManyFields of
+        Options.IncludeUpdateManyFields ->
+          singleUpdates ++ maybeToList multiUpdate
+        Options.DontIncludeUpdateManyFields ->
+          singleUpdates
 
 -- | Create a parser for 'update_table_many'. This function is very similar to
 -- both 'GSB.buildTableUpdateMutationFields' and
@@ -496,7 +551,7 @@ pgScalarSelectionArgumentsParser ::
   ColumnType ('Postgres pgKind) ->
   InputFieldsParser n (Maybe (ScalarSelectionArguments ('Postgres pgKind)))
 pgScalarSelectionArgumentsParser columnType
-  | isScalarColumnWhere PG.isJSONType columnType =
+  | isScalarColumnWhere Postgres.isJSONType columnType =
     P.fieldOptional fieldName description P.string `P.bindFields` fmap join . traverse toColExp
   | otherwise = pure Nothing
   where
@@ -505,9 +560,9 @@ pgScalarSelectionArgumentsParser columnType
     toColExp textValue = case parseJSONPath textValue of
       Left err -> P.parseError $ "parse json path error: " <> toErrorMessage err
       Right [] -> pure Nothing
-      Right jPaths -> pure $ Just $ PG.ColumnOp PG.jsonbPathOp $ PG.SEArray $ map elToColExp jPaths
-    elToColExp (Key k) = PG.SELit $ K.toText k
-    elToColExp (Index i) = PG.SELit $ tshow i
+      Right jPaths -> pure $ Just $ Postgres.ColumnOp Postgres.jsonbPathOp $ Postgres.SEArray $ map elToColExp jPaths
+    elToColExp (Key k) = Postgres.SELit $ K.toText k
+    elToColExp (Index i) = Postgres.SELit $ tshow i
 
 orderByOperatorsHasuraCase ::
   (G.Name, NonEmpty (Definition P.EnumValueInfo, (BasicOrderType ('Postgres pgKind), NullsOrderType ('Postgres pgKind))))
@@ -526,22 +581,22 @@ orderByOperators tCase =
   (Name._order_by,) $
     NE.fromList
       [ ( define (applyEnumValueCase tCase Name._asc) "in ascending order, nulls last",
-          (PG.OTAsc, PG.NullsLast)
+          (Postgres.OTAsc, Postgres.NullsLast)
         ),
         ( define (applyEnumValueCase tCase Name._asc_nulls_first) "in ascending order, nulls first",
-          (PG.OTAsc, PG.NullsFirst)
+          (Postgres.OTAsc, Postgres.NullsFirst)
         ),
         ( define (applyEnumValueCase tCase Name._asc_nulls_last) "in ascending order, nulls last",
-          (PG.OTAsc, PG.NullsLast)
+          (Postgres.OTAsc, Postgres.NullsLast)
         ),
         ( define (applyEnumValueCase tCase Name._desc) "in descending order, nulls first",
-          (PG.OTDesc, PG.NullsFirst)
+          (Postgres.OTDesc, Postgres.NullsFirst)
         ),
         ( define (applyEnumValueCase tCase Name._desc_nulls_first) "in descending order, nulls first",
-          (PG.OTDesc, PG.NullsFirst)
+          (Postgres.OTDesc, Postgres.NullsFirst)
         ),
         ( define (applyEnumValueCase tCase Name._desc_nulls_last) "in descending order, nulls last",
-          (PG.OTDesc, PG.NullsLast)
+          (Postgres.OTDesc, Postgres.NullsLast)
         )
       ]
   where
@@ -852,8 +907,8 @@ comparisonExps = memoize 'comparisonExps \columnType -> do
       let scalarType = unsafePGColumnToBackend columnType
       IR.UVParameter Nothing $
         ColumnValue
-          (ColumnScalar $ PG.PGArray scalarType)
-          (PG.PGValArray $ cvValue <$> columnValues)
+          (ColumnScalar $ Postgres.PGArray scalarType)
+          (Postgres.PGValArray $ cvValue <$> columnValues)
 
     castExp :: ColumnType ('Postgres pgKind) -> NamingCase -> SchemaT r m (Maybe (Parser 'Input n (CastExp ('Postgres pgKind) (IR.UnpreparedValue ('Postgres pgKind)))))
     castExp sourceType tCase = do
@@ -939,9 +994,9 @@ countTypeInput = \case
   Nothing -> pure $ flip mkCountType Nothing
   where
     mkCountType :: IR.CountDistinct -> Maybe [Column ('Postgres pgKind)] -> CountType ('Postgres pgKind)
-    mkCountType _ Nothing = PG.CTStar
-    mkCountType IR.SelectCountDistinct (Just cols) = PG.CTDistinct cols
-    mkCountType IR.SelectCountNonDistinct (Just cols) = PG.CTSimple cols
+    mkCountType _ Nothing = Postgres.CTStar
+    mkCountType IR.SelectCountDistinct (Just cols) = Postgres.CTDistinct cols
+    mkCountType IR.SelectCountNonDistinct (Just cols) = Postgres.CTSimple cols
 
 -- | Update operator that prepends a value to a column containing jsonb arrays.
 --

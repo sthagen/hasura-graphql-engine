@@ -26,7 +26,6 @@ extra-source-files:
   src-rsr/catalog_versions.txt
   src-rsr/catalog_version.txt
 
-
 source-repository head
   type:     git
   location: https://github.com/hasura/graphql-engine
@@ -183,6 +182,7 @@ common lib-depends
                      , pretty-simple
                      , process
                      , profunctors
+                     , refined
                      , retry
                      , safe-exceptions
                      , scientific
@@ -214,8 +214,8 @@ common lib-depends
 
                      -- Encoder related
                      , uuid
-                     , binary
                      , base16-bytestring
+                     , cereal
                      , cryptohash-md5
 
                      -- Logging related
@@ -347,50 +347,6 @@ common lib-depends
   if !flag(profiling)
     -- ghc-heap-view can't be built with profiling
     build-depends:     ghc-heap-view
-
-library dc-api
-  import: common-all
-  hs-source-dirs:      src-dc-api
-  build-depends:       aeson
-                     , autodocodec
-                     , autodocodec-openapi3
-                     , base
-                     , bytestring
-                     , deepseq
-                     , extra
-                     , graphql-parser
-                     , hashable
-                     , insert-ordered-containers
-                     , lens
-                     , lens-aeson
-                     , openapi3
-                     , scientific
-                     , servant
-                     , servant-client
-                     , servant-client-core
-                     , servant-openapi3
-                     , text
-                     , unordered-containers
-                     , http-media
-  if !flag(profiling)
-    -- ghc-heap-view can't be built with profiling
-    build-depends:     ghc-heap-view
-
-  exposed-modules:     Autodocodec.Extended
-                     , Hasura.Backends.DataConnector.API
-                     , Hasura.Backends.DataConnector.API.V0
-                     , Hasura.Backends.DataConnector.API.V0.Aggregate
-                     , Hasura.Backends.DataConnector.API.V0.Capabilities
-                     , Hasura.Backends.DataConnector.API.V0.Column
-                     , Hasura.Backends.DataConnector.API.V0.ConfigSchema
-                     , Hasura.Backends.DataConnector.API.V0.Expression
-                     , Hasura.Backends.DataConnector.API.V0.OrderBy
-                     , Hasura.Backends.DataConnector.API.V0.Query
-                     , Hasura.Backends.DataConnector.API.V0.Explain
-                     , Hasura.Backends.DataConnector.API.V0.Relationships
-                     , Hasura.Backends.DataConnector.API.V0.Scalar.Type
-                     , Hasura.Backends.DataConnector.API.V0.Schema
-                     , Hasura.Backends.DataConnector.API.V0.Table
 
 library
   import: common-all, lib-depends
@@ -582,27 +538,15 @@ library
                      , Hasura.Backends.DataConnector.Adapter.Backend
                      , Hasura.Backends.DataConnector.Adapter.Execute
                      , Hasura.Backends.DataConnector.Adapter.ConfigTransform
+                     , Hasura.Backends.DataConnector.Adapter.RunSQL
                      , Hasura.Backends.DataConnector.Adapter.Metadata
                      , Hasura.Backends.DataConnector.Adapter.Schema
                      , Hasura.Backends.DataConnector.Adapter.SchemaCache
                      , Hasura.Backends.DataConnector.Adapter.Transport
                      , Hasura.Backends.DataConnector.Adapter.Types
                      , Hasura.Backends.DataConnector.Agent.Client
-                     , Hasura.Backends.DataConnector.IR.Aggregate
-                     , Hasura.Backends.DataConnector.IR.Column
-                     , Hasura.Backends.DataConnector.IR.Expression
-                     , Hasura.Backends.DataConnector.IR.Function
-                     , Hasura.Backends.DataConnector.IR.Name
-                     , Hasura.Backends.DataConnector.IR.OrderBy
-                     , Hasura.Backends.DataConnector.IR.Query
-                     , Hasura.Backends.DataConnector.IR.Relationships
-                     , Hasura.Backends.DataConnector.IR.Scalar.Type
-                     , Hasura.Backends.DataConnector.IR.Scalar.Value
-                     , Hasura.Backends.DataConnector.IR.Table
                      , Hasura.Backends.DataConnector.Logging
                      , Hasura.Backends.DataConnector.Plan
-                     , Hasura.Backends.DataConnector.Schema.Column
-                     , Hasura.Backends.DataConnector.Schema.Table
 
                      -- Exposed for benchmark:
                      , Hasura.Cache.Bounded
@@ -693,7 +637,6 @@ library
                      , Hasura.RQL.Types.Metadata.Object
                      , Hasura.RQL.Types.Metadata.Serialization
                      , Hasura.RQL.Types.Network
-                     , Hasura.RQL.Types.Numeric
                      , Hasura.RQL.Types.Permission
                      , Hasura.RQL.Types.QueryCollection
                      , Hasura.RQL.Types.QueryTags
@@ -874,6 +817,7 @@ library
                      , Hasura.SQL.Value
                      , Hasura.SQL.WKT
                      , Hasura.Tracing
+                     , Hasura.Tracing.TraceId
                      , Hasura.QueryTags
                      , Network.HTTP.Client.Transformable
                      , Network.HTTP.Client.Manager
@@ -909,6 +853,7 @@ executable graphql-engine
                    , hasura-prelude
                    , kan-extensions
                    , pg-client
+                   , refined
                    , text
                    , text-conversions
                    , time
@@ -1019,7 +964,6 @@ test-suite graphql-engine-tests
     Control.Monad.MemoizeSpec
     Control.Monad.TimeLimit
     Data.HashMap.Strict.ExtendedSpec
-    Data.NumericSpec
     Data.Parser.CacheControlSpec
     Data.Parser.JSONPathSpec
     Data.Parser.RemoteRelationshipSpec
@@ -1039,15 +983,9 @@ test-suite graphql-engine-tests
     Hasura.Backends.DataConnector.API.V0.OrderBySpec
     Hasura.Backends.DataConnector.API.V0.QuerySpec
     Hasura.Backends.DataConnector.API.V0.RelationshipsSpec
-    Hasura.Backends.DataConnector.API.V0.Scalar.TypeSpec
+    Hasura.Backends.DataConnector.API.V0.ScalarSpec
     Hasura.Backends.DataConnector.API.V0.SchemaSpec
     Hasura.Backends.DataConnector.API.V0.TableSpec
-    Hasura.Backends.DataConnector.RQLGenerator
-    Hasura.Backends.DataConnector.RQLGenerator.GenAnnSelectG
-    Hasura.Backends.DataConnector.RQLGenerator.GenCommon
-    Hasura.Backends.DataConnector.RQLGenerator.GenSelectArgsG
-    Hasura.Backends.DataConnector.RQLGenerator.GenSelectFromG
-    Hasura.Backends.DataConnector.RQLGenerator.GenTablePermG
     Hasura.Backends.MSSQL.ErrorSpec
     Hasura.Backends.MySQL.DataLoader.ExecuteTests
     Hasura.Backends.Postgres.Execute.PrepareSpec
@@ -1097,6 +1035,7 @@ test-suite graphql-engine-tests
     Hasura.SessionSpec
     Hasura.SQL.WKTSpec
     Hasura.StreamingSubscriptionSuite
+    Hasura.Tracing.TraceIdSpec
     Network.HTTP.Client.TransformableSpec
     Test.Aeson.Expectation
     Test.Aeson.Utils
@@ -1292,6 +1231,7 @@ test-suite tests-hspec
     Test.EventTrigger.MSSQL.EventTiggersUniqueNameSpec
     Test.HelloWorldSpec
     Test.LongIdentifiersSpec
+    Test.Metadata.InconsistentSpec
     Test.Mutations.MultiplePerRequest.UpdateManySpec
     Test.Postgres.DataValidation.PermissionSpec
     Test.Postgres.BackendOnlyPermissionsSpec
@@ -1303,6 +1243,7 @@ test-suite tests-hspec
     Test.Queries.Directives.IncludeSpec
     Test.Queries.Directives.SkipSpec
     Test.Queries.DirectivesSpec
+    Test.Queries.AggregationSpec
     Test.Queries.AggregationPredicatesSpec
     Test.Queries.FilterSearchSpec
     Test.Queries.MultiColumnObjectRelationshipsSpec
@@ -1339,6 +1280,7 @@ test-suite tests-hspec
     Test.Schema.DataValidation.Permissions.SelectSpec
     Test.SQLServer.InsertVarcharColumnSpec
     Test.SQLServer.VarcharLiteralsSpec
+    Test.Schema.ConflictsSpec
     Test.Schema.DefaultValuesSpec
     Test.Schema.EnumSpec
     Test.Schema.TableRelationships.ArrayRelationshipsSpec
@@ -1347,62 +1289,3 @@ test-suite tests-hspec
     Test.ServiceLivenessSpec
     Test.SQLServer.InsertVarcharColumnSpec
     Test.Subscriptions.CustomFieldsSpec
-
-test-suite tests-dc-api
-  import: common-all, common-exe
-  type: exitcode-stdio-1.0
-  build-depends:
-    , Diff
-    , aeson
-    , ansi-terminal
-    , autodocodec
-    , autodocodec-openapi3
-    , base
-    , bytestring
-    , case-insensitive
-    , data-fix
-    , deepseq
-    , dc-api
-    , file-embed
-    , hashable
-    , hspec
-    , hspec-core
-    , http-client
-    , lens
-    , lens-aeson
-    , mtl
-    , network-uri
-    , openapi3
-    , optparse-applicative
-    , scientific
-    , servant
-    , servant-client
-    , servant-client-core
-    , servant-openapi3
-    , text
-    , unordered-containers
-    , vector
-    , xml-conduit
-    , xml-lens
-    , yaml
-    , zlib
-  hs-source-dirs: tests-dc-api
-  -- Turning off optimizations is intentional; tests aren't
-  -- performance sensitive and waiting for compilation is a problem.
-  ghc-options: -Wall -O0 -threaded
-  main-is: Main.hs
-  other-modules:
-      Command
-    , Paths_graphql_engine
-    , Test.Data
-    , Test.CapabilitiesSpec
-    , Test.Expectations
-    , Test.HealthSpec
-    , Test.MetricsSpec
-    , Test.ExplainSpec
-    , Test.QuerySpec
-    , Test.QuerySpec.AggregatesSpec
-    , Test.QuerySpec.BasicSpec
-    , Test.QuerySpec.OrderBySpec
-    , Test.QuerySpec.RelationshipsSpec
-    , Test.SchemaSpec

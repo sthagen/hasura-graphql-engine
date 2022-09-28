@@ -22,11 +22,6 @@ import Hasura.Backends.DataConnector.API qualified as API
 import Hasura.Backends.DataConnector.Adapter.ConfigTransform (transformConnSourceConfig)
 import Hasura.Backends.DataConnector.Adapter.Types qualified as DC
 import Hasura.Backends.DataConnector.Agent.Client (AgentClientContext (..), runAgentClientT)
-import Hasura.Backends.DataConnector.IR.Column qualified as IR.C
-import Hasura.Backends.DataConnector.IR.Name qualified as IR.N
-import Hasura.Backends.DataConnector.IR.Scalar.Type qualified as IR.S.T
-import Hasura.Backends.DataConnector.IR.Scalar.Value qualified as IR.S.V
-import Hasura.Backends.DataConnector.IR.Table qualified as IR.T
 import Hasura.Backends.Postgres.SQL.Types (PGDescription (..))
 import Hasura.Base.Error (Code (..), QErr, decodeValue, throw400, throw500, withPathK)
 import Hasura.Incremental qualified as Inc
@@ -122,7 +117,7 @@ resolveBackendInfo' logger = proc (invalidationKeys, optionsMap) -> do
         runTraceTWithReporter noReporter "capabilities"
           . flip runAgentClientT (AgentClientContext logger _dcoUri manager Nothing)
           $ genericClient // API._capabilities
-      return $ DC.DataConnectorInfo options crCapabilities crConfigSchemaResponse
+      return $ DC.DataConnectorInfo options _crCapabilities _crConfigSchemaResponse
 
 resolveSourceConfig' ::
   MonadIO m =>
@@ -190,33 +185,33 @@ resolveDatabaseMetadata' ::
   m (Either QErr (ResolvedSource 'DataConnector))
 resolveDatabaseMetadata' _ sc@(DC.SourceConfig {_scSchema = API.SchemaResponse {..}}) customization =
   -- We need agents to provide the foreign key contraints inside 'API.SchemaResponse'
-  let foreignKeys = fmap API.dtiForeignKeys srTables
+  let foreignKeys = fmap API._tiForeignKeys _srTables
       tables = Map.fromList $ do
-        API.TableInfo {..} <- srTables
-        let primaryKeyColumns = Seq.fromList $ coerce <$> fromMaybe [] dtiPrimaryKey
+        API.TableInfo {..} <- _srTables
+        let primaryKeyColumns = Seq.fromList $ coerce <$> fromMaybe [] _tiPrimaryKey
         let meta =
               RQL.T.T.DBTableMetadata
                 { _ptmiOid = OID 0,
                   _ptmiColumns = do
-                    API.ColumnInfo {..} <- dtiColumns
+                    API.ColumnInfo {..} <- _tiColumns
                     pure $
                       RQL.T.C.RawColumnInfo
-                        { rciName = Witch.from dciName,
+                        { rciName = Witch.from _ciName,
                           rciPosition = 1,
-                          rciType = Witch.from dciType,
-                          rciIsNullable = dciNullable,
-                          rciDescription = fmap GQL.Description dciDescription,
+                          rciType = Witch.from _ciType,
+                          rciIsNullable = _ciNullable,
+                          rciDescription = fmap GQL.Description _ciDescription,
                           -- TODO: Add Column Mutability to the 'TableInfo'
                           rciMutability = RQL.T.C.ColumnMutability False False
                         },
-                  _ptmiPrimaryKey = RQL.T.T.PrimaryKey (RQL.T.T.Constraint (IR.T.ConstraintName "") (OID 0)) <$> NESeq.nonEmptySeq primaryKeyColumns,
+                  _ptmiPrimaryKey = RQL.T.T.PrimaryKey (RQL.T.T.Constraint (DC.ConstraintName "") (OID 0)) <$> NESeq.nonEmptySeq primaryKeyColumns,
                   _ptmiUniqueConstraints = mempty,
                   _ptmiForeignKeys = buildForeignKeySet foreignKeys,
                   _ptmiViewInfo = Just $ RQL.T.T.ViewInfo False False False,
-                  _ptmiDescription = fmap PGDescription dtiDescription,
+                  _ptmiDescription = fmap PGDescription _tiDescription,
                   _ptmiExtraTableMetadata = ()
                 }
-        pure (coerce dtiName, meta)
+        pure (coerce _tiName, meta)
    in pure $
         pure $
           ResolvedSource
@@ -237,12 +232,12 @@ buildForeignKeySet (catMaybes -> foreignKeys) =
       foreignKeys <&> \(API.ForeignKeys constraints) ->
         constraints & HashMap.foldMapWithKey @[RQL.T.T.ForeignKeyMetadata 'DataConnector]
           \constraintName API.Constraint {..} -> maybeToList do
-            let columnMapAssocList = HashMap.foldrWithKey' (\k v acc -> (Witch.from k, Witch.from v) : acc) [] cColumnMapping
+            let columnMapAssocList = HashMap.foldrWithKey' (\k v acc -> (DC.ColumnName k, DC.ColumnName v) : acc) [] _cColumnMapping
             columnMapping <- NEHashMap.fromList columnMapAssocList
             let foreignKey =
                   RQL.T.T.ForeignKey
                     { _fkConstraint = RQL.T.T.Constraint (Witch.from constraintName) (OID 1),
-                      _fkForeignTable = Witch.from cForeignTable,
+                      _fkForeignTable = Witch.from _cForeignTable,
                       _fkColumnMapping = columnMapping
                     }
             pure $ RQL.T.T.ForeignKeyMetadata foreignKey
@@ -252,7 +247,7 @@ parseBoolExpOperations' ::
   forall m v.
   (MonadError QErr m, SchemaCache.TableCoreInfoRM 'DataConnector m) =>
   RQL.T.C.ValueParser 'DataConnector m v ->
-  IR.T.Name ->
+  DC.TableName ->
   RQL.T.T.FieldInfoMap (RQL.T.T.FieldInfo 'DataConnector) ->
   RQL.T.C.ColumnReference 'DataConnector ->
   J.Value ->
@@ -352,7 +347,7 @@ parseBoolExpOperations' rhsParser rootTable fieldInfoMap columnRef value =
               colInfo <- validateRhsColumn fieldInfoMap' colName
               pure $ RootOrCurrentColumn rootInfo colInfo
 
-        validateRhsColumn :: RQL.T.T.FieldInfoMap (RQL.T.T.FieldInfo 'DataConnector) -> IR.C.Name -> m IR.C.Name
+        validateRhsColumn :: RQL.T.T.FieldInfoMap (RQL.T.T.FieldInfo 'DataConnector) -> DC.ColumnName -> m DC.ColumnName
         validateRhsColumn fieldInfoMap' rhsCol = do
           rhsType <- RQL.T.T.askColumnType fieldInfoMap' rhsCol "column operators can only compare table columns"
           when (columnType /= rhsType) $
@@ -374,7 +369,7 @@ parseCollectableType' collectableType = \case
     | HSU.isReqUserId t -> pure $ mkTypedSessionVar collectableType HSU.userIdHeader
   val -> case collectableType of
     CollectableTypeScalar scalarType ->
-      PSESQLExp . IR.S.V.ValueLiteral <$> RQL.T.C.parseScalarValueColumnType scalarType val
+      PSESQLExp . DC.ValueLiteral <$> RQL.T.C.parseScalarValueColumnType scalarType val
     CollectableTypeArray _ ->
       throw400 NotSupported "Array types are not supported by the Data Connector backend"
 
@@ -385,8 +380,8 @@ mkTypedSessionVar ::
 mkTypedSessionVar columnType =
   PSESessVar (columnTypeToScalarType <$> columnType)
 
-columnTypeToScalarType :: RQL.T.C.ColumnType 'DataConnector -> IR.S.T.Type
+columnTypeToScalarType :: RQL.T.C.ColumnType 'DataConnector -> DC.ScalarType
 columnTypeToScalarType = \case
   RQL.T.C.ColumnScalar scalarType -> scalarType
   -- NOTE: This should be unreachable:
-  RQL.T.C.ColumnEnumReference _ -> IR.S.T.String
+  RQL.T.C.ColumnEnumReference _ -> DC.StringTy

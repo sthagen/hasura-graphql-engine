@@ -43,7 +43,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Text.Extended
 import Data.Text.NonEmpty
 import Data.Time.Clock qualified as Time
-import Database.PG.Query qualified as Q
+import Database.PG.Query qualified as PG
 import Hasura.Incremental (Cacheable)
 import Hasura.Prelude
 import Hasura.RQL.DDL.Headers
@@ -65,11 +65,11 @@ newtype TriggerName = TriggerName {unTriggerName :: NonEmptyText}
       FromJSON,
       ToJSON,
       ToJSONKey,
-      Q.ToPrepArg,
+      PG.ToPrepArg,
       Generic,
       NFData,
       Cacheable,
-      Q.FromCol
+      PG.FromCol
     )
 
 triggerNameToTxt :: TriggerName -> Text
@@ -226,9 +226,9 @@ data AutoTriggerLogCleanupConfig = AutoTriggerLogCleanupConfig
     -- | maximum number of events to be deleted in a single cleanup action
     _atlccBatchSize :: Int,
     -- | retention period (in hours) for the event trigger logs
-    _atlccRetentionPeriod :: Int,
+    _atlccClearOlderThan :: Int,
     -- | SQL query timeout (in seconds)
-    _atlccQueryTimeout :: Int,
+    _atlccTimeout :: Int,
     -- | should we clean the invocation logs as well
     _atlccCleanInvocationLogs :: Bool,
     -- | is the cleanup action paused
@@ -245,8 +245,8 @@ instance FromJSON AutoTriggerLogCleanupConfig where
     withObject "AutoTriggerLogCleanupConfig" $ \o -> do
       _atlccSchedule <- o .: "schedule"
       _atlccBatchSize <- o .:? "batch_size" .!= 10000
-      _atlccRetentionPeriod <- o .:? "retention_period" .!= 168 -- 7 Days = 168 hours
-      _atlccQueryTimeout <- o .:? "timeout" .!= 60
+      _atlccClearOlderThan <- o .: "clear_older_than"
+      _atlccTimeout <- o .:? "timeout" .!= 60
       _atlccCleanInvocationLogs <- o .:? "clean_invocation_logs" .!= False
       _atlccPaused <- o .:? "paused" .!= ETCSUnpaused
       pure AutoTriggerLogCleanupConfig {..}
@@ -263,9 +263,9 @@ data TriggerLogCleanupConfig = TriggerLogCleanupConfig
     -- | batch size of for the cleanup action
     tlccBatchSize :: Int,
     -- | retention period (in hours) for the event trigger logs
-    tlccRetentionPeriod :: Int,
+    tlccClearOlderThan :: Int,
     -- | SQL query timeout (in seconds)
-    tlccQueryTimeout :: Int,
+    tlccTimeout :: Int,
     -- | should we clean the invocation logs as well
     tlccCleanInvocationLogs :: Bool
   }
@@ -281,8 +281,8 @@ instance FromJSON TriggerLogCleanupConfig where
       tlccEventTriggerName <- o .: "event_trigger_name"
       tlccSourceName <- o .:? "source" .!= SNDefault
       tlccBatchSize <- o .:? "batch_size" .!= 10000
-      tlccRetentionPeriod <- o .:? "retention_period" .!= 168 -- 7 Days = 168 hours
-      tlccQueryTimeout <- o .:? "timeout" .!= 60
+      tlccClearOlderThan <- o .: "clear_older_than"
+      tlccTimeout <- o .:? "timeout" .!= 60
       tlccCleanInvocationLogs <- o .:? "clean_invocation_logs" .!= False
       pure TriggerLogCleanupConfig {..}
 

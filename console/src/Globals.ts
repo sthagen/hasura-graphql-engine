@@ -6,8 +6,19 @@ import { isEmpty } from './components/Common/utils/jsUtils';
 import { stripTrailingSlash } from './components/Common/utils/urlUtils';
 
 import { SERVER_CONSOLE_MODE } from './constants';
+import { parseConsoleType, ConsoleType } from './utils/envUtils';
 
-type ConsoleType = 'oss' | 'cloud' | 'pro' | 'pro-lite';
+export type LuxFeature =
+  | 'DatadogIntegration'
+  | 'ProUser'
+  | 'CloudUser'
+  | 'V1V2Migration'
+  | 'GithubIntegration'
+  | 'CloudDedicatedVPC'
+  | 'GCPSupport'
+  | 'Avalara'
+  | 'NeonDatabaseIntegration'
+  | string;
 
 type UUID = string;
 
@@ -70,6 +81,9 @@ type CloudServerEnv = {
   tenantID: UUID;
   urlPrefix: string;
   userRole: CloudUserRole;
+  neonOAuthClientId?: string;
+  neonRootDomain?: string;
+  allowedLuxFeatures?: LuxFeature[];
   userId?: string;
   consoleSentryDsn?: string; // Corresponds to the HASURA_CONSOLE_SENTRY_DSN environment variable
 };
@@ -115,6 +129,9 @@ export type CloudCliEnv = {
 type ProCliEnv = CloudCliEnv;
 type ProLiteCliEnv = CloudCliEnv;
 
+// Until this non-discriminated-union-based `EnvVars` exist, please keep the following spreadsheet
+// https://docs.google.com/spreadsheets/d/10feBESWKCfFuh7g9436Orp4i4fNoQxjnt5xxhrrdtJo/edit#gid=0
+// updated with all the env vars that the Console receives and their possible values. The spreadsheet acts as the source of truth for the environment variables, at the moment
 export type EnvVars = {
   nodeEnv?: string;
   apiHost?: string;
@@ -134,6 +151,9 @@ export type EnvVars = {
   eeMode?: string;
   consoleId?: string;
   userRole?: string;
+  neonOAuthClientId?: string;
+  neonRootDomain?: string;
+  allowedLuxFeatures?: LuxFeature[];
   userId?: string;
   cdnAssets?: boolean;
   consoleSentryDsn?: string; // Corresponds to the HASURA_CONSOLE_SENTRY_DSN environment variable
@@ -194,11 +214,16 @@ const globals = {
   herokuOAuthClientId: window.__env?.herokuOAuthClientId,
   hasuraCloudTenantId: window.__env?.tenantID,
   hasuraCloudProjectId: window.__env?.projectID,
+  neonOAuthClientId: window.__env?.neonOAuthClientId,
+  neonRootDomain: window.__env?.neonRootDomain,
+  allowedLuxFeatures: window.__env?.allowedLuxFeatures || [],
   cloudDataApiUrl: `${window.location?.protocol}//data.${window.__env?.cloudRootDomain}`,
   luxDataHost: window.__env?.luxDataHost,
   userRole: window.__env?.userRole || undefined,
   userId: window.__env?.userId || undefined,
-  consoleType: window.__env?.consoleType || '',
+  consoleType: window.__env?.consoleType // FIXME : this check can be removed when the all CLI environments are set with the console type, some CLI environments could have empty consoleType
+    ? parseConsoleType(window.__env?.consoleType)
+    : ('' as ConsoleType),
   eeMode: window.__env?.eeMode === 'true',
 };
 if (globals.consoleMode === SERVER_CONSOLE_MODE) {

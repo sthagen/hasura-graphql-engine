@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Hasura.Server.Init.ArgSpec
   ( spec,
   )
@@ -7,14 +9,14 @@ where
 
 import Control.Lens (preview, _Just)
 import Data.HashSet qualified as Set
+import Data.Time (NominalDiffTime)
 import Data.URL.Template qualified as Template
-import Database.PG.Query qualified as Q
+import Database.PG.Query qualified as PG
 import Hasura.GraphQL.Execute.Subscription.Options qualified as ES
 import Hasura.GraphQL.Schema.NamingCase qualified as NC
 import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Logging qualified as Logging
 import Hasura.Prelude
-import Hasura.RQL.Types.Numeric qualified as Numeric
 import Hasura.Server.Auth qualified as Auth
 import Hasura.Server.Cors qualified as Cors
 import Hasura.Server.Init qualified as UUT
@@ -22,6 +24,7 @@ import Hasura.Server.Logging qualified as Logging
 import Hasura.Server.Types qualified as Types
 import Hasura.Session qualified as Session
 import Options.Applicative qualified as Opt
+import Refined (NonNegative, Positive, refineTH)
 import Test.Hspec qualified as Hspec
 
 {-# ANN module ("HLint: ignore Redundant ==" :: String) #-}
@@ -419,12 +422,12 @@ serveParserSpec =
         Opt.Success rawConnParams ->
           rawConnParams
             == UUT.ConnParamsRaw
-              { rcpStripes = Just $ Numeric.unsafeNonNegativeInt 3,
-                rcpConns = Just $ Numeric.unsafeNonNegativeInt 2,
-                rcpIdleTime = Just $ Numeric.unsafeNonNegativeInt 40,
-                rcpConnLifetime = Just $ Numeric.unsafeNonNegative 400,
+              { rcpStripes = Just $$(refineTH @NonNegative @Int 3),
+                rcpConns = Just $$(refineTH @NonNegative @Int 2),
+                rcpIdleTime = Just $$(refineTH @NonNegative @Int 40),
+                rcpConnLifetime = Just $$(refineTH @NonNegative @NominalDiffTime 400),
                 rcpAllowPrepare = Just True,
-                rcpPoolTimeout = Just (Numeric.unsafeNonNegative 45)
+                rcpPoolTimeout = Just $$(refineTH @NonNegative @NominalDiffTime 45)
               }
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
@@ -503,7 +506,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoTxIso result `Hspec.shouldSatisfy` \case
-        Opt.Success txIso -> txIso == Just Q.ReadCommitted
+        Opt.Success txIso -> txIso == Just PG.ReadCommitted
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 
@@ -851,6 +854,32 @@ serveParserSpec =
           parserInfo = Opt.info (UUT.serveCommandParser @Logging.Hasura Opt.<**> Opt.helper) Opt.fullDesc
           -- When
           argInput = ["--console-assets-dir"]
+          -- Then
+          result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
+
+      case result of
+        Opt.Success _result -> Hspec.expectationFailure "Should not parse successfully"
+        Opt.Failure _pf -> pure ()
+        Opt.CompletionInvoked cr -> Hspec.expectationFailure $ show cr
+
+    Hspec.it "It accepts '--console-sentry-dsn'" $ do
+      let -- Given
+          parserInfo = Opt.info (UUT.serveCommandParser @Logging.Hasura Opt.<**> Opt.helper) Opt.fullDesc
+          -- When
+          argInput = ["--console-sentry-dsn", "123123"]
+          -- Then
+          result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
+
+      fmap UUT.rsoConsoleSentryDsn result `Hspec.shouldSatisfy` \case
+        Opt.Success consoleSentryDsn -> consoleSentryDsn == Just "123123"
+        Opt.Failure _pf -> False
+        Opt.CompletionInvoked _cr -> False
+
+    Hspec.it "It fails '--console-sentry-dsn' expects an argument" $ do
+      let -- Given
+          parserInfo = Opt.info (UUT.serveCommandParser @Logging.Hasura Opt.<**> Opt.helper) Opt.fullDesc
+          -- When
+          argInput = ["--console-sentry-dsn"]
           -- Then
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
@@ -1402,7 +1431,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoEventsHttpPoolSize result `Hspec.shouldSatisfy` \case
-        Opt.Success eventsHttpPoolSize -> eventsHttpPoolSize == Just (Numeric.unsafePositiveInt 50)
+        Opt.Success eventsHttpPoolSize -> eventsHttpPoolSize == Just $$(refineTH @Positive @Int 50)
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 
@@ -1441,7 +1470,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoEventsFetchInterval result `Hspec.shouldSatisfy` \case
-        Opt.Success eventsFetchInterval -> eventsFetchInterval == Just (Numeric.unsafeNonNegative 634)
+        Opt.Success eventsFetchInterval -> eventsFetchInterval == Just $$(refineTH @NonNegative @Milliseconds 634)
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 
@@ -1493,7 +1522,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoAsyncActionsFetchInterval result `Hspec.shouldSatisfy` \case
-        Opt.Success asyncActionsFetchInterval -> asyncActionsFetchInterval == Just (UUT.Interval $ Numeric.unsafeNonNegative 123)
+        Opt.Success asyncActionsFetchInterval -> asyncActionsFetchInterval == Just (UUT.Interval $$(refineTH 123))
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 
@@ -1597,7 +1626,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoWebSocketKeepAlive result `Hspec.shouldSatisfy` \case
-        Opt.Success webSocketKeepAlive -> webSocketKeepAlive == Just (UUT.KeepAliveDelay $ Numeric.unsafeNonNegative 8)
+        Opt.Success webSocketKeepAlive -> webSocketKeepAlive == Just (UUT.KeepAliveDelay $$(refineTH 8))
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 
@@ -1714,7 +1743,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoSchemaPollInterval result `Hspec.shouldSatisfy` \case
-        Opt.Success schemaPollInterval -> schemaPollInterval == Just (UUT.Interval $ Numeric.unsafeNonNegative 5432)
+        Opt.Success schemaPollInterval -> schemaPollInterval == Just (UUT.Interval $$(refineTH 5432))
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 
@@ -1805,7 +1834,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoEventsFetchBatchSize result `Hspec.shouldSatisfy` \case
-        Opt.Success eventsFetchBatchSize -> eventsFetchBatchSize == Just (Numeric.unsafeNonNegativeInt 40)
+        Opt.Success eventsFetchBatchSize -> eventsFetchBatchSize == Just $$(refineTH @NonNegative @Int 40)
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 
@@ -1844,7 +1873,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoGracefulShutdownTimeout result `Hspec.shouldSatisfy` \case
-        Opt.Success gracefulShutdownTimeout -> gracefulShutdownTimeout == Just (Numeric.unsafeNonNegative 52)
+        Opt.Success gracefulShutdownTimeout -> gracefulShutdownTimeout == Just $$(refineTH @NonNegative @Seconds 52)
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 
@@ -1896,7 +1925,7 @@ serveParserSpec =
           result = Opt.execParserPure Opt.defaultPrefs parserInfo argInput
 
       fmap UUT.rsoWebSocketConnectionInitTimeout result `Hspec.shouldSatisfy` \case
-        Opt.Success webSocketConnectionInitTimeout -> webSocketConnectionInitTimeout == Just (UUT.WSConnectionInitTimeout (Numeric.unsafeNonNegative 34))
+        Opt.Success webSocketConnectionInitTimeout -> webSocketConnectionInitTimeout == Just (UUT.WSConnectionInitTimeout $$(refineTH 34))
         Opt.Failure _pf -> False
         Opt.CompletionInvoked _cr -> False
 

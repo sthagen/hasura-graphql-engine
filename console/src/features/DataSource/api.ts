@@ -45,25 +45,50 @@ const getRunSqlType = (driver: SupportedDrivers) => {
   return `${driver}_run_sql`;
 };
 
+export const runQuery = async <ResponseType>({
+  body,
+  httpClient,
+}: { body: Record<string, any> } & NetworkArgs) => {
+  /**
+   * Use v2 query instead of v1 because it supports other <db>_run_sql commands
+   */
+  const result = await httpClient.post<ResponseType>('v2/query', body);
+  return result.data;
+};
+
+export const runGraphQL = async ({
+  operationName,
+  query,
+  httpClient,
+}: { operationName: string; query: string } & NetworkArgs) => {
+  try {
+    const result = await httpClient.post('v1/graphql', {
+      query,
+      operationName,
+    });
+    return result.data;
+  } catch (err) {
+    throw err;
+  }
+};
+
 export const runSQL = async ({
   source,
   sql,
   httpClient,
 }: RunSqlArgs & NetworkArgs): Promise<RunSQLResponse> => {
-  if (source.kind === 'gdc') throw Error('GDC does not support run sql');
-
   const type = getRunSqlType(source.kind);
-  /**
-   * Use v2 query instead of v1 because it supports other <db>_run_sql commands
-   */
-  const result = await httpClient.post<RunSQLResponse>('v2/query', {
-    type,
-    args: {
-      sql,
-      source: source.name,
+  const result = await runQuery<RunSQLResponse>({
+    httpClient,
+    body: {
+      type,
+      args: {
+        sql,
+        source: source.name,
+      },
     },
   });
-  return result.data;
+  return result;
 };
 
 export const getDriverPrefix = (driver: SupportedDrivers) =>

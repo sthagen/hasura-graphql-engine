@@ -20,7 +20,7 @@ where
 
 import Data.Aeson
 import Data.HashSet qualified as Set
-import Database.PG.Query qualified as Q
+import Database.PG.Query qualified as PG
 import Hasura.GraphQL.Schema.NamingCase
 import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Prelude
@@ -57,13 +57,13 @@ pgToDbVersion = DbVersion . tshow . unPGVersion
 
 -- | A uuid of the postgres metadata db.
 newtype MetadataDbId = MetadataDbId {getMetadataDbId :: Text}
-  deriving (Show, Eq, ToJSON, FromJSON, Q.FromCol, Q.ToPrepArg)
+  deriving (Show, Eq, ToJSON, FromJSON, PG.FromCol, PG.ToPrepArg)
 
 mdDbIdToDbUid :: MetadataDbId -> DbUid
 mdDbIdToDbUid = DbUid . getMetadataDbId
 
 newtype InstanceId = InstanceId {getInstanceId :: Text}
-  deriving (Show, Eq, ToJSON, FromJSON, Q.FromCol, Q.ToPrepArg)
+  deriving (Show, Eq, ToJSON, FromJSON, PG.FromCol, PG.ToPrepArg)
 
 -- | Generate an 'InstanceId' from a 'UUID'
 generateInstanceId :: IO InstanceId
@@ -75,6 +75,7 @@ data ExperimentalFeature
   | EFNamingConventions
   | EFStreamingSubscriptions
   | EFApolloFederation
+  | EFHideUpdateManyFields
   deriving (Show, Eq, Generic)
 
 instance Hashable ExperimentalFeature
@@ -85,8 +86,9 @@ instance FromJSON ExperimentalFeature where
     "optimize_permission_filters" -> pure EFOptimizePermissionFilters
     "naming_convention" -> pure EFNamingConventions
     "streaming_subscriptions" -> pure EFStreamingSubscriptions
+    "hide_update_many_fields" -> pure EFHideUpdateManyFields
     "apollo_federation" -> pure EFApolloFederation
-    _ -> fail "ExperimentalFeature can only be one of these value: inherited_roles, optimize_permission_filters, naming_convention, streaming_subscriptions or apollo_federation"
+    _ -> fail "ExperimentalFeature can only be one of these value: inherited_roles, optimize_permission_filters, hide_update_many_fields, naming_convention, streaming_subscriptions or apollo_federation"
 
 instance ToJSON ExperimentalFeature where
   toJSON = \case
@@ -95,6 +97,7 @@ instance ToJSON ExperimentalFeature where
     EFNamingConventions -> "naming_convention"
     EFStreamingSubscriptions -> "streaming_subscriptions"
     EFApolloFederation -> "apollo_federation"
+    EFHideUpdateManyFields -> "hide_update_many_fields"
 
 data MaintenanceMode a = MaintenanceModeEnabled a | MaintenanceModeDisabled
   deriving (Show, Eq)

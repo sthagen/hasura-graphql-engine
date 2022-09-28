@@ -203,6 +203,54 @@
           }
         }
       }
+    },
+    "/raw": {
+      "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Hasura-DataConnector-SourceName",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Hasura-DataConnector-Config",
+            "required": true,
+            "schema": {
+              "additionalProperties": true,
+              "nullable": false,
+              "type": "object"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json;charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/RawRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json;charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "description": "Invalid `body` or `X-Hasura-DataConnector-Config` or `X-Hasura-DataConnector-SourceName`"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -213,22 +261,25 @@
           "capabilities": {
             "$ref": "#/components/schemas/Capabilities"
           },
-          "configSchemas": {
+          "config_schemas": {
             "$ref": "#/components/schemas/ConfigSchemaResponse"
           }
         },
         "required": [
           "capabilities",
-          "configSchemas"
+          "config_schemas"
         ],
         "type": "object"
       },
       "Capabilities": {
         "properties": {
+          "comparisons": {
+            "$ref": "#/components/schemas/ComparisonCapabilities"
+          },
           "explain": {
             "$ref": "#/components/schemas/ExplainCapabilities"
           },
-          "graphqlSchema": {
+          "graphql_schema": {
             "$ref": "#/components/schemas/GraphQLTypeDefinitions"
           },
           "metrics": {
@@ -240,10 +291,13 @@
           "queries": {
             "$ref": "#/components/schemas/QueryCapabilities"
           },
+          "raw": {
+            "$ref": "#/components/schemas/RawCapabilities"
+          },
           "relationships": {
             "$ref": "#/components/schemas/RelationshipCapabilities"
           },
-          "scalarTypes": {
+          "scalar_types": {
             "$ref": "#/components/schemas/ScalarTypesCapabilities"
           },
           "subscriptions": {
@@ -254,13 +308,13 @@
       },
       "QueryCapabilities": {
         "properties": {
-          "supportsPrimaryKeys": {
+          "supports_primary_keys": {
             "description": "Does the agent support querying a table by primary key?",
             "type": "boolean"
           }
         },
         "required": [
-          "supportsPrimaryKeys"
+          "supports_primary_keys"
         ],
         "type": "object"
       },
@@ -271,9 +325,9 @@
         "type": "string"
       },
       "ScalarTypeCapabilities": {
-        "description": "Capabilities of a scalar type.\ncomparisonType: Name of the GraphQL input object to be used for comparison operations on the scalar type. The input object type must be defined in the `graphqlSchema`.\n",
+        "description": "Capabilities of a scalar type.\ncomparison_type: Name of the GraphQL input object to be used for comparison operations on the scalar type. The input object type must be defined in the `graphql_schema`.\n",
         "properties": {
-          "comparisonType": {
+          "comparison_type": {
             "$ref": "#/components/schemas/GraphQLName"
           }
         },
@@ -283,7 +337,7 @@
         "additionalProperties": {
           "$ref": "#/components/schemas/ScalarTypeCapabilities"
         },
-        "description": "A map from scalar type names to their capabilities.\nKeys must be valid GraphQL names and must be defined as scalar types in the `graphqlSchema`\n",
+        "description": "A map from scalar type names to their capabilities.\nKeys must be valid GraphQL names and must be defined as scalar types in the `graphql_schema`\n",
         "type": "object"
       },
       "GraphQLTypeDefinitions": {
@@ -291,15 +345,37 @@
         "type": "string"
       },
       "RelationshipCapabilities": {},
+      "SubqueryComparisonCapabilities": {
+        "nullable": true,
+        "properties": {
+          "supports_relations": {
+            "description": "Does the agent support comparisons that involve related tables (ie. joins)?",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "supports_relations"
+        ],
+        "type": "object"
+      },
+      "ComparisonCapabilities": {
+        "properties": {
+          "subquery": {
+            "$ref": "#/components/schemas/SubqueryComparisonCapabilities"
+          }
+        },
+        "type": "object"
+      },
       "MetricsCapabilities": {},
       "ExplainCapabilities": {},
+      "RawCapabilities": {},
       "ConfigSchemaResponse": {
         "nullable": false,
         "properties": {
-          "configSchema": {
+          "config_schema": {
             "$ref": "#/components/schemas/OpenApiSchema"
           },
-          "otherSchemas": {
+          "other_schemas": {
             "additionalProperties": {
               "$ref": "#/components/schemas/OpenApiSchema"
             },
@@ -308,8 +384,8 @@
           }
         },
         "required": [
-          "configSchema",
-          "otherSchemas"
+          "config_schema",
+          "other_schemas"
         ],
         "type": "object"
       },
@@ -692,7 +768,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/Constraint"
             },
-            "description": "Foreign Key Constraints",
+            "description": "Foreign key constraints",
             "nullable": true,
             "type": "object"
           },
@@ -1021,6 +1097,118 @@
           }
         ]
       },
+      "UnrelatedTable": {
+        "properties": {
+          "table": {
+            "$ref": "#/components/schemas/TableName"
+          },
+          "type": {
+            "enum": [
+              "unrelated"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "type"
+        ],
+        "type": "object"
+      },
+      "RelatedTable": {
+        "properties": {
+          "relationship": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "related"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "relationship",
+          "type"
+        ],
+        "type": "object"
+      },
+      "ExistsInTable": {
+        "discriminator": {
+          "mapping": {
+            "related": "RelatedTable",
+            "unrelated": "UnrelatedTable"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UnrelatedTable"
+          },
+          {
+            "$ref": "#/components/schemas/RelatedTable"
+          }
+        ]
+      },
+      "Expression": {
+        "discriminator": {
+          "mapping": {
+            "and": "AndExpression",
+            "binary_arr_op": "ApplyBinaryArrayComparisonOperator",
+            "binary_op": "ApplyBinaryComparisonOperator",
+            "exists": "ExistsExpression",
+            "not": "NotExpression",
+            "or": "OrExpression",
+            "unary_op": "ApplyUnaryComparisonOperator"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ExistsExpression"
+          },
+          {
+            "$ref": "#/components/schemas/ApplyBinaryArrayComparisonOperator"
+          },
+          {
+            "$ref": "#/components/schemas/OrExpression"
+          },
+          {
+            "$ref": "#/components/schemas/ApplyUnaryComparisonOperator"
+          },
+          {
+            "$ref": "#/components/schemas/ApplyBinaryComparisonOperator"
+          },
+          {
+            "$ref": "#/components/schemas/NotExpression"
+          },
+          {
+            "$ref": "#/components/schemas/AndExpression"
+          }
+        ]
+      },
+      "ExistsExpression": {
+        "properties": {
+          "in_table": {
+            "$ref": "#/components/schemas/ExistsInTable"
+          },
+          "type": {
+            "enum": [
+              "exists"
+            ],
+            "type": "string"
+          },
+          "where": {
+            "$ref": "#/components/schemas/Expression"
+          }
+        },
+        "required": [
+          "in_table",
+          "where",
+          "type"
+        ],
+        "type": "object"
+      },
       "BinaryArrayComparisonOperator": {
         "additionalProperties": true,
         "anyOf": [
@@ -1042,7 +1230,8 @@
             "type": "string"
           },
           "path": {
-            "description": "The relationship path from the current query table to the table that contains the specified column. Empty array means the current query table.",
+            "default": [],
+            "description": "The path to the table that contains the specified column. Missing or empty array means the current table. [\"$\"] means the query table. No other values are supported at this time.",
             "items": {
               "type": "string"
             },
@@ -1050,7 +1239,6 @@
           }
         },
         "required": [
-          "path",
           "name"
         ],
         "type": "object"
@@ -1083,39 +1271,6 @@
           "type"
         ],
         "type": "object"
-      },
-      "Expression": {
-        "discriminator": {
-          "mapping": {
-            "and": "AndExpression",
-            "binary_arr_op": "ApplyBinaryArrayComparisonOperator",
-            "binary_op": "ApplyBinaryComparisonOperator",
-            "not": "NotExpression",
-            "or": "OrExpression",
-            "unary_op": "ApplyUnaryComparisonOperator"
-          },
-          "propertyName": "type"
-        },
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/ApplyBinaryArrayComparisonOperator"
-          },
-          {
-            "$ref": "#/components/schemas/OrExpression"
-          },
-          {
-            "$ref": "#/components/schemas/ApplyUnaryComparisonOperator"
-          },
-          {
-            "$ref": "#/components/schemas/ApplyBinaryComparisonOperator"
-          },
-          {
-            "$ref": "#/components/schemas/NotExpression"
-          },
-          {
-            "$ref": "#/components/schemas/AndExpression"
-          }
-        ]
       },
       "OrExpression": {
         "properties": {
@@ -1474,6 +1629,36 @@
         },
         "required": [
           "lines",
+          "query"
+        ],
+        "type": "object"
+      },
+      "RawResponse": {
+        "properties": {
+          "rows": {
+            "description": "The rows returned by the raw query.",
+            "items": {
+              "additionalProperties": {
+                "additionalProperties": true
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "type": "object"
+      },
+      "RawRequest": {
+        "properties": {
+          "query": {
+            "description": "A string representing a raw query",
+            "type": "string"
+          }
+        },
+        "required": [
           "query"
         ],
         "type": "object"

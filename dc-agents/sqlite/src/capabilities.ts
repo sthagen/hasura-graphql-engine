@@ -3,13 +3,19 @@ import { CapabilitiesResponse } from "@hasura/dc-api-types"
 import { envToBool } from "./util"
 
 export const capabilitiesResponse: CapabilitiesResponse = {
-  configSchemas: configSchema,
+  config_schemas: configSchema,
   capabilities: {
     queries: {
-      supportsPrimaryKeys: true
+      supports_primary_keys: true
     },
     relationships: {},
+    comparisons: {
+      subquery: {
+        supports_relations: true
+      }
+    },
     explain: {},
+    raw: {},
     ... ( envToBool('METRICS') ?  { metrics: {} } : {} )
   },
 }

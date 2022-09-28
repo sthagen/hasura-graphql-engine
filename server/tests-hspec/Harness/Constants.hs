@@ -1,4 +1,5 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 -- | Constant configurations used throughout the test suite.
 module Harness.Constants
@@ -42,13 +43,12 @@ where
 import Data.HashSet qualified as Set
 import Data.Word (Word16)
 import Database.MySQL.Simple qualified as Mysql
-import Database.PG.Query qualified as Q
+import Database.PG.Query qualified as PG
 import Hasura.Backends.Postgres.Connection.MonadTx (ExtensionsSchema (..))
 import Hasura.GraphQL.Execute.Subscription.Options qualified as ES
 import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Logging qualified as L
 import Hasura.Prelude
-import Hasura.RQL.Types.Numeric qualified as Numeric
 import Hasura.Server.Cors (CorsConfig (CCAllowAll))
 import Hasura.Server.Init
   ( API (CONFIG, DEVELOPER, GRAPHQL, METADATA),
@@ -65,6 +65,7 @@ import Hasura.Server.Types
     ReadOnlyMode (ReadOnlyModeDisabled),
   )
 import Network.WebSockets qualified as WS
+import Refined (refineTH)
 
 -------------------------------------------------------------------------------
 
@@ -240,8 +241,8 @@ serveOptions =
     -- a random port, so this isn't particularly
     -- important.
       soHost = "0.0.0.0",
-      soConnParams = Q.defaultConnParams,
-      soTxIso = Q.Serializable,
+      soConnParams = PG.defaultConnParams,
+      soTxIso = PG.Serializable,
       soAdminSecret = mempty,
       soAuthHook = Nothing,
       soJwtSecret = mempty,
@@ -249,6 +250,7 @@ serveOptions =
       soCorsConfig = CCAllowAll,
       soEnableConsole = True,
       soConsoleAssetsDir = Just "../console/static/dist",
+      soConsoleSentryDsn = Nothing,
       soEnableTelemetry = False,
       soStringifyNum = Options.StringifyNumbers,
       soDangerousBooleanCollapse = Options.Don'tDangerouslyCollapseBooleans,
@@ -268,11 +270,11 @@ serveOptions =
       soInferFunctionPermissions = Options.InferFunctionPermissions,
       soEnableMaintenanceMode = MaintenanceModeDisabled,
       -- MUST be disabled to be able to modify schema.
-      soSchemaPollInterval = Interval (Numeric.unsafeNonNegative 10),
+      soSchemaPollInterval = Interval $$(refineTH 10),
       soExperimentalFeatures = Set.singleton EFStreamingSubscriptions,
-      soEventsFetchBatchSize = Numeric.unsafeNonNegativeInt 1,
+      soEventsFetchBatchSize = $$(refineTH 1),
       soDevMode = True,
-      soGracefulShutdownTimeout = Numeric.unsafeNonNegative 0, -- Don't wait to shutdown.
+      soGracefulShutdownTimeout = $$(refineTH 0), -- Don't wait to shutdown.
       soWebSocketConnectionInitTimeout = Init._default Init.webSocketConnectionInitTimeoutOption,
       soEventingMode = EventingEnabled,
       soReadOnlyMode = ReadOnlyModeDisabled,

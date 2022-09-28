@@ -1,4 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
+-- Ignore "incomplete record updates" error on `Permission`s as the type currently
+-- models permissions for all operations, which may have different fields.
+{-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
 
 -- |
 -- Test filtering and searching using aggregate fields in "where" clauses.
@@ -12,10 +15,11 @@ module Test.Queries.AggregationPredicatesSpec (spec) where
 import Data.Aeson (Value)
 import Data.List.NonEmpty qualified as NE
 import Harness.Backend.Postgres qualified as Postgres
-import Harness.GraphqlEngine (postGraphql)
+import Harness.GraphqlEngine (postGraphql, postGraphqlWithHeaders)
 import Harness.Quoter.Graphql (graphql)
-import Harness.Quoter.Yaml (interpolateYaml)
+import Harness.Quoter.Yaml (interpolateYaml, yaml)
 import Harness.Test.Fixture qualified as Fixture
+import Harness.Test.Permissions (Permission (..), selectPermission)
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (TestEnvironment)
@@ -32,13 +36,9 @@ spec = do
     ( NE.fromList
         [ (Fixture.fixture $ Fixture.Backend Fixture.Postgres)
             { Fixture.setupTeardown = \(testEnv, _) ->
-                [ Postgres.setupTablesAction schema testEnv
-                ],
-              Fixture.customOptions =
-                Just $
-                  Fixture.defaultOptions
-                    { Fixture.skipTests = Just "Tests disabled until aggregation predicates are enabled for users in https://github.com/hasura/graphql-engine-mono/issues/5511"
-                    }
+                [ Postgres.setupTablesAction schema testEnv,
+                  Postgres.setupPermissionsAction permissions testEnv
+                ]
             }
         ]
     )
@@ -72,8 +72,43 @@ schema =
         tableData =
           [ [Schema.VInt 1, Schema.VStr "Article 1", Schema.VBool False, Schema.VInt 1],
             [Schema.VInt 2, Schema.VStr "Article 2", Schema.VBool True, Schema.VInt 2],
-            [Schema.VInt 3, Schema.VStr "Article 3", Schema.VBool True, Schema.VInt 2]
+            [Schema.VInt 3, Schema.VStr "Article 3", Schema.VBool True, Schema.VInt 2],
+            [Schema.VInt 4, Schema.VStr "Article 4", Schema.VBool True, Schema.VInt 1]
           ]
+      }
+  ]
+
+permissions :: [Permission]
+permissions =
+  [ selectPermission
+      { permissionTable = "author",
+        permissionSource = "postgres",
+        permissionRole = "role-select-author-name-only",
+        permissionColumns = ["id", "name"]
+      },
+    selectPermission
+      { permissionTable = "article",
+        permissionSource = "postgres",
+        permissionRole = "role-select-author-name-only",
+        permissionColumns = ["id", "title", "author_id"],
+        permissionRows =
+          [yaml|
+          published: true
+        |],
+        permissionAllowAggregations = True
+      },
+    selectPermission
+      { permissionTable = "author",
+        permissionSource = "postgres",
+        permissionRole = "disallow-aggregation-queries",
+        permissionColumns = ["id", "name"]
+      },
+    selectPermission
+      { permissionTable = "article",
+        permissionSource = "postgres",
+        permissionRole = "disallow-aggregation-queries",
+        permissionColumns = ["id", "title", "author_id"],
+        permissionAllowAggregations = False
       }
   ]
 
@@ -89,7 +124,7 @@ tests opts = do
   let shouldBe :: IO Value -> Value -> IO ()
       shouldBe = shouldReturnYaml opts
 
-  it "Filter on aggregation predicate `count`" \testEnvironment -> do
+  it "Filters on aggregation predicate `count`" \testEnvironment -> do
     let schemaName = Schema.getSchemaName testEnvironment
 
     let expected :: Value
@@ -97,8 +132,10 @@ tests opts = do
           [interpolateYaml|
             data:
               #{schemaName}_author:
-              - name: Author 2
-                id: 2
+                - id: 1
+                  name: Author 1
+                - id: 2
+                  name: Author 2
           |]
 
         actual :: IO Value
@@ -123,7 +160,7 @@ tests opts = do
 
     actual `shouldBe` expected
 
-  it "Filter on aggregation predicate `bool_and` with one clause" \testEnvironment -> do
+  it "Filters on aggregation predicate `bool_and` with one clause" \testEnvironment -> do
     let schemaName = Schema.getSchemaName testEnvironment
 
     let expected :: Value
@@ -144,7 +181,7 @@ tests opts = do
                 #{schemaName}_author(
                   where: {
                     articles_by_id_to_author_id_aggregate: {
-                      bool_and: { arguments: { arg0: published }, predicate: { _eq: false } }
+                      bool_and: { arguments: published, predicate: { _eq: false } }
                     }
                   }
                 ) {
@@ -156,7 +193,7 @@ tests opts = do
 
     actual `shouldBe` expected
 
-  it "Filter on aggregation predicate `bool_and` with more than one clause" \testEnvironment -> do
+  it "Filters on aggregation predicate `bool_and` with more than one clause" \testEnvironment -> do
     let schemaName = Schema.getSchemaName testEnvironment
 
     let expected :: Value
@@ -176,7 +213,7 @@ tests opts = do
                   where: {
                     articles_by_id_to_author_id_aggregate: {
                       bool_and: {
-                        arguments: { arg0: published }
+                        arguments: published
                         predicate: { _eq: true }
                         filter: { author_id: { _neq: 2 } }
                       }
@@ -191,7 +228,7 @@ tests opts = do
 
     actual `shouldBe` expected
 
-  it "Filter on aggregation predicate and other filters" \testEnvironment -> do
+  it "Filters on aggregation predicate and other filters" \testEnvironment -> do
     let schemaName = Schema.getSchemaName testEnvironment
 
     let expected :: Value
@@ -283,7 +320,7 @@ tests opts = do
                     where: {
                       articles_by_id_to_author_id_aggregate: {
                         bool_and: {
-                          arguments: { arg0: published }
+                          arguments: published
                           predicate: { _eq: true }
                           filter: { author_id: { _neq: 2 } }
                         }
@@ -298,3 +335,105 @@ tests opts = do
               |]
 
       actual `shouldBe` expected
+
+  it "Respects select permissions on the column" \testEnvironment -> do
+    let schemaName = Schema.getSchemaName testEnvironment
+
+    let expected :: Value
+        expected =
+          [interpolateYaml|
+            errors:
+              - extensions:
+                  code: validation-failed
+                  path: $.selectionSet.#{schemaName}_author.args.where.articles_by_id_to_author_id_aggregate.count.arguments[0]
+                message: expected one of the values ['id', 'author_id', 'title'] for type '#{schemaName}_article_select_column', but found 'published'
+          |]
+
+        actual :: IO Value
+        actual =
+          postGraphqlWithHeaders
+            testEnvironment
+            [("X-Hasura-Role", "role-select-author-name-only")]
+            [graphql|
+              query {
+                #{schemaName}_author(
+                  where: {
+                    articles_by_id_to_author_id_aggregate: {
+                      count: { predicate: { _gt: 1 }, arguments: published }
+                    }
+                  }
+                ) {
+                  id
+                }
+              }
+            |]
+
+    actual `shouldBe` expected
+
+  it "Respects select permissions on the row" \testEnvironment -> do
+    let schemaName = Schema.getSchemaName testEnvironment
+
+    let expected :: Value
+        expected =
+          [interpolateYaml|
+            data:
+              #{schemaName}_author:
+              - id: 1
+                name: Author 1
+          |]
+
+        actual :: IO Value
+        actual =
+          postGraphqlWithHeaders
+            testEnvironment
+            [("X-Hasura-Role", "role-select-author-name-only")]
+            [graphql|
+              query {
+                #{schemaName}_author(
+                  where: {
+                    articles_by_id_to_author_id_aggregate: {
+                      count: { predicate: { _eq: 1 } }
+                    }
+                  }
+                ) {
+                  id
+                  name
+                }
+              }
+            |]
+
+    actual `shouldBe` expected
+
+  it "Respects 'aggregation queries' select permissions for a given role and table" \testEnvironment -> do
+    let schemaName = Schema.getSchemaName testEnvironment
+
+    let expected :: Value
+        expected =
+          [interpolateYaml|
+            errors:
+              - extensions:
+                  code: validation-failed
+                  path: $.selectionSet.hasura_author.args.where.articles_by_id_to_author_id_aggregate
+                message: 'field ''articles_by_id_to_author_id_aggregate'' not found in type: ''hasura_author_bool_exp'''
+          |]
+
+        actual :: IO Value
+        actual =
+          postGraphqlWithHeaders
+            testEnvironment
+            [("X-Hasura-Role", "disallow-aggregation-queries")]
+            [graphql|
+              query {
+                #{schemaName}_author(
+                  where: {
+                    articles_by_id_to_author_id_aggregate: {
+                      count: { predicate: { _eq: 1 } }
+                    }
+                  }
+                ) {
+                  id
+                }
+              }
+            |]
+
+    actual `shouldBe` expected

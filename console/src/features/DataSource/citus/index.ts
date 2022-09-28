@@ -7,6 +7,7 @@ import {
   getFKRelationships,
   getTablesListAsTree,
 } from './introspection';
+import { getTableRows } from './query';
 
 export type CitusTable = { name: string; schema: string };
 
@@ -59,5 +60,8 @@ export const citus: Database = {
     getTableColumns,
     getFKRelationships,
     getTablesListAsTree,
+  },
+  query: {
+    getTableRows,
   },
 };

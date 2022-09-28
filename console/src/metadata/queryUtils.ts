@@ -1,3 +1,4 @@
+import defaultState from '@/components/Services/Events/EventTriggers/state';
 import {
   ColumnConfig,
   CustomRootFields,
@@ -25,6 +26,7 @@ import { Nullable } from '../components/Common/utils/tsUtils';
 
 export const metadataQueryTypes = [
   'add_source',
+  'update_source',
   'drop_source',
   'reload_source',
   'track_table',
@@ -523,6 +525,10 @@ export const generateCreateEventTriggerQuery = (
       enable_manual: state.operations.enable_manual,
       retry_conf: state.retryConf,
       headers: transformHeaders(state.headers),
+      cleanup_config: {
+        ...defaultState.cleanupConfig,
+        ...state.cleanupConfig,
+      },
       replace,
       request_transform: requestTransform,
     },

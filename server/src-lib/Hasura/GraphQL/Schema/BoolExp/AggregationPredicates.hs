@@ -26,6 +26,7 @@ import Hasura.GraphQL.Schema.Parser
 import Hasura.GraphQL.Schema.Table
 import Hasura.Name qualified as Name
 import Hasura.Prelude
+import Hasura.RQL.IR qualified as IR
 import Hasura.RQL.IR.BoolExp.AggregationPredicates
 import Hasura.RQL.IR.Value
 import Hasura.RQL.Types.Backend qualified as B
@@ -53,19 +54,23 @@ defaultAggregationPredicatesParser ::
 defaultAggregationPredicatesParser aggFns si ti = runMaybeT do
   arrayRelationships <- fails $ return $ nonEmpty $ tableArrayRelationships ti
   aggregationFunctions <- fails $ return $ nonEmpty aggFns
+  roleName <- retrieve scRole
 
-  buildAnyOptionalFields $
+  collectOptionalFieldsNE . succeedingBranchesNE $
     arrayRelationships <&> \rel -> do
       relTable <- askTableInfo si (riRTable rel)
+      selectPermissions <- hoistMaybe $ tableSelectPermissions roleName relTable
+      guard $ spiAllowAgg selectPermissions
+      let rowPermissions = fmap partialSQLExpToUnpreparedValue <$> spiFilter selectPermissions
       relGqlName <- textToName $ relNameToTxt $ riName rel
       typeGqlName <- (<> Name.__ <> relGqlName <> Name.__ <> Name._aggregate) <$> getTableGQLName ti
 
       -- We only make a field for aggregations over a relation if at least
       -- some aggregation predicates are callable.
-      relAggregateField rel relGqlName typeGqlName
+      relAggregateField rel relGqlName typeGqlName rowPermissions
         -- We only return an InputFieldsParser for aggregation predicates,
         -- if we parse at least one aggregation predicate
-        <$> buildAnyOptionalFields
+        <$> (collectOptionalFieldsNE . succeedingBranchesNE)
           ( aggregationFunctions <&> \FunctionSignature {..} -> do
               aggPredicateField fnGQLName typeGqlName <$> unfuse do
                 aggPredArguments <-
@@ -77,12 +82,18 @@ defaultAggregationPredicatesParser aggFns si ti = runMaybeT do
                     ArgumentsStar ->
                       maybe AggregationPredicateArgumentsStar AggregationPredicateArguments . nonEmpty
                         <$> fuse (fieldOptionalDefault Name._arguments Nothing [] . P.list <$> fails (tableSelectColumnsEnum si relTable))
+                    SingleArgument typ ->
+                      AggregationPredicateArguments . (NE.:| [])
+                        <$> fuse
+                          ( P.field Name._arguments Nothing
+                              <$> fails (tableSelectColumnsPredEnum (== (ColumnScalar typ)) relGqlName si relTable)
+                          )
                     Arguments args ->
                       AggregationPredicateArguments
                         <$> fuse
                           ( P.field Name._arguments Nothing
                               . P.object (typeGqlName <> Name.__ <> fnGQLName <> Name.__ <> Name._arguments) Nothing
-                              <$> buildAllFieldsNE
+                              <$> collectFieldsNE
                                 ( args `for` \ArgumentSignature {..} ->
                                     P.field argName Nothing <$> fails (tableSelectColumnsPredEnum (== (ColumnScalar argType)) relGqlName si relTable)
                                 )
@@ -100,12 +111,13 @@ defaultAggregationPredicatesParser aggFns si ti = runMaybeT do
       RelInfo b ->
       G.Name ->
       G.Name ->
+      (IR.AnnBoolExp b (UnpreparedValue b)) ->
       (InputFieldsParser n [AggregationPredicate b (UnpreparedValue b)]) ->
       (InputFieldsParser n (Maybe (AggregationPredicatesImplementation b (UnpreparedValue b))))
-    relAggregateField rel relGqlName typeGqlName =
+    relAggregateField rel relGqlName typeGqlName rowPermissions =
       P.fieldOptional (relGqlName <> Name.__ <> Name._aggregate) Nothing
         . P.object typeGqlName Nothing
-        . fmap (AggregationPredicatesImplementation rel)
+        . fmap (AggregationPredicatesImplementation rel rowPermissions)
         . ( `P.bindFields`
               \case
                 [predicate] -> pure predicate
@@ -121,26 +133,34 @@ defaultAggregationPredicatesParser aggFns si ti = runMaybeT do
     aggPredicateField fnGQLName typeGqlName =
       P.fieldOptional fnGQLName Nothing . P.object (typeGqlName <> Name.__ <> fnGQLName) Nothing
 
-    buildAnyOptionalFields ::
-      Applicative f =>
-      NonEmpty (MaybeT f (InputFieldsParser n (Maybe c))) ->
-      MaybeT f (InputFieldsParser n [c])
-    buildAnyOptionalFields = fmap collectOptionalFields . collectBranchesNE
-      where
-        -- Collect a non-empty list of optional input field parsers into one input field
-        -- parser parsing a list of the specified values.
-        collectOptionalFields :: NonEmpty (InputFieldsParser n (Maybe a)) -> InputFieldsParser n [a]
-        collectOptionalFields = fmap (catMaybes . NE.toList) . sequenceA
+    -- Collect all non-failing branches of optional field parsers.
+    -- Fails only when all branches fail.
+    -- buildAnyOptionalFields ::
+    --   Applicative f =>
+    --   NonEmpty (MaybeT f (InputFieldsParser n (Maybe c))) ->
+    --   MaybeT f (InputFieldsParser n [c])
+    -- buildAnyOptionalFields = fmap collectOptionalFields . succeedingBranchesNE
+    --   where
 
-    buildAllFieldsNE ::
+    -- Collect all the non-failed branches, failing if all branches failed.
+    succeedingBranchesNE :: forall f a. Applicative f => NonEmpty (MaybeT f a) -> MaybeT f (NonEmpty a)
+    succeedingBranchesNE xs = MaybeT $ NE.nonEmpty . catMaybes . NE.toList <$> sequenceA (xs <&> runMaybeT)
+
+    -- Collect a non-empty list of input field parsers into one input field
+    -- parser parsing a non-empty list of the specified values.
+    collectFieldsNE ::
       Functor f =>
       MaybeT f (NonEmpty (InputFieldsParser n c)) ->
       MaybeT f (InputFieldsParser n (NonEmpty c))
-    buildAllFieldsNE = fmap sequenceA
+    collectFieldsNE = fmap sequenceA
 
-    -- Collect all the non-failed branches, failing if all branches failed.
-    collectBranchesNE :: forall f a. Applicative f => NonEmpty (MaybeT f a) -> MaybeT f (NonEmpty a)
-    collectBranchesNE xs = MaybeT $ NE.nonEmpty . catMaybes . NE.toList <$> sequenceA (xs <&> runMaybeT)
+    -- Collect a non-empty list of optional input field parsers into one input field
+    -- parser parsing a list of the specified values.
+    collectOptionalFieldsNE ::
+      Functor f =>
+      MaybeT f (NonEmpty (InputFieldsParser n (Maybe a))) ->
+      MaybeT f (InputFieldsParser n [a])
+    collectOptionalFieldsNE = fmap $ fmap (catMaybes . NE.toList) . sequenceA
 
     -- Mark a computation as potentially failing.
     fails :: f (Maybe a) -> MaybeT f a
@@ -169,6 +189,7 @@ data FunctionSignature (b :: BackendType) = FunctionSignature
 
 data ArgumentsSignature (b :: BackendType)
   = ArgumentsStar
+  | SingleArgument (B.ScalarType b)
   | Arguments (NonEmpty (ArgumentSignature b))
 
 data ArgumentSignature (b :: BackendType) = ArgumentSignature

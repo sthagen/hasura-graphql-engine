@@ -1,39 +1,8 @@
-import get from 'lodash.get';
 import { FaFolder, FaTable } from 'react-icons/fa';
 import React from 'react';
-import { Table } from '@/features/MetadataAPI';
-import { IntrospectedTable, Property, Ref, TableColumn } from '../types';
+import { MetadataTable, Source, Table } from '@/features/MetadataAPI';
+import { IntrospectedTable, TableColumn, TableRow } from '../types';
 import { RunSQLResponse } from '../api';
-
-export const isProperty = (
-  value: Ref | Property | { oneOf: (Property | Ref)[] }
-): value is Property => {
-  return 'type' in value;
-};
-
-export const isRef = (
-  value: Ref | Property | { oneOf: (Property | Ref)[] }
-): value is Ref => {
-  return Object.keys(value).includes('$ref');
-};
-
-export const isOneOf = (
-  value: Ref | Property | { oneOf: (Property | Ref)[] }
-): value is { oneOf: (Property | Ref)[] } => {
-  return Object.keys(value).includes('oneOf');
-};
-
-export const getProperty = (
-  value: Ref | Property,
-  otherSchemas: Record<string, Property>
-) => {
-  if (isRef(value)) {
-    const ref = value.$ref;
-    return get(otherSchemas, ref.split('/').slice(2).join('.'));
-  }
-
-  return value;
-};
 
 export const adaptIntrospectedTables = (
   runSqlResponse: RunSQLResponse
@@ -110,4 +79,32 @@ export const convertToTreeData = (
       };
     }),
   ];
+};
+
+export const transformGraphqlResponse = ({
+  data,
+  tableCustomization,
+}: {
+  data: Record<string, string>[];
+  tableCustomization: MetadataTable['configuration'];
+  sourceCustomization: Source['customization'];
+  columns: string[];
+}): TableRow[] => {
+  return data.map(row => {
+    const transformedRow = Object.entries(row).reduce((acc, [key, value]) => {
+      const columnName =
+        Object.entries(tableCustomization?.column_config ?? {}).find(
+          ([, columnConfig]) => {
+            return columnConfig.custom_name === key;
+          }
+        )?.[0] ?? key;
+
+      return {
+        ...acc,
+        [columnName]: value,
+      };
+    }, {});
+
+    return transformedRow;
+  });
 };

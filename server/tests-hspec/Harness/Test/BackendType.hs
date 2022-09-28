@@ -52,24 +52,31 @@ defaultBackendCapabilities = \case
     Just
       [yaml|
       relationships: {}
+      comparisons:
+        subquery:
+          supports_relations: true
       explain: {}
       metrics: {}
+      raw: {}
       queries:
-        supportsPrimaryKeys: true
+        supports_primary_keys: true
     |]
   DataConnectorReference ->
     Just
       [yaml|
-      graphqlSchema: |-
+      graphql_schema: |-
         scalar DateTime
 
         input DateTimeComparisons {in_year: Int
           same_day_as: DateTime
         }
       relationships: {}
-      scalarTypes:
+      comparisons:
+        subquery:
+          supports_relations: true
+      scalar_types:
         DateTime:
-          comparisonType: DateTimeComparisons
+          comparison_type: DateTimeComparisons
     |]
   _ -> Nothing
 

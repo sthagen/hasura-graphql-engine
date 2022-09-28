@@ -6,10 +6,7 @@ import {
   FieldWrapper,
   FieldWrapperPassThroughProps,
 } from '@/new-components/Form';
-import {
-  parseQueryString,
-  readFile,
-} from '@/components/Services/Settings/AllowedQueries/utils';
+import { parseQueryString, readFile } from './utils';
 
 export type GraphQLFileUploadProps = FieldWrapperPassThroughProps & {
   /**
@@ -46,7 +43,6 @@ export const GraphQLFileUpload: React.FC<GraphQLFileUploadProps> = ({
         const parsedData = parseQueryString(data);
         setValue(name, parsedData);
       } catch (error) {
-        console.log('parse error', error);
         setError(name, { type: 'custom', message: 'Invalid GraphQL query' });
       }
     });

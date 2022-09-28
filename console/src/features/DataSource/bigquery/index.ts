@@ -4,6 +4,7 @@ import {
   getTableColumns,
   getTablesListAsTree,
 } from './introspection';
+import { getTableRows } from './query';
 
 export type BigQueryTable = { name: string; dataset: string };
 
@@ -11,7 +12,7 @@ export const bigquery: Database = {
   introspection: {
     getDriverInfo: async () => ({
       name: 'bigquery',
-      displayName: 'Big Query',
+      displayName: 'BigQuery',
       release: 'GA',
     }),
     getDatabaseConfiguration: async () => {
@@ -24,5 +25,8 @@ export const bigquery: Database = {
     getTableColumns,
     getFKRelationships: async () => Feature.NotImplemented,
     getTablesListAsTree,
+  },
+  query: {
+    getTableRows,
   },
 };
