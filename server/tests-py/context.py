@@ -790,10 +790,9 @@ class HGECtxGQLServer:
 
 class HGECtx:
 
-    def __init__(self, hge_url, pg_url, config):
-
+    def __init__(self, hge_url, pg_url, hge_key, enabled_apis, config):
         self.http = requests.Session()
-        self.hge_key = config.getoption('--hge-key')
+        self.hge_key = hge_key
         self.timeout = 120  # BigQuery can take a while
         self.hge_url = hge_url
         self.pg_url = pg_url
@@ -811,10 +810,7 @@ class HGECtx:
             if self.hge_jwt_algo == "Ed25519":
                 self.hge_jwt_algo = "EdDSA"
         self.webhook_insecure = config.getoption('--test-webhook-insecure')
-        self.metadata_disabled = config.getoption('--test-metadata-disabled')
         self.may_skip_test_teardown = False
-        self.function_permissions = config.getoption('--test-function-permissions')
-        self.streaming_subscriptions = config.getoption('--test-streaming-subscriptions')
 
         # This will be GC'd, but we also explicitly dispose() in teardown()
         self.engine = sqlalchemy.create_engine(self.pg_url)
@@ -842,7 +838,7 @@ class HGECtx:
             # HGE version
             result = subprocess.run(['../../scripts/get-version.sh'], shell=False, stdout=subprocess.PIPE, check=True)
             self.version = result.stdout.decode('utf-8').strip()
-        if self.is_default_backend and not self.metadata_disabled and not config.getoption('--skip-schema-setup'):
+        if self.is_default_backend and (not enabled_apis or 'metadata' in enabled_apis) and not config.getoption('--skip-schema-setup'):
           try:
               self.v2q_f("queries/" + self.backend_suffix("clear_db")+ ".yaml")
           except requests.exceptions.RequestException as e:

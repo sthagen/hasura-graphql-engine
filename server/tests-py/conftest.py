@@ -7,7 +7,9 @@ import sys
 import threading
 import time
 from typing import Optional
+import uuid
 
+import auth_webhook_server
 from context import HGECtx, HGECtxGQLServer, ActionsWebhookServer, EvtsWebhookServer, GQLWsClient, PytestConf, GraphQLWSClient
 import fixtures.hge
 import graphql_server
@@ -32,9 +34,6 @@ def pytest_addoption(parser):
         help="csv list of urls for connecting to Postgres directly",
         required=False,
         nargs='+'
-    )
-    parser.addoption(
-        "--hge-key", metavar="HGE_KEY", help="admin secret key for graphql-engine", required=False
     )
     parser.addoption(
         "--hge-webhook", metavar="HGE_WEBHOOK", help="url for graphql-engine's access control webhook", required=False
@@ -62,25 +61,10 @@ def pytest_addoption(parser):
     )
 
     parser.addoption(
-        "--test-metadata-disabled", action="store_true",
-        help="Run Test cases with metadata queries being disabled"
-    )
-
-    parser.addoption(
-        "--test-graphql-disabled", action="store_true",
-        help="Run Test cases with GraphQL queries being disabled"
-    )
-
-    parser.addoption(
         "--test-hge-scale-url",
         metavar="<url>",
         required=False,
         help="Run testcases for horizontal scaling"
-    )
-
-    parser.addoption(
-        "--test-allowlist-queries", action="store_true",
-        help="Run Test cases with allowlist queries enabled"
     )
 
     parser.addoption(
@@ -97,21 +81,6 @@ def pytest_addoption(parser):
         default=False,
         required=False,
         help="Run testcases for startup database calls"
-    )
-
-    parser.addoption(
-        "--test-function-permissions",
-        action="store_true",
-        required=False,
-        help="Run manual function permission tests"
-    )
-
-    parser.addoption(
-        "--test-streaming-subscriptions",
-        action="store_true",
-        default=False,
-        required=False,
-        help="Run streaming subscription tests"
     )
 
     parser.addoption(
@@ -181,13 +150,6 @@ This option may result in test failures if the schema has to change between the 
     )
 
     parser.addoption(
-        "--enable-remote-schema-permissions",
-        action="store_true",
-        default=False,
-        help="Flag to indicate if the graphql-engine has enabled remote schema permissions",
-    )
-
-    parser.addoption(
         "--redis-url",
         metavar="REDIS_URL",
         help="redis url for cache server",
@@ -205,12 +167,6 @@ This option may result in test failures if the schema has to change between the 
         action="store_true",
         default=False,
         help="Flag to specify if the pro tests are to be run"
-    )
-
-    parser.addoption(
-        "--test-developer-api-enabled", action="store_true",
-        help="Run Test cases with the Developer API Enabled",
-        default=False
     )
 
     parser.addoption(
@@ -406,8 +362,23 @@ def hge_fixture_env() -> dict[str, str]:
     return {}
 
 @pytest.fixture(scope='class')
-def hge_key(request) -> Optional[str]:
-    return request.config.getoption('--hge-key')
+def hge_key(
+    request: pytest.FixtureRequest,
+    hge_bin: Optional[str],
+) -> Optional[str]:
+    marker = request.node.get_closest_marker('admin_secret')
+    if hge_bin:
+        # If the test requests an admin secret, generate one.
+        return str(uuid.uuid4()) if marker else None
+    else:
+        # If the environment variable is set, use it.
+        # This will be used in the event that we start the server outside the test harness.
+        # We skip the test if it explicitly requires that we have no admin secret.
+        anti_marker = request.node.get_closest_marker('no_admin_secret')
+        env_key = os.environ.get('HASURA_GRAPHQL_ADMIN_SECRET')
+        if anti_marker and env_key:
+            pytest.skip('This test requires that the admin secret is not set.')
+        return env_key
 
 @pytest.fixture(scope='class')
 def hge_server(
@@ -415,16 +386,28 @@ def hge_server(
     hge_bin: Optional[str],
     hge_port: int,
     hge_url: str,
+    hge_key: Optional[str],
     hge_fixture_env: dict[str, str],
     pg_url: str,
 ) -> Optional[str]:
     if not hge_bin:
       return None
-    return fixtures.hge.hge_server(request, hge_bin, hge_port, hge_url, hge_fixture_env, pg_url)
+    return fixtures.hge.hge_server(request, hge_bin, hge_port, hge_url, hge_key, hge_fixture_env, pg_url)
 
 @pytest.fixture(scope='class')
-def hge_ctx(request, hge_url, pg_url, hge_server):
-    hge_ctx = HGECtx(hge_url, pg_url, request.config)
+def enabled_apis(request: pytest.FixtureRequest, hge_bin: Optional[str]) -> Optional[set[str]]:
+    if hge_bin:
+        hge_marker_env: dict[str, str] = {marker.args[0]: marker.args[1] for marker in request.node.iter_markers('hge_env') if marker.args[1] is not None}
+        enabled_apis_str = hge_marker_env.get('HASURA_GRAPHQL_ENABLED_APIS')
+    else:
+        enabled_apis_str = os.environ.get('HASURA_GRAPHQL_ENABLED_APIS')
+    if not enabled_apis_str:
+        return None
+    return set(enabled_apis_str.split(','))
+
+@pytest.fixture(scope='class')
+def hge_ctx(request, hge_url, pg_url, hge_key, enabled_apis, hge_server):
+    hge_ctx = HGECtx(hge_url, pg_url, hge_key, enabled_apis, request.config)
 
     yield hge_ctx
 
@@ -460,28 +443,21 @@ def actions_fixture(pg_version: int, hge_url: str, hge_key: Optional[str], hge_f
     web_server.join()
 
 use_action_fixtures = pytest.mark.usefixtures(
-    "actions_fixture",
+    'actions_fixture',
     'per_class_db_schema_for_mutation_tests',
     'per_method_db_data_for_mutation_tests'
 )
 
 @pytest.fixture(scope='class')
-def functions_permissions_fixtures(hge_ctx):
-    if not hge_ctx.function_permissions:
-        pytest.skip('These tests are meant to be run with --test-function-permissions set')
-        return
-
-use_function_permission_fixtures = pytest.mark.usefixtures(
-    'per_class_db_schema_for_mutation_tests',
-    'per_method_db_data_for_mutation_tests',
-    'functions_permissions_fixtures'
-)
-
-@pytest.fixture(scope='class')
-def streaming_subscriptions_fixtures(hge_ctx):
-    if not hge_ctx.streaming_subscriptions:
-        pytest.skip('These tests are meant to be run with --test-streaming-subscriptions set with pytest')
-        return
+@pytest.mark.early
+def auth_hook(hge_fixture_env: dict[str, str]):
+    server = auth_webhook_server.create_server()
+    server_thread = threading.Thread(target = server.serve_forever)
+    server_thread.start()
+    hge_fixture_env['HASURA_GRAPHQL_AUTH_HOOK'] = 'http://localhost:9876/auth'
+    ports.wait_for_port(server.server_port)
+    yield server
+    auth_webhook_server.stop_server(server)
 
 @pytest.fixture(scope='class')
 def pro_tests_fixtures(hge_ctx):

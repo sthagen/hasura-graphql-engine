@@ -56,8 +56,6 @@ services:
       - output:/output
     working_dir: /src
     depends_on:
-      hge-build:
-        condition: service_completed_successfully
       citus:
         condition: service_healthy
       mssql-healthcheck:
@@ -81,6 +79,14 @@ services:
       retries: 10
     volumes:
       - /var/lib/postgresql/data
+
+  citus-healthy:
+    image: busybox
+    command:
+      - 'true'
+    depends_on:
+      citus:
+        condition: service_healthy
 
   mssql:
     # Uses a different image for arm64.
