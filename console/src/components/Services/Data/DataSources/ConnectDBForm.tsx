@@ -48,7 +48,7 @@ const dbTypePlaceholders: Record<Driver, string> = {
   postgres: 'postgresql://username:password@hostname:5432/database',
   citus: 'postgresql://username:password@hostname:5432/database',
   mssql:
-    'Driver={ODBC Driver 17 for SQL Server};Server=serveraddress;Database=dbname;Uid=username;Pwd=password;',
+    'Driver={ODBC Driver 18 for SQL Server};Server=serveraddress;Database=dbname;Uid=username;Pwd=password',
   mysql: 'MySQL connection string',
   bigquery: 'SERVICE_ACCOUNT_KEY_FROM_ENV',
   cockroach: 'postgresql://username:password@hostname:5432/database',
@@ -90,6 +90,7 @@ const ConnectDatabaseForm = (props: ConnectDatabaseFormProps) => {
     connectionTypeState,
     isReadReplica = false,
     title,
+    isEditState,
   } = props;
 
   const isDBSupported = (driver: Driver, connectionType: string) => {
@@ -385,6 +386,7 @@ const ConnectDatabaseForm = (props: ConnectDatabaseFormProps) => {
       <ConnectionSettingsForm
         connectionDBState={connectionDBState}
         connectionDBStateDispatch={connectionDBStateDispatch}
+        isEditState={isEditState}
       />
       {/*
         TODO: remove the edit state condition when the BE issue is solved

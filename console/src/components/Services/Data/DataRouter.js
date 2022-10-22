@@ -8,10 +8,8 @@ import {
   schemaConnector,
   viewTableConnector,
   rawSQLConnector,
-  editItemConnector,
   addExistingTableViewConnector,
   addTableConnector,
-  modifyTableConnector,
   modifyViewConnector,
   relationshipsConnector,
   relationshipsViewConnector,
@@ -35,6 +33,8 @@ import { getSourcesFromMetadata } from '../../../metadata/selector';
 import { ManageContainer } from '@/features/Data';
 import { Connect } from '@/features/ConnectDB';
 import { TableInsertItemContainer } from './TableInsertItem/TableInsertItemContainer';
+import { ModifyTableContainer } from './TableModify/ModifyTableContainer';
+import { TableEditItemContainer } from './TableEditItem/TableEditItemContainer';
 
 const makeDataRouter = (
   connect,
@@ -87,7 +87,7 @@ const makeDataRouter = (
           </Route>
           <Route
             path=":schema/tables/:table/edit"
-            component={editItemConnector(connect)}
+            component={TableEditItemContainer}
           />
           <Route
             path=":schema/tables/:table/insert"
@@ -96,7 +96,7 @@ const makeDataRouter = (
           <Route
             path=":schema/tables/:table/modify"
             onEnter={migrationRedirects}
-            component={modifyTableConnector(connect)}
+            component={ModifyTableContainer}
           />
           <Route
             path=":schema/tables/:table/relationships"

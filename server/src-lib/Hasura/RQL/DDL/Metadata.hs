@@ -55,12 +55,10 @@ import Hasura.RQL.DDL.Network
 import Hasura.RQL.DDL.Permission
 import Hasura.RQL.DDL.Relationship
 import Hasura.RQL.DDL.RemoteRelationship
-import Hasura.RQL.DDL.RemoteSchema
 import Hasura.RQL.DDL.ScheduledTrigger
 import Hasura.RQL.DDL.Schema
 import Hasura.RQL.DDL.Schema.Source
 import Hasura.RQL.DDL.Webhook.Transform
-import Hasura.RQL.DDL.Webhook.Transform.Class (mkReqTransformCtx)
 import Hasura.RQL.Types.Allowlist
 import Hasura.RQL.Types.ApiLimit
 import Hasura.RQL.Types.Backend
@@ -682,7 +680,7 @@ runTestWebhookTransform (TestWebhookTransform env headers urlE payload rt _ sv) 
     let req = initReq & HTTP.body .~ pure (J.encode payload) & HTTP.headers .~ headers'
         reqTransform = requestFields rt
         engine = templateEngine rt
-        reqTransformCtx = mkReqTransformCtx url sv engine
+        reqTransformCtx = fmap mkRequestContext $ mkReqTransformCtx url sv engine
     hoistEither $ first (RequestTransformationError req) $ applyRequestTransform reqTransformCtx reqTransform req
 
   case result of
