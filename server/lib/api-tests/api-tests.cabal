@@ -12,6 +12,7 @@ executable api-tests
     , bytestring
     , dc-api
     , fast-logger
+    , graphql-parser
     , hasura-prelude
     , hspec
     , http-conduit
@@ -162,3 +163,4 @@ executable api-tests
     Test.Schema.ViewsSpec
     Test.ServiceLivenessSpec
     Test.Subscriptions.CustomFieldsSpec
+    Test.Subscriptions.LiveQueriesSpec

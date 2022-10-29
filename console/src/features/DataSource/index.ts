@@ -3,13 +3,13 @@ import { OpenApiSchema } from '@hasura/dc-api-types';
 import { DataNode } from 'antd/lib/tree';
 import { AxiosInstance } from 'axios';
 import { z } from 'zod';
+import pickBy from 'lodash.pickby';
 import { bigquery } from './bigquery';
 import { citus } from './citus';
 import { cockroach } from './cockroach';
 import { gdc } from './gdc';
 import { mssql } from './mssql';
 import { postgres, PostgresTable } from './postgres';
-
 import type {
   DriverInfoResponse,
   GetFKRelationshipProps,
@@ -33,6 +33,7 @@ import {
   exportMetadata,
   getDriverPrefix,
   NetworkArgs,
+  runIntrospectionQuery,
   RunSQLResponse,
 } from './api';
 import { getAllSourceKinds } from './common/getAllSourceKinds';
@@ -144,7 +145,6 @@ export const DataSource = (httpClient: AxiosInstance) => ({
         const driverInfo = await getDriverMethods(
           driver.kind
         ).introspection?.getDriverInfo();
-        console.log(driver, driverInfo);
 
         if (driverInfo && driverInfo !== Feature.NotImplemented)
           return {
@@ -207,12 +207,14 @@ export const DataSource = (httpClient: AxiosInstance) => ({
                 prefix: z.string().optional(),
                 suffix: z.string().optional(),
               })
+              .transform(value => pickBy(value, d => d !== ''))
               .optional(),
             type_names: z
               .object({
                 prefix: z.string().optional(),
                 suffix: z.string().optional(),
               })
+              .transform(value => pickBy(value, d => d !== ''))
               .optional(),
           })
           .deepPartial()
@@ -410,4 +412,5 @@ export {
   getTableName,
   RunSQLResponse,
   getDriverPrefix,
+  runIntrospectionQuery,
 };
