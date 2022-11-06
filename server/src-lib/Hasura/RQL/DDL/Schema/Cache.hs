@@ -84,6 +84,7 @@ import Hasura.SQL.Backend
 import Hasura.SQL.BackendMap (BackendMap)
 import Hasura.SQL.BackendMap qualified as BackendMap
 import Hasura.SQL.Tag
+import Hasura.Server.Migrate.Version
 import Hasura.Server.Types
 import Hasura.Session
 import Hasura.Tracing qualified as Tracing
@@ -486,7 +487,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
         MonadError QErr m,
         MonadBaseControl IO m
       ) =>
-      (Proxy b, Bool, SourceConfig b) `arr` RecreateEventTriggers
+      (Proxy b, Bool, SourceConfig b) `arr` (RecreateEventTriggers, SourceCatalogMigrationState)
     initCatalogIfNeeded = Inc.cache proc (Proxy, atleastOneTrigger, sourceConfig) -> do
       arrM id
         -< do
@@ -498,29 +499,29 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
 
               if
                   -- when safe mode is enabled, don't perform any migrations
-                  | readOnlyMode == ReadOnlyModeEnabled -> pure RETDoNothing
+                  | readOnlyMode == ReadOnlyModeEnabled -> pure (RETDoNothing, SCMSMigrationOnHold "read-only mode enabled")
                   -- when eventing mode is disabled, don't perform any migrations
-                  | eventingMode == EventingDisabled -> pure RETDoNothing
+                  | eventingMode == EventingDisabled -> pure (RETDoNothing, SCMSMigrationOnHold "eventing mode disabled")
                   -- when maintenance mode is enabled, don't perform any migrations
-                  | maintenanceMode == (MaintenanceModeEnabled ()) -> pure RETDoNothing
+                  | maintenanceMode == (MaintenanceModeEnabled ()) -> pure (RETDoNothing, SCMSMigrationOnHold "maintenance mode enabled")
                   | otherwise -> do
-                    -- The `initCatalogForSource` action is retried here because
-                    -- in cloud there will be multiple workers (graphql-engine instances)
-                    -- trying to migrate the source catalog, when needed. This introduces
-                    -- a race condition as both the workers try to migrate the source catalog
-                    -- concurrently and when one of them succeeds the other ones will fail
-                    -- and be in an inconsistent state. To avoid the inconsistency, we retry
-                    -- migrating the catalog on error and in the retry `initCatalogForSource`
-                    -- will see that the catalog is already migrated, so it won't attempt the
-                    -- migration again
-                    liftEither
-                      =<< Retry.retrying
-                        ( Retry.constantDelay (fromIntegral $ diffTimeToMicroSeconds $ seconds $ Seconds 10)
-                            <> Retry.limitRetries 3
-                        )
-                        (const $ return . isLeft)
-                        (const $ runExceptT $ prepareCatalog @b sourceConfig)
-            else pure RETDoNothing
+                      -- The `initCatalogForSource` action is retried here because
+                      -- in cloud there will be multiple workers (graphql-engine instances)
+                      -- trying to migrate the source catalog, when needed. This introduces
+                      -- a race condition as both the workers try to migrate the source catalog
+                      -- concurrently and when one of them succeeds the other ones will fail
+                      -- and be in an inconsistent state. To avoid the inconsistency, we retry
+                      -- migrating the catalog on error and in the retry `initCatalogForSource`
+                      -- will see that the catalog is already migrated, so it won't attempt the
+                      -- migration again
+                      liftEither
+                        =<< Retry.retrying
+                          ( Retry.constantDelay (fromIntegral $ diffTimeToMicroSeconds $ seconds $ Seconds 10)
+                              <> Retry.limitRetries 3
+                          )
+                          (const $ return . isLeft)
+                          (const $ runExceptT $ prepareCatalog @b sourceConfig)
+            else pure (RETDoNothing, SCMSUninitializedSource)
 
     buildSource ::
       forall b arr m.
@@ -736,7 +737,9 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
                               numEventTriggers = sum $ map (length . snd) eventTriggers
                               sourceConfig = _rsConfig source
 
-                          recreateEventTriggers <- initCatalogIfNeeded -< (Proxy :: Proxy b, numEventTriggers > 0, sourceConfig)
+                          (recreateEventTriggers, sourceCatalogMigrationState) <- initCatalogIfNeeded -< (Proxy :: Proxy b, numEventTriggers > 0, sourceConfig)
+
+                          bindA -< unLogger logger (sourceName, sourceCatalogMigrationState)
 
                           let alignTableMap :: HashMap (TableName b) a -> HashMap (TableName b) c -> HashMap (TableName b) (a, c)
                               alignTableMap = M.intersectionWith (,)
@@ -758,7 +761,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
                   -<
                     (exists, (invalidationKeys, defaultNC, isNamingConventionEnabled))
             )
-        |) (M.fromList $ OMap.toList backendInfoAndSourceMetadata)
+          |) (M.fromList $ OMap.toList backendInfoAndSourceMetadata)
           >-> (\infos -> catMaybes infos >- returnA)
 
       -- then we can build the entire source output
@@ -923,7 +926,7 @@ buildSchemaCacheRule logger env = proc (metadata, invalidationKeys) -> do
       case ds of
         [G.ExecutableDefinitionOperation (G.OperationDefinitionTyped d)]
           | G._todType d == G.OperationTypeSubscription ->
-            throw405 $ "query with name " <> toTxt queryName <> " is a subscription"
+              throw405 $ "query with name " <> toTxt queryName <> " is a subscription"
           | otherwise -> pure ()
         [] -> throw400 BadRequest $ "query with name " <> toTxt queryName <> " has no definitions."
         _ -> throw400 BadRequest $ "query with name " <> toTxt queryName <> " has multiple definitions."

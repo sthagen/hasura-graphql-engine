@@ -36,35 +36,25 @@ module Harness.GraphqlEngine
     -- * Re-exports
     serverUrl,
     Server,
-
-    -- * Subscriptions
-    SubscriptionHandle,
-    withSubscriptions,
-    getNextResponse,
   )
 where
 
 -------------------------------------------------------------------------------
 
-import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.Async qualified as Async
 import Control.Concurrent.Extended (sleep)
-import Control.Concurrent.STM (atomically, newTVarIO, readTVar, writeTVar)
-import Control.Lens (preview)
 import Control.Monad.Trans.Managed (ManagedT (..), lowerManagedT)
 import Data.Aeson
 import Data.Aeson.Encode.Pretty as AP
-import Data.Aeson.Lens (key)
-import Data.Aeson.QQ.Simple
 import Data.Aeson.Types (Pair)
 import Data.Environment qualified as Env
 import Data.Text qualified as T
 import Data.Time (getCurrentTime)
 import Harness.Constants qualified as Constants
-import Harness.Exceptions (SomeException (SomeException), bracket, catch, displayException, withFrozenCallStack)
+import Harness.Exceptions (bracket, withFrozenCallStack)
 import Harness.Http qualified as Http
 import Harness.Quoter.Yaml (yaml)
-import Harness.TestEnvironment (Server (..), TestEnvironment (..), getServer, serverUrl, testLog, testLogBytestring)
+import Harness.TestEnvironment (BackendSettings (..), Server (..), TestEnvironment (..), getServer, serverUrl, testLog, testLogBytestring)
 import Hasura.App (Loggers (..), ServeCtx (..))
 import Hasura.App qualified as App
 import Hasura.Logging (Hasura)
@@ -75,10 +65,7 @@ import Hasura.Server.Metrics (ServerMetricsSpec, createServerMetrics)
 import Hasura.Server.Prometheus (makeDummyPrometheusMetrics)
 import Network.Socket qualified as Socket
 import Network.Wai.Handler.Warp qualified as Warp
-import Network.WebSockets qualified as WS
-import System.Log.FastLogger
 import System.Metrics qualified as EKG
-import System.Timeout (timeout)
 import Test.Hspec
 
 -------------------------------------------------------------------------------
@@ -265,8 +252,8 @@ args:
 -- available before returning.
 --
 -- The port availability is subject to races.
-startServerThread :: Maybe (String, Int) -> IO Server
-startServerThread murlPrefixport = do
+startServerThread :: BackendSettings -> Maybe (String, Int) -> IO Server
+startServerThread backendSettings murlPrefixport = do
   (urlPrefix, port, thread) <-
     case murlPrefixport of
       Just (urlPrefix, port) -> do
@@ -276,7 +263,7 @@ startServerThread murlPrefixport = do
         port <- bracket (Warp.openFreePort) (Socket.close . snd) (pure . fst)
         let urlPrefix = "http://127.0.0.1"
         thread <-
-          Async.async (runApp Constants.serveOptions {soPort = unsafePort port})
+          Async.async (runApp backendSettings Constants.serveOptions {soPort = unsafePort port})
         pure (urlPrefix, port, thread)
   let server = Server {port = fromIntegral port, urlPrefix, thread}
   Http.healthCheck (serverUrl server)
@@ -285,8 +272,8 @@ startServerThread murlPrefixport = do
 -------------------------------------------------------------------------------
 
 -- | Run the graphql-engine server.
-runApp :: ServeOptions Hasura.Logging.Hasura -> IO ()
-runApp serveOptions = do
+runApp :: BackendSettings -> ServeOptions Hasura.Logging.Hasura -> IO ()
+runApp backendSettings serveOptions = do
   let rci =
         PostgresConnInfo
           { _pciDatabaseConn =
@@ -296,7 +283,7 @@ runApp serveOptions = do
                       { _pgcpHost = T.pack Constants.postgresHost,
                         _pgcpUsername = T.pack Constants.postgresUser,
                         _pgcpPassword = Just (T.pack Constants.postgresPassword),
-                        _pgcpPort = fromIntegral Constants.postgresPort,
+                        _pgcpPort = fromIntegral (Constants.postgresPort backendSettings),
                         _pgcpDatabase = T.pack Constants.postgresDb
                       }
                 ),
@@ -335,170 +322,3 @@ runApp serveOptions = do
 -- | Used only for 'runApp' above.
 data TestMetricsSpec name metricType tags
   = ServerSubset (ServerMetricsSpec name metricType tags)
-
--- * Subscriptions
-
---
-
--- $ subscriptions
--- A subscription is a live query where the result is received each time the data
--- changes.
---
--- Creating a subscription query is done in two parts. First, we initiate a connection
--- with the server via websockets, then we send our query along with an id number.
---
--- The server will send back multiple messages, each with a @"type"@ field which indicate
--- their purpose. Some are "acknowledge connection" (@connection_ack@),
--- or "keep alive" (@ka@), others are actual data.
-
--- | A subscription's connection initiation message.
-initMessage :: Value
-initMessage =
-  [aesonQQ|
-  {
-    "type": "connection_init",
-    "payload": {
-      "headers": {
-        "content-type": "application/json"
-      },
-      "lazy": true
-    }
-  }
-  |]
-
--- | A subscription's start query message. @"id"@ is always 1.
-startQueryMessage :: Int -> Value -> Value
-startQueryMessage subId q =
-  object
-    [ "id" .= String (tshow subId),
-      "type" .= String "start",
-      "payload"
-        .= object
-          [ "variables" .= object [],
-            "extensions" .= object [],
-            "query" .= q
-          ]
-    ]
-
--- | A handle to an active subscription. Can be queried for the next message received.
-newtype SubscriptionHandle = SubscriptionHandle {unSubscriptionHandle :: MVar (Either String Value)}
-
--- | A Spec transformer that sets up the ability to run subscriptions against a HGE instance.
--- Example usage:
---
--- > spec :: SpecWith (TestEnvironment)
--- > spec = do
--- >   describe "subscriptions" $
--- >     withSubscriptions $ subscriptionsSpec
---
--- > subscriptionsSpec :: SpecWith (Value -> IO SubscriptionHandle, TestEnvironment)
--- > subscriptionsSpec = do
--- >   it "works" $ \(mkSubscription, _te) -> do
--- >     let schemaName :: Schema.SchemaName
--- >         schemaName = Schema.getSchemaName testEnvironment
--- >     query <- mkSubscription "[graphql| subscription { #{schemaName}_example { id, name }} |]"
--- >     let expected :: Value
--- >         expected =
--- >           [yaml|
--- >             data:
--- >               hasura_example: []
--- >           |]
--- >         actual :: IO Value
--- >         actual = getNextResponse query
--- >     actual `shouldBe` expected
-withSubscriptions :: SpecWith (Value -> IO SubscriptionHandle, TestEnvironment) -> SpecWith TestEnvironment
-withSubscriptions = aroundAllWith \actionWithSubAndTest testEnvironment -> do
-  WS.runClient "127.0.0.1" (fromIntegral $ port $ server testEnvironment) "/v1/graphql" \conn -> do
-    -- CAVE: loads of stuff still outstanding:
-    --  * trimming threads, NDAT-228
-    --  * multiplexing handles, NDAT-229
-    --  * timeouts on blocking operations, NDAT-230
-
-    -- send initialization message
-    WS.sendTextData conn (encode initMessage)
-
-    -- open communication channel with responses
-    messageMVar <- newEmptyMVar
-
-    -- counter for subscriptions
-    subNextId <- newTVarIO 1
-
-    let -- Is this an actual message or client/server busywork?
-        isInteresting :: Value -> Bool
-        isInteresting res =
-          preview (key "type") res
-            `notElem` [ Just "ka", -- keep alive
-                        Just "connection_ack" -- connection acknowledged
-                      ]
-
-        -- listens for server responses and populates @messageMVar@ with the new response.
-        -- It will only read one message at a time because it is blocked by reading/writing
-        -- to the MVar.
-        -- Will throw an exception to the other thread if it encounters an error.
-        responseListener :: IO ()
-        responseListener = do
-          res <- eitherDecode <$> WS.receiveData conn
-          case res of
-            Left err -> do
-              logger testEnvironment $ toLogStr $ "subscription decode failed: " ++ err
-              putMVar messageMVar (Left err)
-            Right msg -> do
-              when (isInteresting msg) do
-                logger testEnvironment (toLogStr $ "subscriptions message: " ++ show msg)
-                case preview (key "payload") msg of
-                  Nothing -> do
-                    logger testEnvironment (toLogStr ("Unable to parse message" :: Text))
-                    putMVar messageMVar (Left $ "Unable to parse message: " ++ show msg)
-                  Just payload -> putMVar messageMVar (Right payload)
-              responseListener
-
-        -- Create a subscription over this websocket connection.
-        -- Will be used by the user to create new subscriptions.
-        -- The handled can be used to request the next response.
-        mkSub :: Value -> IO SubscriptionHandle
-        mkSub query = do
-          -- each subscription has an id, this manages a new id for each subscription.
-          subId <- atomically do
-            currSubId <- readTVar subNextId
-            let !next = currSubId + 1
-            writeTVar subNextId next
-            pure currSubId
-          -- initialize a connection.
-          WS.sendTextData conn (encode $ startQueryMessage subId query)
-          pure $ SubscriptionHandle messageMVar
-
-        handleExceptionsAndTimeout action = do
-          let time = seconds subscriptionsTimeoutTime
-          catch
-            ( do
-                res <-
-                  timeout
-                    (fromIntegral $ diffTimeToMicroSeconds time)
-                    action
-                case res of
-                  Nothing ->
-                    error ("Subscription exceeded the allotted time of: " <> show time)
-                  Just () ->
-                    pure ()
-            )
-            ( \(SomeException err) ->
-                putMVar messageMVar (Left $ displayException err)
-            )
-
-    _ <- Async.async (handleExceptionsAndTimeout responseListener)
-
-    actionWithSubAndTest (mkSub, testEnvironment)
-
--- | Get the next response received on a subscription.
--- Blocks until data is available.
-getNextResponse :: HasCallStack => SubscriptionHandle -> IO Value
-getNextResponse handle = do
-  let time = seconds subscriptionsTimeoutTime
-  res <- timeout (fromIntegral $ diffTimeToMicroSeconds time) $ takeMVar (unSubscriptionHandle handle)
-  case res of
-    Nothing -> withFrozenCallStack $ error ("Waiting for a response exceeded the allotted time of: " <> show time)
-    Just (Left err) -> withFrozenCallStack $ error err
-    Just (Right val) -> pure val
-
-subscriptionsTimeoutTime :: Seconds
-subscriptionsTimeoutTime = 15

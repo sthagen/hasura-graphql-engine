@@ -264,7 +264,7 @@ lhsPostgresMkLocalTestEnvironment _ = pure Nothing
 lhsPostgresSetup :: Value -> (TestEnvironment, Maybe Server) -> IO ()
 lhsPostgresSetup rhsTableName (testEnvironment, _) = do
   let sourceName = "source"
-      sourceConfig = Postgres.defaultSourceConfiguration
+      sourceConfig = Postgres.defaultSourceConfiguration testEnvironment
       schemaName = Schema.getSchemaName testEnvironment
   -- Add remote source
   GraphqlEngine.postMetadata_
@@ -277,7 +277,7 @@ args:
 |]
   -- setup tables only
   Postgres.createTable testEnvironment track
-  Postgres.insertTable track
+  Postgres.insertTable testEnvironment track
   Schema.trackTable Fixture.Postgres sourceName track testEnvironment
   GraphqlEngine.postMetadata_
     testEnvironment
@@ -321,7 +321,7 @@ args:
     |]
 
 lhsPostgresTeardown :: (TestEnvironment, Maybe Server) -> IO ()
-lhsPostgresTeardown _ = Postgres.dropTable track
+lhsPostgresTeardown (testEnvironment, _) = Postgres.dropTable testEnvironment track
 
 --------------------------------------------------------------------------------
 -- LHS Cockroach
@@ -598,15 +598,15 @@ lhsRemoteServerMkLocalTestEnvironment _ = do
         flip foldMap orderByList \HasuraTrackOrderBy {..} ->
           if
               | Just idOrder <- tob_id -> case idOrder of
-                Asc -> compare trackId1 trackId2
-                Desc -> compare trackId2 trackId1
+                  Asc -> compare trackId1 trackId2
+                  Desc -> compare trackId2 trackId1
               | Just titleOrder <- tob_title -> case titleOrder of
-                Asc -> compare trackTitle1 trackTitle2
-                Desc -> compare trackTitle2 trackTitle1
+                  Asc -> compare trackTitle1 trackTitle2
+                  Desc -> compare trackTitle2 trackTitle1
               | Just albumIdOrder <- tob_album_id ->
-                compareWithNullLast albumIdOrder trackAlbumId1 trackAlbumId2
+                  compareWithNullLast albumIdOrder trackAlbumId1 trackAlbumId2
               | otherwise ->
-                error "empty track_order object"
+                  error "empty track_order object"
     compareWithNullLast Desc x1 x2 = compareWithNullLast Asc x2 x1
     compareWithNullLast Asc Nothing Nothing = EQ
     compareWithNullLast Asc (Just _) Nothing = LT
@@ -667,7 +667,7 @@ lhsRemoteServerTeardown (_, maybeServer) = traverse_ stopServer maybeServer
 rhsPostgresSetup :: (TestEnvironment, ()) -> IO ()
 rhsPostgresSetup (testEnvironment, _) = do
   let sourceName = "target"
-      sourceConfig = Postgres.defaultSourceConfiguration
+      sourceConfig = Postgres.defaultSourceConfiguration testEnvironment
       schemaName = Schema.getSchemaName testEnvironment
 
   -- Add remote source
@@ -681,7 +681,7 @@ args:
 |]
   -- setup tables only
   Postgres.createTable testEnvironment album
-  Postgres.insertTable album
+  Postgres.insertTable testEnvironment album
   Schema.trackTable Fixture.Postgres sourceName album testEnvironment
 
   GraphqlEngine.postMetadata_
@@ -720,7 +720,7 @@ args:
   |]
 
 rhsPostgresTeardown :: (TestEnvironment, ()) -> IO ()
-rhsPostgresTeardown _ = Postgres.dropTable album
+rhsPostgresTeardown (testEnvironment, _) = Postgres.dropTable testEnvironment album
 
 --------------------------------------------------------------------------------
 -- RHS Cockroach

@@ -72,11 +72,11 @@ dbTodbRemoteRelationshipFixture =
         [ clearMetadataSetupAction testEnvironment,
           Fixture.SetupAction
             { Fixture.setupAction = rhsPostgresSetup testEnvironment,
-              Fixture.teardownAction = \_ -> rhsPostgresTeardown
+              Fixture.teardownAction = \_ -> rhsPostgresTeardown testEnvironment
             },
           Fixture.SetupAction
             { Fixture.setupAction = lhsPostgresSetup (testEnvironment, Nothing),
-              Fixture.teardownAction = \_ -> lhsPostgresTeardown
+              Fixture.teardownAction = \_ -> lhsPostgresTeardown testEnvironment
             },
           Fixture.SetupAction
             { Fixture.setupAction = createSourceRemoteRelationship testEnvironment,
@@ -99,7 +99,7 @@ dbToRemoteSchemaRemoteRelationshipFixture =
             },
           Fixture.SetupAction
             { Fixture.setupAction = lhsPostgresSetup (testEnvironment, Nothing),
-              Fixture.teardownAction = \_ -> lhsPostgresTeardown
+              Fixture.teardownAction = \_ -> lhsPostgresTeardown testEnvironment
             },
           Fixture.SetupAction
             { Fixture.setupAction = createRemoteSchemaRemoteRelationship testEnvironment,
@@ -118,7 +118,7 @@ remoteSchemaToDBRemoteRelationshipFixture =
         [ clearMetadataSetupAction testEnvironment,
           Fixture.SetupAction
             { Fixture.setupAction = rhsPostgresSetup testEnvironment,
-              Fixture.teardownAction = \_ -> rhsPostgresTeardown
+              Fixture.teardownAction = \_ -> rhsPostgresTeardown testEnvironment
             },
           Fixture.SetupAction
             { Fixture.setupAction = lhsRemoteServerSetup (testEnvironment, lhsServer),
@@ -214,7 +214,7 @@ albumTable =
 rhsPostgresSetup :: TestEnvironment -> IO ()
 rhsPostgresSetup testEnvironment = do
   let sourceName = "target"
-      sourceConfig = Postgres.defaultSourceConfiguration
+      sourceConfig = Postgres.defaultSourceConfiguration testEnvironment
   GraphqlEngine.postMetadata_
     testEnvironment
     [yaml|
@@ -225,17 +225,17 @@ args:
 |]
   -- setup tables only
   Postgres.createTable testEnvironment albumTable
-  Postgres.insertTable albumTable
+  Postgres.insertTable testEnvironment albumTable
   Schema.trackTable Fixture.Postgres sourceName albumTable testEnvironment
 
-rhsPostgresTeardown :: IO ()
-rhsPostgresTeardown = Postgres.dropTable albumTable
+rhsPostgresTeardown :: TestEnvironment -> IO ()
+rhsPostgresTeardown testEnvironment = Postgres.dropTable testEnvironment albumTable
 
 -- | LHS Postgres Setup
 lhsPostgresSetup :: (TestEnvironment, Maybe Server) -> IO ()
 lhsPostgresSetup (testEnvironment, _) = do
   let sourceName = "source"
-      sourceConfig = Postgres.defaultSourceConfiguration
+      sourceConfig = Postgres.defaultSourceConfiguration testEnvironment
   -- Add remote source
   GraphqlEngine.postMetadata_
     testEnvironment
@@ -247,7 +247,7 @@ args:
 |]
   -- setup tables only
   Postgres.createTable testEnvironment track
-  Postgres.insertTable track
+  Postgres.insertTable testEnvironment track
   Schema.trackTable Fixture.Postgres sourceName track testEnvironment
 
 createSourceRemoteRelationship :: TestEnvironment -> IO ()
@@ -276,8 +276,8 @@ args:
           id: artist_id
   |]
 
-lhsPostgresTeardown :: IO ()
-lhsPostgresTeardown = Postgres.dropTable track
+lhsPostgresTeardown :: TestEnvironment -> IO ()
+lhsPostgresTeardown testEnvironment = Postgres.dropTable testEnvironment track
 
 --------------------------------------------------------------------------------
 -- DB to Remote Schema Remote relationship
@@ -559,15 +559,15 @@ lhsRemoteServerMkLocalTestEnvironment _ = do
         flip foldMap orderByList \LHSHasuraTrackOrderBy {..} ->
           if
               | Just idOrder <- tob_id -> case idOrder of
-                Asc -> compare trackId1 trackId2
-                Desc -> compare trackId2 trackId1
+                  Asc -> compare trackId1 trackId2
+                  Desc -> compare trackId2 trackId1
               | Just titleOrder <- tob_title -> case titleOrder of
-                Asc -> compare trackTitle1 trackTitle2
-                Desc -> compare trackTitle2 trackTitle1
+                  Asc -> compare trackTitle1 trackTitle2
+                  Desc -> compare trackTitle2 trackTitle1
               | Just albumIdOrder <- tob_album_id ->
-                compareWithNullLast albumIdOrder trackAlbumId1 trackAlbumId2
+                  compareWithNullLast albumIdOrder trackAlbumId1 trackAlbumId2
               | otherwise ->
-                error "empty track_order object"
+                  error "empty track_order object"
     compareWithNullLast Desc x1 x2 = compareWithNullLast Asc x2 x1
     compareWithNullLast Asc Nothing Nothing = EQ
     compareWithNullLast Asc (Just _) Nothing = LT

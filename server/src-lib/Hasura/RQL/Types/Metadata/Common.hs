@@ -124,7 +124,9 @@ parseListAsMap things mapFn listP = do
   unless (null duplicates) $
     fail $
       T.unpack $
-        "multiple declarations exist for the following " <> things <> ": "
+        "multiple declarations exist for the following "
+          <> things
+          <> ": "
           <> T.commaSeparated duplicates
   pure $ oMapFromL mapFn list
 
@@ -206,19 +208,19 @@ instance (Backend b) => HasCodec (TableMetadata b) where
     CommentCodec "Representation of a table in metadata, 'tables.yaml' and 'metadata.json'" $
       AC.object (codecNamePrefix @b <> "TableMetadata") $
         TableMetadata
-          <$> requiredFieldWith' "table" placeholderCodecViaJSON .== _tmTable
+          <$> requiredField' "table" .== _tmTable
           <*> optionalFieldWithOmittedDefault' "is_enum" False .== _tmIsEnum
-          <*> optionalFieldWithOmittedDefaultWith "configuration" placeholderCodecViaJSON emptyTableConfig configDoc .== _tmConfiguration
+          <*> optionalFieldWithOmittedDefault "configuration" emptyTableConfig configDoc .== _tmConfiguration
           <*> optSortedList "object_relationships" _rdName .== _tmObjectRelationships
           <*> optSortedList "array_relationships" _rdName .== _tmArrayRelationships
           <*> optSortedList "computed_fields" _cfmName .== _tmComputedFields
-          <*> optSortedListViaJSON "remote_relationships" _rrName .== _tmRemoteRelationships
+          <*> optSortedList "remote_relationships" _rrName .== _tmRemoteRelationships
           <*> optSortedList "insert_permissions" _pdRole .== _tmInsertPermissions
           <*> optSortedList "select_permissions" _pdRole .== _tmSelectPermissions
           <*> optSortedList "update_permissions" _pdRole .== _tmUpdatePermissions
           <*> optSortedList "delete_permissions" _pdRole .== _tmDeletePermissions
           <*> optSortedListViaJSON "event_triggers" etcName .== _tmEventTriggers
-          <*> optionalFieldOrNullWith' "apollo_federation_config" placeholderCodecViaJSON .== _tmApolloFederationConfig
+          <*> optionalFieldOrNull' "apollo_federation_config" .== _tmApolloFederationConfig
     where
       optSortedListViaJSON ::
         (Eq a, FromJSON a, ToJSON a, Hashable k, Ord k, T.ToTxt k) =>
@@ -358,12 +360,12 @@ instance (Backend b) => HasCodec (FunctionMetadata b) where
             "https://hasura.io/docs/latest/graphql/core/api-reference/schema-metadata-api/custom-functions.html#args-syntax"
           ]
       )
-      $ AC.object (codecNamePrefix @b <> "FunctionMetadata") $
-        FunctionMetadata
-          <$> requiredFieldWith "function" placeholderCodecViaJSON nameDoc .== _fmFunction
-          <*> optionalFieldWithOmittedDefaultWith "configuration" placeholderCodecViaJSON emptyFunctionConfig configDoc .== _fmConfiguration
-          <*> optionalFieldWithOmittedDefaultWith' "permissions" (listCodec placeholderCodecViaJSON) [] .== _fmPermissions
-          <*> optionalField' "comment" .== _fmComment
+      $ AC.object (codecNamePrefix @b <> "FunctionMetadata")
+      $ FunctionMetadata
+        <$> requiredFieldWith "function" placeholderCodecViaJSON nameDoc .== _fmFunction
+        <*> optionalFieldWithOmittedDefaultWith "configuration" placeholderCodecViaJSON emptyFunctionConfig configDoc .== _fmConfiguration
+        <*> optionalFieldWithOmittedDefaultWith' "permissions" (listCodec placeholderCodecViaJSON) [] .== _fmPermissions
+        <*> optionalField' "comment" .== _fmComment
     where
       nameDoc = "Name of the SQL function"
       configDoc = "Configuration for the SQL function"

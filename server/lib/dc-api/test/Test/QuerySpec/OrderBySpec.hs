@@ -1,7 +1,7 @@
 module Test.QuerySpec.OrderBySpec (spec) where
 
 import Control.Arrow ((>>>))
-import Control.Lens (ix, (&), (.~), (?~), (^.), (^?), _1, _2, _3, _Just)
+import Control.Lens (ix, (%~), (&), (.~), (?~), (^.), (^?), _1, _2, _3, _Just)
 import Control.Monad (when)
 import Data.Aeson (Value (..))
 import Data.HashMap.Strict (HashMap)
@@ -9,7 +9,7 @@ import Data.HashMap.Strict qualified as HashMap
 import Data.List (sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NonEmpty
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Ord (Down (..))
 import Hasura.Backends.DataConnector.API
 import Servant.API (NamedRoutes)
@@ -54,7 +54,12 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
   when (isJust _cRelationships) . describe "involving relationships" $ do
     it "can order results by a column in a related table" $ do
       let orderByRelations = HashMap.fromList [(_tdArtistRelationshipName, OrderByRelation Nothing mempty)]
-      let orderBy = OrderBy orderByRelations $ _tdOrderByColumn [_tdArtistRelationshipName] "Name" Ascending :| []
+      let orderBy =
+            OrderBy orderByRelations $
+              NonEmpty.fromList
+                [ _tdOrderByColumn [_tdArtistRelationshipName] "Name" Ascending,
+                  _tdOrderByColumn [] "AlbumId" Ascending
+                ]
       let query =
             albumsQueryRequest
               & qrQuery . qOrderBy ?~ orderBy
@@ -67,7 +72,7 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
       let expectedAlbums =
             _tdAlbumsRows
               & fmap (\album -> (album, getRelatedArtist album))
-              & sortOn ((^? _2 . _Just . Data.field "Name"))
+              & sortOn (\row -> (row ^? _2 . _Just . Data.field "Name", row ^? _1 . Data.field "AlbumId"))
               & fmap fst
 
       Data.responseRows receivedAlbums `rowsShouldBe` expectedAlbums
@@ -76,7 +81,12 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
     it "can order results by a column in a related table where the related table is filtered" $ do
       let artistTableFilter = ApplyBinaryComparisonOperator GreaterThan (_tdCurrentComparisonColumn "Name" _tdStringType) (ScalarValue (String "N") _tdStringType)
       let orderByRelations = HashMap.fromList [(_tdArtistRelationshipName, OrderByRelation (Just artistTableFilter) mempty)]
-      let orderBy = OrderBy orderByRelations $ _tdOrderByColumn [_tdArtistRelationshipName] "Name" Ascending :| []
+      let orderBy =
+            OrderBy orderByRelations $
+              NonEmpty.fromList
+                [ _tdOrderByColumn [_tdArtistRelationshipName] "Name" Ascending,
+                  _tdOrderByColumn [] "AlbumId" Ascending
+                ]
       let query =
             albumsQueryRequest
               & qrQuery . qOrderBy ?~ orderBy
@@ -92,7 +102,7 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
       let expectedAlbums =
             _tdAlbumsRows
               & fmap (\album -> (album, getRelatedArtist album))
-              & sortOn ((^? _2 . _Just . Data.field "Name") >>> toNullsLastOrdering)
+              & sortOn (\row -> (row ^? _2 . _Just . Data.field "Name" & toNullsLastOrdering, row ^? _1 . Data.field "AlbumId"))
               & fmap fst
 
       Data.responseRows receivedAlbums `rowsShouldBe` expectedAlbums
@@ -118,7 +128,8 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
             OrderBy orderByRelations $
               NonEmpty.fromList
                 [ _tdOrderByColumn [_tdAlbumRelationshipName, _tdArtistRelationshipName] "Name" Descending,
-                  _tdOrderByColumn [] "Name" Ascending
+                  _tdOrderByColumn [] "Name" Ascending,
+                  _tdOrderByColumn [] "TrackId" Ascending
                 ]
       let query =
             tracksQueryRequest
@@ -137,16 +148,78 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
 
       let expectedTracks =
             _tdTracksRows
-              & fmap (\track -> (Data.filterColumnsByQueryFields (_qrQuery tracksQueryRequest) track, getRelatedArtist track, track ^? Data.field "Name"))
-              & sortOn (\row -> (Down (row ^? _2 . _Just . Data.field "Name"), row ^. _3))
+              & fmap (\track -> (Data.filterColumnsByQueryFields (_qrQuery tracksQueryRequest) track, getRelatedArtist track, track))
+              & sortOn (\row -> (Down (row ^? _2 . _Just . Data.field "Name"), row ^? _3 . Data.field "Name", row ^? _3 . Data.field "TrackId"))
               & fmap (^. _1)
 
       Data.responseRows receivedTracks `rowsShouldBe` expectedTracks
       _qrAggregates receivedTracks `jsonShouldBe` Nothing
 
+    it "can order results separately within each array relationship" $ do
+      let tracksOrdering = OrderBy mempty $ _tdOrderByColumn [] "Name" Descending :| []
+      let tracksField =
+            RelField . RelationshipField _tdTracksRelationshipName $
+              tracksQuery
+                & qOrderBy ?~ tracksOrdering
+                & qLimit ?~ 5
+      let albumsOrdering = OrderBy mempty $ _tdOrderByColumn [] "Title" Descending :| []
+      let albumsField =
+            RelField . RelationshipField _tdAlbumsRelationshipName $
+              albumsQuery
+                & qFields . _Just %~ Data.insertField "Tracks" tracksField
+                & qOrderBy ?~ albumsOrdering
+                & qLimit ?~ 3
+      let artistsOrdering = OrderBy mempty $ _tdOrderByColumn [] "Name" Descending :| []
+      let query =
+            artistsQueryRequest
+              & qrQuery . qFields . _Just %~ Data.insertField "Albums" albumsField
+              & qrQuery . qOrderBy ?~ artistsOrdering
+              & qrQuery . qOffset ?~ 75
+              & qrQuery . qLimit ?~ 5
+              & qrTableRelationships
+                .~ [ Data.onlyKeepRelationships [_tdTracksRelationshipName] _tdAlbumsTableRelationships,
+                     Data.onlyKeepRelationships [_tdAlbumsRelationshipName] _tdArtistsTableRelationships
+                   ]
+      receivedArtists <- guardedQuery api sourceName config query
+
+      let joinInTracks (album :: HashMap FieldName FieldValue) = fromMaybe album $ do
+            albumId <- album ^? Data.field "AlbumId" . Data._ColumnFieldNumber
+            let albums =
+                  _tdTracksRows
+                    & filter ((^? Data.field "AlbumId" . Data._ColumnFieldNumber) >>> (== Just albumId))
+                    & sortOn ((^? Data.field "Name") >>> Down)
+                    & take 5
+                    & Data.filterColumns ["TrackId", "Name"]
+            pure $ Data.insertField "Tracks" (mkSubqueryResponse (Just albums) Nothing) album
+
+      let joinInAlbums (artist :: HashMap FieldName FieldValue) = fromMaybe artist $ do
+            artistId <- artist ^? Data.field "ArtistId" . Data._ColumnFieldNumber
+            let albums =
+                  _tdAlbumsRows
+                    & filter ((^? Data.field "ArtistId" . Data._ColumnFieldNumber) >>> (== Just artistId))
+                    & sortOn ((^? Data.field "Title") >>> Down)
+                    & take 3
+                    & fmap joinInTracks
+            pure $ Data.insertField "Albums" (mkSubqueryResponse (Just albums) Nothing) artist
+
+      let expectedArtists =
+            _tdArtistsRows
+              & sortOn ((^? Data.field "Name") >>> Down)
+              & drop 75
+              & take 5
+              & fmap joinInAlbums
+
+      Data.responseRows receivedArtists `rowsShouldBe` expectedArtists
+      _qrAggregates receivedArtists `jsonShouldBe` Nothing
+
     it "can order results by an aggregate of a related table" $ do
       let orderByRelations = HashMap.fromList [(_tdAlbumsRelationshipName, OrderByRelation Nothing mempty)]
-      let orderBy = OrderBy orderByRelations $ OrderByElement [_tdAlbumsRelationshipName] OrderByStarCountAggregate Descending :| []
+      let orderBy =
+            OrderBy orderByRelations $
+              NonEmpty.fromList
+                [ OrderByElement [_tdAlbumsRelationshipName] OrderByStarCountAggregate Descending,
+                  _tdOrderByColumn [] "Name" Ascending
+                ]
       let query =
             artistsQueryRequest
               & qrQuery . qOrderBy ?~ orderBy
@@ -161,7 +234,7 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
       let expectedArtists =
             _tdArtistsRows
               & fmap (\artist -> (artist, getAlbumsCount artist))
-              & sortOn (Down . (^. _2))
+              & sortOn (\row -> (Down (row ^. _2), row ^? _1 . Data.field "Name"))
               & fmap fst
 
       Data.responseRows receivedArtists `rowsShouldBe` expectedArtists
@@ -170,7 +243,12 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
     it "can order results by an aggregate of a related table where the related table is filtered" $ do
       let albumTableFilter = ApplyBinaryComparisonOperator GreaterThan (_tdCurrentComparisonColumn "Title" _tdStringType) (ScalarValue (String "N") _tdStringType)
       let orderByRelations = HashMap.fromList [(_tdAlbumsRelationshipName, OrderByRelation (Just albumTableFilter) mempty)]
-      let orderBy = OrderBy orderByRelations $ OrderByElement [_tdAlbumsRelationshipName] OrderByStarCountAggregate Descending :| []
+      let orderBy =
+            OrderBy orderByRelations $
+              NonEmpty.fromList
+                [ OrderByElement [_tdAlbumsRelationshipName] OrderByStarCountAggregate Descending,
+                  _tdOrderByColumn [] "Name" Ascending
+                ]
       let query =
             artistsQueryRequest
               & qrQuery . qOrderBy ?~ orderBy
@@ -185,7 +263,7 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
       let expectedArtists =
             _tdArtistsRows
               & fmap (\artist -> (artist, getAlbumsCount artist))
-              & sortOn (Down . (^. _2))
+              & sortOn (\row -> (Down (row ^. _2), row ^? _1 . Data.field "Name"))
               & fmap fst
 
       Data.responseRows receivedArtists `rowsShouldBe` expectedArtists
@@ -236,11 +314,14 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
       Data.responseRows receivedAlbums `rowsShouldBe` expectedArtists
       _qrAggregates receivedAlbums `jsonShouldBe` Nothing
   where
+    albumsQuery :: Query
+    albumsQuery =
+      let fields = Data.mkFieldsMap [("AlbumId", _tdColumnField "AlbumId" _tdIntType), ("ArtistId", _tdColumnField "ArtistId" _tdIntType), ("Title", _tdColumnField "Title" _tdStringType)]
+       in Data.emptyQuery & qFields ?~ fields
+
     albumsQueryRequest :: QueryRequest
     albumsQueryRequest =
-      let fields = Data.mkFieldsMap [("AlbumId", _tdColumnField "AlbumId" _tdIntType), ("ArtistId", _tdColumnField "ArtistId" _tdIntType), ("Title", _tdColumnField "Title" _tdStringType)]
-          query = Data.emptyQuery & qFields ?~ fields
-       in QueryRequest _tdAlbumsTableName [] query
+      QueryRequest _tdAlbumsTableName [] albumsQuery
 
     artistsQueryRequest :: QueryRequest
     artistsQueryRequest =
@@ -248,11 +329,14 @@ spec TestData {..} api sourceName config Capabilities {..} = describe "Order By 
           query = Data.emptyQuery & qFields ?~ fields
        in QueryRequest _tdArtistsTableName [] query
 
+    tracksQuery :: Query
+    tracksQuery =
+      let fields = Data.mkFieldsMap [("TrackId", _tdColumnField "TrackId" _tdIntType), ("Name", _tdColumnField "Name" _tdStringType)]
+       in Data.emptyQuery & qFields ?~ fields
+
     tracksQueryRequest :: QueryRequest
     tracksQueryRequest =
-      let fields = Data.mkFieldsMap [("TrackId", _tdColumnField "TrackId" _tdIntType), ("Name", _tdColumnField "Name" _tdStringType)]
-          query = Data.emptyQuery & qFields ?~ fields
-       in QueryRequest _tdTracksTableName [] query
+      QueryRequest _tdTracksTableName [] tracksQuery
 
 data NullableOrdered a
   = NullFirst
@@ -262,3 +346,7 @@ data NullableOrdered a
 
 toNullsLastOrdering :: Maybe a -> NullableOrdered a
 toNullsLastOrdering = maybe NullLast Some
+
+mkSubqueryResponse :: Maybe [HashMap FieldName FieldValue] -> Maybe (HashMap FieldName Value) -> FieldValue
+mkSubqueryResponse rows aggregates =
+  mkRelationshipFieldValue $ QueryResponse rows aggregates

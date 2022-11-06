@@ -124,7 +124,7 @@ data InternalLogTypes
     ILTMetadata
   | ILTJwkRefreshLog
   | ILTTelemetry
-  | ILTSchemaSyncThread
+  | ILTSchemaSync
   | ILTSourceCatalogMigration
   deriving (Show, Eq, Generic)
 
@@ -140,7 +140,7 @@ instance Witch.From InternalLogTypes Text where
     ILTMetadata -> "metadata"
     ILTJwkRefreshLog -> "jwk-refresh-log"
     ILTTelemetry -> "telemetry-log"
-    ILTSchemaSyncThread -> "schema-sync-thread"
+    ILTSchemaSync -> "schema-sync"
     ILTSourceCatalogMigration -> "source-catalog-migration"
 
 instance J.ToJSON InternalLogTypes where
@@ -298,7 +298,9 @@ mkLogger (LoggerCtx loggerSet serverLogLevel timeGetter enabledLogTypes) = Logge
   localTime <- liftIO timeGetter
   let (logLevel, logTy, logDet) = toEngineLog l
   when (logLevel >= serverLogLevel && isLogTypeEnabled enabledLogTypes logTy) $
-    liftIO $ FL.pushLogStrLn loggerSet $ FL.toLogStr (J.encode $ EngineLog localTime logLevel logTy logDet)
+    liftIO $
+      FL.pushLogStrLn loggerSet $
+        FL.toLogStr (J.encode $ EngineLog localTime logLevel logTy logDet)
 
 nullLogger :: Logger Hasura
 nullLogger = Logger \_ -> pure ()

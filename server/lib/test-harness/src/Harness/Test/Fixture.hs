@@ -4,7 +4,9 @@
 -- Central types and functions are 'Fixture', 'SetupAction', and 'run'.
 module Harness.Test.Fixture
   ( run,
+    runSingleSetup,
     runWithLocalTestEnvironment,
+    runWithLocalTestEnvironmentSingleSetup,
     Fixture (..),
     fixture,
     FixtureName (..),
@@ -14,7 +16,6 @@ module Harness.Test.Fixture
     schemaKeyword,
     noLocalTestEnvironment,
     SetupAction (..),
-    emptySetupAction,
     Options (..),
     combineOptions,
     defaultOptions,
@@ -25,14 +26,19 @@ where
 import Data.Text qualified as T
 import Data.UUID.V4 (nextRandom)
 import Harness.Exceptions
-import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Test.BackendType
 import Harness.Test.CustomOptions
-import Harness.Test.Hspec.Extended
 import Harness.TestEnvironment (TestEnvironment (..), testLog)
 import Hasura.Prelude
-import Test.Hspec (ActionWith, SpecWith, aroundAllWith, aroundWith, describe, pendingWith)
-import Test.Hspec.Core.Spec (mapSpecItem)
+import Test.Hspec
+  ( ActionWith,
+    SpecWith,
+    aroundAllWith,
+    aroundWith,
+    beforeWith,
+    describe,
+    pendingWith,
+  )
 
 -- | Runs the given tests, for each provided 'Fixture'@ ()@.
 --
@@ -47,27 +53,16 @@ import Test.Hspec.Core.Spec (mapSpecItem)
 --
 -- For a more general version that can run tests for any 'Fixture'@ a@, see
 -- 'runWithLocalTestEnvironment'.
+--
+-- This function runs setup and teardown for each Spec item individually.
 run :: NonEmpty (Fixture ()) -> (Options -> SpecWith TestEnvironment) -> SpecWith TestEnvironment
 run fixtures tests = do
-  let mappedTests opts =
-        mapSpecItem
-          actionWithTestEnvironmentMapping
-          (mapItemAction actionWithTestEnvironmentMapping)
-          (tests opts)
-  runWithLocalTestEnvironment fixtures mappedTests
+  runWithLocalTestEnvironment fixtures (\opts -> beforeWith (\(te, ()) -> return te) (tests opts))
 
--- | Observe that there is a direct correspondance (i.e. an isomorphism) from
--- @TestEnvironment@ to @(TestEnvironment, ())@ within 'ActionWith'.
---
--- NOTE: 'ActionWith'@ a@ is a type alias for @a -> IO ()@; thus, the fully
--- expanded type signature here is @(TestEnvironment -> IO ()) -> (TestEnvironment, ()) -> IO ()@.
---
--- NOTE: This can possibly be generalized to a @Control.Lens.Iso@.
---
--- NOTE: This should probably be extracted to some common helper module (e.g.
--- @Harness.TestEnvironment@).
-actionWithTestEnvironmentMapping :: ActionWith TestEnvironment -> ActionWith (TestEnvironment, ())
-actionWithTestEnvironmentMapping actionWith (testEnvironment, _) = actionWith testEnvironment
+{-# DEPRECATED runSingleSetup "runSingleSetup lets all specs in aFixture share a single database environment, which impedes parallelisation and out-of-order execution." #-}
+runSingleSetup :: NonEmpty (Fixture ()) -> (Options -> SpecWith TestEnvironment) -> SpecWith TestEnvironment
+runSingleSetup fixtures tests = do
+  runWithLocalTestEnvironmentSingleSetup fixtures (\opts -> beforeWith (\(te, ()) -> return te) (tests opts))
 
 -- | Runs the given tests, for each provided 'Fixture'@ a@.
 --
@@ -78,27 +73,45 @@ actionWithTestEnvironmentMapping actionWith (testEnvironment, _) = actionWith te
 -- 'Fixture's are parameterized by the type of local testEnvironment that needs
 -- to be carried throughout the tests.
 --
+-- This function runs setup and teardown for each Spec item individually.
+--
 -- See 'Fixture' for details.
 runWithLocalTestEnvironment ::
   forall a.
   NonEmpty (Fixture a) ->
   (Options -> SpecWith (TestEnvironment, a)) ->
   SpecWith TestEnvironment
-runWithLocalTestEnvironment fixtures tests =
-  for_ fixtures \context -> do
-    let n = name context
-        co = customOptions context
+runWithLocalTestEnvironment = runWithLocalTestEnvironmentInternal aroundWith
+
+{-# DEPRECATED runWithLocalTestEnvironmentSingleSetup "runWithLocalTestEnvironmentSingleSetup lets all specs in a Fixture share a single database environment, which impedes parallelisation and out-of-order execution." #-}
+runWithLocalTestEnvironmentSingleSetup ::
+  forall a.
+  NonEmpty (Fixture a) ->
+  (Options -> SpecWith (TestEnvironment, a)) ->
+  SpecWith TestEnvironment
+runWithLocalTestEnvironmentSingleSetup = runWithLocalTestEnvironmentInternal aroundAllWith
+
+runWithLocalTestEnvironmentInternal ::
+  forall a.
+  ((ActionWith (TestEnvironment, a) -> ActionWith (TestEnvironment)) -> SpecWith (TestEnvironment, a) -> SpecWith (TestEnvironment)) ->
+  NonEmpty (Fixture a) ->
+  (Options -> SpecWith (TestEnvironment, a)) ->
+  SpecWith TestEnvironment
+runWithLocalTestEnvironmentInternal aroundSomeWith fixtures tests =
+  for_ fixtures \fixture' -> do
+    let n = name fixture'
+        co = customOptions fixture'
         options = fromMaybe defaultOptions co
     case skipTests options of
       Just skipMsg ->
-        describe (show n) $ aroundWith (\_ _ -> pendingWith $ "Tests skipped: " <> T.unpack skipMsg) (tests options)
+        describe (show n) $ aroundSomeWith (\_ _ -> pendingWith $ "Tests skipped: " <> T.unpack skipMsg) (tests options)
       Nothing ->
-        describe (show n) $ aroundAllWith (fixtureBracket context) (tests options)
+        describe (show n) $ aroundSomeWith (fixtureBracket fixture') (tests options)
 
 -- We want to be able to report exceptions happening both during the tests
 -- and at teardown, which is why we use a custom re-implementation of
 -- @bracket@.
-fixtureBracket :: Fixture b -> ((TestEnvironment, b) -> IO a) -> TestEnvironment -> IO ()
+fixtureBracket :: Fixture b -> (ActionWith (TestEnvironment, b)) -> ActionWith TestEnvironment
 fixtureBracket Fixture {name, mkLocalTestEnvironment, setupTeardown} actionWith globalTestEnvironment =
   mask \restore -> do
     -- log DB of test
@@ -162,11 +175,11 @@ runSetupActions testEnv acts = go acts []
           Left (exn :: SomeException) -> do
             testLog testEnv $ "Setup failed for step " ++ show (length cleanupAcc) ++ "."
             rethrowAll
-              ( throwIO exn :
-                ( testLog testEnv ("Teardown failed for step " ++ show (length cleanupAcc) ++ ".")
-                    >> teardownAction Nothing
-                ) :
-                cleanupAcc
+              ( throwIO exn
+                  : ( testLog testEnv ("Teardown failed for step " ++ show (length cleanupAcc) ++ ".")
+                        >> teardownAction Nothing
+                    )
+                  : cleanupAcc
               )
             return (return ())
           Right x -> do
@@ -175,8 +188,8 @@ runSetupActions testEnv acts = go acts []
               rest
               ( ( testLog testEnv ("Teardown for step " ++ show (length cleanupAcc) ++ " succeeded.")
                     >> teardownAction (Just x)
-                ) :
-                cleanupAcc
+                )
+                  : cleanupAcc
               )
 
 --------------------------------------------------------------------------------
@@ -234,15 +247,6 @@ data SetupAction = forall a.
   { setupAction :: IO a,
     teardownAction :: Maybe a -> IO ()
   }
-
--- | Setup a test action without any initialization then reset the
--- metadata in the teardown. This is useful for running tests on the Metadata API.
-emptySetupAction :: TestEnvironment -> SetupAction
-emptySetupAction testEnvironment =
-  SetupAction
-    { setupAction = pure (),
-      teardownAction = const $ GraphqlEngine.clearMetadata testEnvironment
-    }
 
 -- | A name describing the given context.
 data FixtureName

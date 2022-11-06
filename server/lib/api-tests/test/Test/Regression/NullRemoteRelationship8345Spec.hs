@@ -184,7 +184,7 @@ lhsPostgresMkLocalTestEnvironment _ = pure Nothing
 lhsPostgresSetup :: Aeson.Value -> Aeson.Value -> (TestEnvironment, Maybe Server) -> IO ()
 lhsPostgresSetup albumJoin artistJoin (testEnvironment, _) = do
   let sourceName = "source"
-      sourceConfig = Postgres.defaultSourceConfiguration
+      sourceConfig = Postgres.defaultSourceConfiguration testEnvironment
       schemaName = Schema.getSchemaName testEnvironment
   -- Add remote source
   GraphqlEngine.postMetadata_
@@ -197,7 +197,7 @@ args:
 |]
   -- setup tables only
   Postgres.createTable testEnvironment lhsTrack
-  Postgres.insertTable lhsTrack
+  Postgres.insertTable testEnvironment lhsTrack
   Schema.trackTable Fixture.Postgres sourceName lhsTrack testEnvironment
   GraphqlEngine.postMetadata_
     testEnvironment
@@ -223,8 +223,8 @@ args:
   |]
 
 lhsPostgresTeardown :: (TestEnvironment, Maybe Server) -> IO ()
-lhsPostgresTeardown _ = do
-  Postgres.dropTable lhsTrack
+lhsPostgresTeardown (testEnvironment, _) = do
+  Postgres.dropTable testEnvironment lhsTrack
 
 --------------------------------------------------------------------------------
 -- RHS Postgres
@@ -235,7 +235,7 @@ rhsPostgresMkLocalTestEnvironment _ = pure Nothing
 rhsPostgresSetup :: (TestEnvironment, Maybe Server) -> IO ()
 rhsPostgresSetup (testEnvironment, _) = do
   let sourceName = "target"
-      sourceConfig = Postgres.defaultSourceConfiguration
+      sourceConfig = Postgres.defaultSourceConfiguration testEnvironment
   GraphqlEngine.postMetadata_
     testEnvironment
     [yaml|
@@ -246,15 +246,15 @@ args:
 |]
   Postgres.createTable testEnvironment rhsAlbum
   Postgres.createTable testEnvironment rhsArtist
-  Postgres.insertTable rhsAlbum
-  Postgres.insertTable rhsArtist
+  Postgres.insertTable testEnvironment rhsAlbum
+  Postgres.insertTable testEnvironment rhsArtist
   Schema.trackTable Fixture.Postgres sourceName rhsAlbum testEnvironment
   Schema.trackTable Fixture.Postgres sourceName rhsArtist testEnvironment
 
 rhsPostgresTeardown :: (TestEnvironment, Maybe Server) -> IO ()
-rhsPostgresTeardown _ = do
-  Postgres.dropTable rhsAlbum
-  Postgres.dropTable rhsArtist
+rhsPostgresTeardown (testEnvironment, _) = do
+  Postgres.dropTable testEnvironment rhsAlbum
+  Postgres.dropTable testEnvironment rhsArtist
 
 --------------------------------------------------------------------------------
 -- LHS Remote Server
@@ -401,17 +401,17 @@ lhsRemoteServerMkLocalTestEnvironment _ = do
         flip foldMap orderByList \LHSHasuraTrackOrderBy {..} ->
           if
               | Just idOrder <- tob_id -> case idOrder of
-                Asc -> compare trackId1 trackId2
-                Desc -> compare trackId2 trackId1
+                  Asc -> compare trackId1 trackId2
+                  Desc -> compare trackId2 trackId1
               | Just titleOrder <- tob_title -> case titleOrder of
-                Asc -> compare trackTitle1 trackTitle2
-                Desc -> compare trackTitle2 trackTitle1
+                  Asc -> compare trackTitle1 trackTitle2
+                  Desc -> compare trackTitle2 trackTitle1
               | Just albumIdOrder <- tob_album_id ->
-                compareWithNullLast albumIdOrder trackAlbumId1 trackAlbumId2
+                  compareWithNullLast albumIdOrder trackAlbumId1 trackAlbumId2
               | Just artistIdOrder <- tob_artist_id ->
-                compareWithNullLast artistIdOrder trackArtistId1 trackArtistId2
+                  compareWithNullLast artistIdOrder trackArtistId1 trackArtistId2
               | otherwise ->
-                error "empty track_order object"
+                  error "empty track_order object"
     compareWithNullLast Desc x1 x2 = compareWithNullLast Asc x2 x1
     compareWithNullLast Asc Nothing Nothing = EQ
     compareWithNullLast Asc (Just _) Nothing = LT
