@@ -2,10 +2,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | Regression tests for issue 8345.
-module Test.Regression.NullRemoteRelationship8345Spec
-  ( spec,
-  )
-where
+module Test.Regression.NullRemoteRelationship8345Spec (spec) where
 
 import Data.Aeson qualified as Aeson
 import Data.Char (isUpper, toLower)
@@ -23,6 +20,7 @@ import Harness.RemoteServer qualified as RemoteServer
 import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
+import Harness.Test.TestResource (Managed)
 import Harness.TestEnvironment (Server, TestEnvironment, stopServer)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
@@ -178,7 +176,7 @@ rhsArtist =
 --------------------------------------------------------------------------------
 -- LHS Postgres
 
-lhsPostgresMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+lhsPostgresMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 lhsPostgresMkLocalTestEnvironment _ = pure Nothing
 
 lhsPostgresSetup :: Aeson.Value -> Aeson.Value -> (TestEnvironment, Maybe Server) -> IO ()
@@ -223,13 +221,12 @@ args:
   |]
 
 lhsPostgresTeardown :: (TestEnvironment, Maybe Server) -> IO ()
-lhsPostgresTeardown (testEnvironment, _) = do
-  Postgres.dropTable testEnvironment lhsTrack
+lhsPostgresTeardown (_testEnvironment, _) = pure ()
 
 --------------------------------------------------------------------------------
 -- RHS Postgres
 
-rhsPostgresMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+rhsPostgresMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 rhsPostgresMkLocalTestEnvironment _ = pure Nothing
 
 rhsPostgresSetup :: (TestEnvironment, Maybe Server) -> IO ()
@@ -252,9 +249,8 @@ args:
   Schema.trackTable Fixture.Postgres sourceName rhsArtist testEnvironment
 
 rhsPostgresTeardown :: (TestEnvironment, Maybe Server) -> IO ()
-rhsPostgresTeardown (testEnvironment, _) = do
-  Postgres.dropTable testEnvironment rhsAlbum
-  Postgres.dropTable testEnvironment rhsArtist
+rhsPostgresTeardown (_testEnvironment, _) =
+  pure ()
 
 --------------------------------------------------------------------------------
 -- LHS Remote Server
@@ -357,12 +353,9 @@ input StringCompExp {
 
 |]
 
-lhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
-lhsRemoteServerMkLocalTestEnvironment _ = do
-  server <-
-    RemoteServer.run $
-      RemoteServer.generateQueryInterpreter (LHSQuery {q_hasura_track = hasura_track})
-  pure $ Just server
+lhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
+lhsRemoteServerMkLocalTestEnvironment _ =
+  Just <$> RemoteServer.run (RemoteServer.generateQueryInterpreter (LHSQuery {q_hasura_track = hasura_track}))
   where
     -- Implements the @hasura_track@ field of the @Query@ type.
     hasura_track (LHSHasuraTrackArgs {..}) = do
@@ -485,9 +478,9 @@ type Query {
 
 |]
 
-rhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+rhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 rhsRemoteServerMkLocalTestEnvironment _ =
-  fmap Just $ RemoteServer.run $ RemoteServer.generateQueryInterpreter (Query {album, artist})
+  Just <$> RemoteServer.run (RemoteServer.generateQueryInterpreter (Query {album, artist}))
   where
     albums = [(1, "album1")]
     artists = [(1, "artist1")]

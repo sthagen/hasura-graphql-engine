@@ -15,13 +15,16 @@ executable api-tests
     , graphql-parser
     , hasura-prelude
     , hspec
+    , hspec-core
     , http-conduit
     , http-types
     , lens
     , lens-aeson
+    , managed
     , morpheus-graphql
     , pg-client
     , postgresql-simple
+    , postgres-options
     , safe-exceptions
     , split
     , sop-core
@@ -37,6 +40,7 @@ executable api-tests
     DeriveGeneric
     DerivingStrategies
     ImportQualifiedPost
+    LambdaCase
     MultiWayIf
     NamedFieldPuns
     NoImplicitPrelude
@@ -163,8 +167,47 @@ executable api-tests
     Test.Schema.TableRelationships.ArrayRelationshipsSpec
     Test.Schema.TableRelationships.ObjectRelationshipsSpec
     Test.Schema.ViewsSpec
-    Test.ServiceLivenessSpec
     Test.Subscriptions.CustomFieldsSpec
     Test.Subscriptions.DerivedDataSpec
     Test.Subscriptions.LiveQueriesSpec
     Test.Subscriptions.StreamingSubscriptionsSpec
+
+executable render-feature-matrix
+  build-depends:
+    , aeson
+    , attoparsec
+    , base
+    , bytestring
+    , containers
+    , lucid2
+    , mtl
+    , text
+
+  default-extensions:
+    BlockArguments
+    DataKinds
+    DeriveGeneric
+    DerivingStrategies
+    ImportQualifiedPost
+    MultiWayIf
+    NamedFieldPuns
+    NoImplicitPrelude
+    OverloadedStrings
+    PatternGuards
+    RecordWildCards
+    ScopedTypeVariables
+    TypeApplications
+    TypeFamilies
+
+  hs-source-dirs: src-render-feature-matrix
+  default-language: Haskell2010
+
+  -- Turning off optimizations is intentional; tests aren't
+  -- performance sensitive and waiting for compilation is a problem.
+  ghc-options:
+    -Wall
+    -Werror
+    -threaded
+    -rtsopts "-with-rtsopts=-N"
+
+  main-is: Main.hs

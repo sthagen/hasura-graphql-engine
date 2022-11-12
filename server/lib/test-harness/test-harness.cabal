@@ -26,6 +26,7 @@ library
     , libyaml
     , lens
     , lens-aeson
+    , managed
     , morpheus-graphql
     , mtl
     , mysql-simple
@@ -35,6 +36,7 @@ library
     , parsec
     , pg-client
     , postgresql-simple
+    , pretty-simple
     , refined
     , resourcet
     , safe-exceptions
@@ -100,6 +102,8 @@ library
     Harness.Exceptions
     Harness.GraphqlEngine
     Harness.Http
+    Harness.Logging
+    Harness.Logging.Messages
     Harness.Quoter.Graphql
     Harness.Quoter.Yaml
     Harness.Quoter.Yaml.InterpolateYaml
@@ -112,6 +116,8 @@ library
     Harness.Test.Permissions
     Harness.Test.Schema
     Harness.Test.SchemaName
+    Harness.Test.SetupAction
+    Harness.Test.TestResource
     Harness.TestEnvironment
     Harness.Webhook
     Harness.Yaml

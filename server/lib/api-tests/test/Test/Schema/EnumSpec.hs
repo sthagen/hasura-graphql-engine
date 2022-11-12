@@ -31,8 +31,7 @@ spec =
                 [ Fixture.SetupAction
                     { Fixture.setupAction =
                         Postgres.run_ testEnvironment setup,
-                      Fixture.teardownAction = \_ ->
-                        Postgres.run_ testEnvironment teardown
+                      Fixture.teardownAction = \_ -> pure ()
                     },
                   Postgres.setupTablesAction schema testEnvironment
                 ]
@@ -41,9 +40,8 @@ spec =
             { Fixture.setupTeardown = \(testEnvironment, _) ->
                 [ Fixture.SetupAction
                     { Fixture.setupAction =
-                        Cockroach.run_ setup,
-                      Fixture.teardownAction = \_ ->
-                        Cockroach.run_ teardown
+                        Cockroach.run_ testEnvironment setup,
+                      Fixture.teardownAction = \_ -> pure ()
                     },
                   Cockroach.setupTablesAction schema testEnvironment
                 ]

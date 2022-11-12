@@ -8,7 +8,6 @@ module Harness.Constants
     postgresDb,
     postgresHost,
     postgresPort,
-    postgresqlConnectionString,
     postgresqlMetadataConnectionString,
     postgresLivenessCheckAttempts,
     postgresLivenessCheckIntervalSeconds,
@@ -32,21 +31,25 @@ module Harness.Constants
     citusConnectionString,
     citusDb,
     cockroachConnectionString,
+    defaultCockroachConnectionString,
     cockroachDb,
     serveOptions,
     dataConnectorDb,
     sqliteSchemaName,
     maxRetriesRateLimitExceeded,
+    uniqueDbName,
   )
 where
 
 -------------------------------------------------------------------------------
 
+import Data.Char qualified
 import Data.HashSet qualified as Set
+import Data.UUID (UUID)
 import Data.Word (Word16)
 import Database.MySQL.Simple qualified as Mysql
 import Database.PG.Query qualified as PG
-import Harness.TestEnvironment (BackendSettings (..), TestEnvironment (..))
+import Harness.TestEnvironment (TestEnvironment (..))
 import Hasura.Backends.Postgres.Connection.MonadTx (ExtensionsSchema (..))
 import Hasura.GraphQL.Execute.Subscription.Options qualified as ES
 import Hasura.GraphQL.Schema.Options qualified as Options
@@ -121,27 +124,24 @@ postgresDb = "hasura"
 postgresHost :: String
 postgresHost = "127.0.0.1"
 
--- | the port used for Postgres, unless it is overwritten by
--- the `HASURA_TEST_POSTGRES_PORT` env var
-defaultPostgresPort :: Word16
-defaultPostgresPort = 65002
+postgresPort :: Word16
+postgresPort = 65002
 
-postgresPort :: BackendSettings -> Word16
-postgresPort =
-  fromMaybe defaultPostgresPort . postgresSourcePort
+-- | return a unique database name from our TestEnvironment's uniqueTestId
+uniqueDbName :: UUID -> String
+uniqueDbName uuid = "test" <> showUUID uuid
 
-postgresqlConnectionString :: TestEnvironment -> String
-postgresqlConnectionString testEnv =
-  "postgres://"
-    ++ postgresUser
-    ++ ":"
-    ++ postgresPassword
-    ++ "@"
-    ++ postgresHost
-    ++ ":"
-    ++ show (postgresPort (backendSettings testEnv))
-    ++ "/"
-    ++ postgresDb
+-- | Sanitise UUID for use in BigQuery dataset name
+-- must be alphanumeric (plus underscores)
+showUUID :: UUID -> String
+showUUID =
+  map
+    ( \a ->
+        if Data.Char.isAlphaNum a
+          then a
+          else '_'
+    )
+    . show
 
 -- * Citus
 
@@ -187,8 +187,20 @@ cockroachHost = "127.0.0.1"
 cockroachPort :: Word16
 cockroachPort = 65008
 
-cockroachConnectionString :: String
-cockroachConnectionString =
+cockroachConnectionString :: TestEnvironment -> String
+cockroachConnectionString testEnvironment =
+  "postgresql://"
+    ++ cockroachUser
+    ++ "@"
+    ++ cockroachHost
+    ++ ":"
+    ++ show cockroachPort
+    ++ "/"
+    ++ uniqueDbName (uniqueTestId testEnvironment)
+    ++ "?sslmode=disable"
+
+defaultCockroachConnectionString :: String
+defaultCockroachConnectionString =
   "postgresql://"
     ++ cockroachUser
     ++ "@"

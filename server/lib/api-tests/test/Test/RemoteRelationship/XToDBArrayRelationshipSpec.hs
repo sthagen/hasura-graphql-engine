@@ -8,10 +8,7 @@
 -- All tests use the same GraphQL syntax, and the only difference is in the
 -- setup: we do a cartesian product of all kinds of sources we support on the
 -- left-hand side and all databases we support on the right-hand side.
-module Test.RemoteRelationship.XToDBArrayRelationshipSpec
-  ( spec,
-  )
-where
+module Test.RemoteRelationship.XToDBArrayRelationshipSpec (spec) where
 
 import Control.Lens (findOf, has, only, (^?!))
 import Data.Aeson (Value)
@@ -35,6 +32,7 @@ import Harness.Test.Fixture (Fixture (..))
 import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (Table (..))
 import Harness.Test.Schema qualified as Schema
+import Harness.Test.TestResource (Managed)
 import Harness.TestEnvironment (Server, TestEnvironment, stopServer)
 import Harness.Yaml (shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
@@ -261,7 +259,7 @@ album =
 --------------------------------------------------------------------------------
 -- LHS Postgres
 
-lhsPostgresMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+lhsPostgresMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 lhsPostgresMkLocalTestEnvironment _ = pure Nothing
 
 lhsPostgresSetup :: Value -> (TestEnvironment, Maybe Server) -> IO ()
@@ -326,12 +324,12 @@ args:
   |]
 
 lhsPostgresTeardown :: (TestEnvironment, Maybe Server) -> IO ()
-lhsPostgresTeardown (testEnvironment, _) = Postgres.dropTable testEnvironment artist
+lhsPostgresTeardown (_testEnvironment, _) = pure ()
 
 --------------------------------------------------------------------------------
 -- LHS Cockroach
 
-lhsCockroachMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+lhsCockroachMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 lhsCockroachMkLocalTestEnvironment _ = pure Nothing
 
 lhsCockroachSetup :: Value -> (TestEnvironment, Maybe Server) -> IO ()
@@ -339,7 +337,7 @@ lhsCockroachSetup rhsTableName (testEnvironment, _) = do
   let schemaName = Schema.getSchemaName testEnvironment
 
   let sourceName = "source"
-      sourceConfig = Cockroach.defaultSourceConfiguration
+      sourceConfig = Cockroach.defaultSourceConfiguration testEnvironment
   -- Add remote source
   GraphqlEngine.postMetadata_
     testEnvironment
@@ -351,7 +349,7 @@ lhsCockroachSetup rhsTableName (testEnvironment, _) = do
     |]
   -- setup tables only
   Cockroach.createTable testEnvironment artist
-  Cockroach.insertTable artist
+  Cockroach.insertTable testEnvironment artist
   Schema.trackTable Fixture.Cockroach sourceName artist testEnvironment
 
   GraphqlEngine.postMetadata_
@@ -396,12 +394,12 @@ lhsCockroachSetup rhsTableName (testEnvironment, _) = do
     |]
 
 lhsCockroachTeardown :: (TestEnvironment, Maybe Server) -> IO ()
-lhsCockroachTeardown _ = Cockroach.dropTable artist
+lhsCockroachTeardown _ = pure ()
 
 --------------------------------------------------------------------------------
 -- LHS SQLServer
 
-lhsSQLServerMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+lhsSQLServerMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 lhsSQLServerMkLocalTestEnvironment _ = pure Nothing
 
 lhsSQLServerSetup :: Value -> (TestEnvironment, Maybe Server) -> IO ()
@@ -560,12 +558,9 @@ input StringCompExp {
 
 |]
 
-lhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
-lhsRemoteServerMkLocalTestEnvironment _ = do
-  server <-
-    RemoteServer.run $
-      RemoteServer.generateQueryInterpreter (Query {hasura_artist})
-  pure $ Just server
+lhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
+lhsRemoteServerMkLocalTestEnvironment _ =
+  Just <$> RemoteServer.run (RemoteServer.generateQueryInterpreter (Query {hasura_artist}))
   where
     -- Implements the @hasura_artist@ field of the @Query@ type.
     hasura_artist (HasuraArtistArgs {..}) = do
@@ -714,7 +709,7 @@ args:
   |]
 
 rhsPostgresTeardown :: (TestEnvironment, ()) -> IO ()
-rhsPostgresTeardown (testEnvironment, _) = Postgres.dropTable testEnvironment album
+rhsPostgresTeardown (_testEnvironment, _) = pure ()
 
 --------------------------------------------------------------------------------
 -- RHS Cockroach
@@ -723,7 +718,7 @@ rhsCockroachSetup :: (TestEnvironment, ()) -> IO ()
 rhsCockroachSetup (testEnvironment, _) = do
   let schemaName = Schema.getSchemaName testEnvironment
   let sourceName = "target"
-      sourceConfig = Cockroach.defaultSourceConfiguration
+      sourceConfig = Cockroach.defaultSourceConfiguration testEnvironment
   -- Add remote source
   GraphqlEngine.postMetadata_
     testEnvironment
@@ -735,7 +730,7 @@ rhsCockroachSetup (testEnvironment, _) = do
     |]
   -- setup tables only
   Cockroach.createTable testEnvironment album
-  Cockroach.insertTable album
+  Cockroach.insertTable testEnvironment album
   Schema.trackTable Fixture.Cockroach sourceName album testEnvironment
 
   GraphqlEngine.postMetadata_
@@ -774,7 +769,7 @@ rhsCockroachSetup (testEnvironment, _) = do
     |]
 
 rhsCockroachTeardown :: (TestEnvironment, ()) -> IO ()
-rhsCockroachTeardown _ = Cockroach.dropTable album
+rhsCockroachTeardown _ = pure ()
 
 --------------------------------------------------------------------------------
 -- RHS SQLServer

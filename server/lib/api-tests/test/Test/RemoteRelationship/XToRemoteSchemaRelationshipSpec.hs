@@ -8,10 +8,7 @@
 -- All tests use the same GraphQL syntax, and the only difference is in the
 -- setup: for each left-hand side source we support we do a custom setup and run
 -- the tests.
-module Test.RemoteRelationship.XToRemoteSchemaRelationshipSpec
-  ( spec,
-  )
-where
+module Test.RemoteRelationship.XToRemoteSchemaRelationshipSpec (spec) where
 
 import Data.Char (isUpper, toLower)
 import Data.List.NonEmpty qualified as NE
@@ -30,6 +27,7 @@ import Harness.RemoteServer qualified as RemoteServer
 import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
+import Harness.Test.TestResource (Managed)
 import Harness.TestEnvironment (Server, TestEnvironment, stopServer)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
@@ -138,7 +136,7 @@ lhsPostgresSetupAction testEnv =
     (lhsPostgresSetup (testEnv, Nothing))
     (const $ lhsPostgresTeardown (testEnv, Nothing))
 
-lhsPostgresMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+lhsPostgresMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 lhsPostgresMkLocalTestEnvironment _ = pure Nothing
 
 lhsPostgresSetup :: (TestEnvironment, Maybe Server) -> IO ()
@@ -146,6 +144,7 @@ lhsPostgresSetup (testEnvironment, _) = do
   let sourceName = "source"
       sourceConfig = Postgres.defaultSourceConfiguration testEnvironment
       schemaName = Schema.getSchemaName testEnvironment
+
   -- Add remote source
   GraphqlEngine.postMetadata_
     testEnvironment
@@ -185,7 +184,6 @@ lhsPostgresTeardown :: (TestEnvironment, Maybe Server) -> IO ()
 lhsPostgresTeardown (testEnvironment, _) = do
   let sourceName = "source"
   Schema.untrackTable Fixture.Postgres sourceName track testEnvironment
-  Postgres.dropTable testEnvironment track
 
 --------------------------------------------------------------------------------
 -- LHS Cockroach
@@ -196,13 +194,13 @@ lhsCockroachSetupAction testEnv =
     (lhsCockroachSetup (testEnv, Nothing))
     (const $ lhsCockroachTeardown (testEnv, Nothing))
 
-lhsCockroachMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+lhsCockroachMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 lhsCockroachMkLocalTestEnvironment _ = pure Nothing
 
 lhsCockroachSetup :: (TestEnvironment, Maybe Server) -> IO ()
 lhsCockroachSetup (testEnvironment, _) = do
   let sourceName = "source"
-      sourceConfig = Cockroach.defaultSourceConfiguration
+      sourceConfig = Cockroach.defaultSourceConfiguration testEnvironment
       schemaName = Schema.getSchemaName testEnvironment
   -- Add remote source
   GraphqlEngine.postMetadata_
@@ -215,7 +213,7 @@ lhsCockroachSetup (testEnvironment, _) = do
     |]
   -- setup tables only
   Cockroach.createTable testEnvironment track
-  Cockroach.insertTable track
+  Cockroach.insertTable testEnvironment track
   Schema.trackTable Fixture.Cockroach sourceName track testEnvironment
   GraphqlEngine.postMetadata_
     testEnvironment
@@ -243,12 +241,12 @@ lhsCockroachTeardown :: (TestEnvironment, Maybe Server) -> IO ()
 lhsCockroachTeardown (testEnvironment, _) = do
   let sourceName = "source"
   Schema.untrackTable Fixture.Cockroach sourceName track testEnvironment
-  Cockroach.dropTable track
+  Cockroach.dropTable testEnvironment track
 
 --------------------------------------------------------------------------------
 -- LHS SQLServer
 
-lhsSQLServerMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
+lhsSQLServerMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
 lhsSQLServerMkLocalTestEnvironment _ = pure Nothing
 
 lhsSQLServerSetupAction :: TestEnvironment -> Fixture.SetupAction
@@ -402,12 +400,9 @@ input StringCompExp {
 
 |]
 
-lhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> IO (Maybe Server)
-lhsRemoteServerMkLocalTestEnvironment _ = do
-  server <-
-    RemoteServer.run $
-      RemoteServer.generateQueryInterpreter (LHSQuery {q_hasura_track = hasura_track})
-  pure $ Just server
+lhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> Managed (Maybe Server)
+lhsRemoteServerMkLocalTestEnvironment _ =
+  Just <$> RemoteServer.run (RemoteServer.generateQueryInterpreter (LHSQuery {q_hasura_track = hasura_track}))
   where
     -- Implements the @hasura_track@ field of the @Query@ type.
     hasura_track (LHSHasuraTrackArgs {..}) = do
@@ -532,10 +527,9 @@ type Query {
 
 |]
 
-rhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> IO Server
+rhsRemoteServerMkLocalTestEnvironment :: TestEnvironment -> Managed Server
 rhsRemoteServerMkLocalTestEnvironment _ =
-  RemoteServer.run $
-    RemoteServer.generateQueryInterpreter (Query {album})
+  RemoteServer.run $ RemoteServer.generateQueryInterpreter (Query {album})
   where
     albums =
       [ (1, ("album1_artist1", Just 1)),

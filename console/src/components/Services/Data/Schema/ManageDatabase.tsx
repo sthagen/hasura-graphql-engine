@@ -5,13 +5,15 @@ import { connect, ConnectedProps } from 'react-redux';
 import { FaExclamationTriangle, FaEye, FaTimes } from 'react-icons/fa';
 import { ManageAgents } from '@/features/ManageAgents';
 import { Button } from '@/new-components/Button';
+import { useMetadataSource } from '@/features/MetadataAPI';
 import {
   availableFeatureFlagIds,
   useIsFeatureFlagEnabled,
 } from '@/features/FeatureFlags';
 import { Analytics, REDACT_EVERYTHING } from '@/features/Analytics';
 import { nativeDrivers } from '@/features/DataSource';
-import { isProConsole } from '@/utils/proConsole';
+import { isCloudConsole } from '@/utils';
+import globals from '@/Globals';
 import styles from './styles.module.scss';
 import { Dispatch, ReduxState } from '../../../../types';
 import BreadCrumb from '../../../Common/Layout/BreadCrumb/BreadCrumb';
@@ -64,6 +66,8 @@ const DatabaseListItem: React.FC<DatabaseListItemProps> = ({
   const [removing, setRemoving] = useState(false);
   const [showUrl, setShowUrl] = useState(false);
   const [dbVersion, setDbVersion] = useState('');
+  const { data: sourceInfo } = useMetadataSource(dataSource?.name);
+
   const fetchDBVersion = () => {
     const query = services[dataSource.driver].getDatabaseVersionSql ?? '';
 
@@ -106,6 +110,15 @@ const DatabaseListItem: React.FC<DatabaseListItemProps> = ({
     inconsistentObjects
   );
 
+  const isTotalMaxConnectionSet =
+    !!sourceInfo?.configuration?.connection_info?.pool_settings
+      ?.total_max_connections;
+  const isMaxConnectionSet =
+    !!sourceInfo?.configuration?.connection_info?.pool_settings
+      ?.max_connections;
+  const showMaxConnectionWarning =
+    isCloudConsole(globals) && !isTotalMaxConnectionSet && isMaxConnectionSet;
+
   return (
     <tr data-test={dataSource.name}>
       <td className="px-sm py-xs align-top w-0 whitespace-nowrap">
@@ -131,14 +144,17 @@ const DatabaseListItem: React.FC<DatabaseListItemProps> = ({
         >
           Reload
         </Button>
-        {isProConsole(window.__env)
-          ? !dataSource?.connection_pool_settings?.total_max_connections && (
-              <span className="bg-blue-100 font-bold rounded-lg pr-xs">
-                <FaExclamationTriangle className="mr-0.5 pb-1 pl-1.5 text-lg" />
-                Set Total Max Connections
-              </span>
-            )
-          : null}
+        {showMaxConnectionWarning && (
+          <span
+            className="bg-blue-100 font-bold rounded-lg pr-xs cursor-pointer"
+            onClick={() => {
+              onEdit(dataSource.name);
+            }}
+          >
+            <FaExclamationTriangle className="mr-0.5 pb-1 pl-1.5 text-lg" />
+            Set Total Max Connections
+          </span>
+        )}
       </td>
       <td className="px-sm py-xs max-w-xs align-top">
         <CollapsibleToggle dataSource={dataSource} dbVersion={dbVersion} />

@@ -13,7 +13,7 @@ import Harness.Quoter.Yaml
 import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (TestEnvironment, stopServer)
+import Harness.TestEnvironment (TestEnvironment)
 import Harness.Webhook qualified as Webhook
 import Harness.Yaml (shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
@@ -31,11 +31,12 @@ spec =
         [ (Fixture.fixture $ Fixture.Backend Fixture.SQLServer)
             { -- setup the webhook server as the local test environment,
               -- so that the server can be referenced while testing
-              Fixture.mkLocalTestEnvironment = webhookServerMkLocalTestEnvironment,
-              Fixture.setupTeardown = \testEnv ->
-                [ Fixture.SetupAction
-                    { Fixture.setupAction = mssqlSetup testEnv,
-                      Fixture.teardownAction = \_ -> mssqlTeardown testEnv
+              Fixture.mkLocalTestEnvironment = const Webhook.run,
+              Fixture.setupTeardown = \(testEnvironment, (webhookServer, _)) ->
+                [ Sqlserver.setupTablesActionDiscardingTeardownErrors (schema "authors") testEnvironment,
+                  Fixture.SetupAction
+                    { Fixture.setupAction = mssqlSetup testEnvironment webhookServer,
+                      Fixture.teardownAction = \_ -> pure ()
                     }
                 ]
             }
@@ -121,7 +122,7 @@ cleanupEventTriggersWhenTableUntracked opts =
               type: mssql_untrack_table
               args:
                 source: mssql
-                table: 
+                table:
                   schema: hasura
                   name: authors
             |]
@@ -139,7 +140,7 @@ cleanupEventTriggersWhenTableUntracked opts =
               type: mssql_run_sql
               args:
                 source: mssql
-                sql: "SELECT 
+                sql: "SELECT
                         (CASE WHEN EXISTS
                           ( SELECT 1
                           FROM sys.triggers tr
@@ -171,9 +172,8 @@ cleanupEventTriggersWhenTableUntracked opts =
 
 -- ** Setup and teardown override
 
-mssqlSetup :: (TestEnvironment, (GraphqlEngine.Server, Webhook.EventsQueue)) -> IO ()
-mssqlSetup (testEnvironment, (webhookServer, _)) = do
-  Sqlserver.setup (schema "authors") (testEnvironment, ())
+mssqlSetup :: TestEnvironment -> GraphqlEngine.Server -> IO ()
+mssqlSetup testEnvironment webhookServer = do
   let webhookServerEchoEndpoint = GraphqlEngine.serverUrl webhookServer ++ "/echo"
   GraphqlEngine.postMetadata_ testEnvironment $
     [yaml|
@@ -190,13 +190,3 @@ mssqlSetup (testEnvironment, (webhookServer, _)) = do
           insert:
             columns: "*"
     |]
-
-mssqlTeardown :: (TestEnvironment, (GraphqlEngine.Server, Webhook.EventsQueue)) -> IO ()
-mssqlTeardown (_, (server, _)) = do
-  stopServer server
-  Sqlserver.dropTable (authorsTable "authors")
-
-webhookServerMkLocalTestEnvironment ::
-  TestEnvironment -> IO (GraphqlEngine.Server, Webhook.EventsQueue)
-webhookServerMkLocalTestEnvironment _ = do
-  Webhook.run
