@@ -21,8 +21,8 @@ import Data.Text.Extended
 import Data.Typeable (Typeable)
 import Hasura.Base.Error
 import Hasura.Base.ToErrorValue
-import Hasura.Incremental (Cacheable)
 import Hasura.Prelude
+import Hasura.RQL.Types.Common (SourceName)
 import Hasura.RQL.Types.HealthCheckImplementation (HealthCheckImplementation)
 import Hasura.RQL.Types.ResizePool (ServerReplicas)
 import Hasura.SQL.Backend
@@ -30,7 +30,7 @@ import Hasura.SQL.Tag
 import Hasura.SQL.Types
 import Language.GraphQL.Draft.Syntax qualified as G
 
-type Representable a = (Show a, Eq a, Hashable a, Cacheable a, NFData a)
+type Representable a = (Show a, Eq a, Hashable a, NFData a)
 
 type SessionVarType b = CollectableType (ScalarType b)
 
@@ -89,6 +89,7 @@ class
     Ord (TableName b),
     Ord (FunctionName b),
     Ord (ScalarType b),
+    Ord (Column b),
     Data (TableName b),
     FromJSON (BackendConfig b),
     FromJSON (BackendInfo b),
@@ -138,11 +139,9 @@ class
     ToErrorValue (ScalarType b),
     ToErrorValue (TableName b),
     ToErrorValue (ConstraintName b),
-    Cacheable (SourceConfig b),
-    Cacheable (BackendConfig b),
-    Cacheable (BackendInfo b),
     Typeable (TableName b),
     Typeable (ConstraintName b),
+    Typeable (Column b),
     Typeable b,
     HasTag b,
     -- constraints of function argument
@@ -160,6 +159,7 @@ class
     Show (CountType b),
     Eq (ScalarValue b),
     Show (ScalarValue b),
+    Eq (SourceConfig b),
     -- Extension constraints.
     Eq (XNodesAgg b),
     Show (XNodesAgg b),
@@ -258,6 +258,16 @@ class
   -- check test codec.
   healthCheckImplementation :: Maybe (HealthCheckImplementation (HealthCheckTest b))
   healthCheckImplementation = Nothing
+
+  -- | An Implementation for version checking when adding a source.
+  versionCheckImplementation :: SourceConnConfiguration b -> IO (Either QErr ())
+  versionCheckImplementation = const (pure $ Right ())
+
+  -- | A backend type can opt into providing an implementation for
+  -- fingerprinted pings to the source,
+  -- useful for attribution that the user is using Hasura
+  runPingSource :: (String -> IO ()) -> SourceName -> SourceConnConfiguration b -> IO ()
+  runPingSource _ _ _ = pure ()
 
   -- Backend-specific IR types
 

@@ -19,6 +19,7 @@ module Harness.GraphqlEngine
     postGraphqlYaml,
     postGraphqlYamlWithHeaders,
     postGraphql,
+    postGraphqlWithVariables,
     postGraphqlWithPair,
     postGraphqlWithHeaders,
     postWithHeadersStatus,
@@ -59,7 +60,6 @@ import Hasura.App (Loggers (..), ServeCtx (..))
 import Hasura.App qualified as App
 import Hasura.Logging (Hasura)
 import Hasura.Prelude
-import Hasura.RQL.Types.Common (PGConnectionParams (..), UrlConf (..))
 import Hasura.Server.Init (PostgresConnInfo (..), ServeOptions (..), unsafePort)
 import Hasura.Server.Metrics (ServerMetricsSpec, createServerMetrics)
 import Hasura.Server.Prometheus (makeDummyPrometheusMetrics)
@@ -149,6 +149,18 @@ postGraphqlYamlWithHeaders testEnvironment headers =
 postGraphql :: HasCallStack => TestEnvironment -> Value -> IO Value
 postGraphql testEnvironment value =
   withFrozenCallStack $ postGraphqlYaml testEnvironment (object ["query" .= value])
+
+-- | Same as 'postGraphql', but accepts variables to the GraphQL query as well.
+postGraphqlWithVariables :: HasCallStack => TestEnvironment -> Value -> Value -> IO Value
+postGraphqlWithVariables testEnvironment query variables =
+  withFrozenCallStack $
+    postGraphqlYaml
+      testEnvironment
+      ( object
+          [ "query" .= query,
+            "variables" .= variables
+          ]
+      )
 
 -- | Same as postGraphql but accepts a list of 'Pair' to pass
 -- additional parameters to the endpoint.
@@ -276,17 +288,7 @@ runApp :: ServeOptions Hasura.Logging.Hasura -> IO ()
 runApp serveOptions = do
   let rci =
         PostgresConnInfo
-          { _pciDatabaseConn =
-              Just
-                ( UrlFromParams
-                    PGConnectionParams
-                      { _pgcpHost = T.pack Constants.postgresHost,
-                        _pgcpUsername = T.pack Constants.postgresUser,
-                        _pgcpPassword = Just (T.pack Constants.postgresPassword),
-                        _pgcpPort = fromIntegral Constants.postgresPort,
-                        _pgcpDatabase = T.pack Constants.postgresDb
-                      }
-                ),
+          { _pciDatabaseConn = Nothing,
             _pciRetries = Nothing
           }
       metadataDbUrl = Just Constants.postgresqlMetadataConnectionString

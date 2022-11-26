@@ -104,11 +104,15 @@ instance (Backend b) => FromJSONWithContext (BackendSourceKind b) (AddSource b) 
 
 runAddSource ::
   forall m b.
-  (MonadError QErr m, CacheRWM m, MetadataM m, BackendMetadata b) =>
+  (MonadIO m, MonadError QErr m, CacheRWM m, MetadataM m, BackendMetadata b) =>
   AddSource b ->
   m EncJSON
 runAddSource (AddSource name backendKind sourceConfig replaceConfiguration sourceCustomization healthCheckConfig) = do
   sources <- scSources <$> askSchemaCache
+  do
+    -- version check
+    result <- liftIO $ versionCheckImplementation @b sourceConfig
+    liftEither result
 
   metadataModifier <-
     MetadataModifier
@@ -435,7 +439,7 @@ runGetTableInfo GetTableInfo {..} = do
         pure $ EncJSON.encJFromJValue table
       backend -> Error.throw500 ("Schema fetching is not supported for '" <> Text.E.toTxt backend <> "'")
 
-schemaGuard :: MonadError QErr m => Union '[API.SchemaResponse, API.ErrorResponse] -> m API.SchemaResponse
+schemaGuard :: MonadError QErr m => Union API.SchemaResponses -> m API.SchemaResponse
 schemaGuard = schemaCase defaultAction pure errorAction
   where
     defaultAction = throw400 DataConnectorError "Error resolving source schema"

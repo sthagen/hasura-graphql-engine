@@ -1,6 +1,14 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { getManualEventsTriggers } from '@/metadata/selector';
+import {
+  adaptFormValuesToQuery,
+  getFiltersAndSortFromUrlQueryParams,
+  runFilterQuery,
+  UserQuery,
+} from '@/features/BrowseRows';
+import useIsFirstRender from '@/hooks/useIsFirstRender';
+import { vSetDefaults } from './ViewActions';
 
 import { setTable } from '../DataActions';
 import ViewRows from './ViewRows';
@@ -10,8 +18,13 @@ import { dataSource, isFeatureSupported } from '../../../../dataSources';
 import { exists } from '../../../Common/utils/jsUtils';
 import TableHeader from '../TableCommon/TableHeader';
 import FeatureDisabled from '../FeatureDisabled';
-import { getPersistedPageSize } from './tableUtils';
-import { vMakeTableRequests, vSetDefaults } from './ViewActions';
+import {
+  getFiltersAndSortFromLocalStorage,
+  getUniqueTableKey,
+  saveUserQueryToLocalStorage,
+  useFiltersAndSortFormValues,
+} from './Hooks/useFiltersAndSortFormValues';
+import { setOffset } from './FilterActions';
 
 type TableBrowseRowsContainerProps = {
   params: {
@@ -30,25 +43,6 @@ export const TableBrowseRowsContainer = (
     schema: schemaName,
   } = props.params;
   const dispatch = useAppDispatch();
-
-  useEffect(() => {
-    const getInitialData = () => {
-      if (!isFeatureSupported('tables.browse.enabled')) {
-        dispatch(setTable(tableName));
-      }
-
-      const limit = getPersistedPageSize();
-      dispatch(setTable(tableName));
-      dispatch(vSetDefaults(limit));
-      dispatch(vMakeTableRequests());
-    };
-
-    getInitialData();
-
-    return () => {
-      dispatch(vSetDefaults());
-    };
-  }, [tableName]);
 
   const schemas = useAppSelector<Table[]>(store => store.tables.allSchemas);
   const {
@@ -83,6 +77,117 @@ export const TableBrowseRowsContainer = (
     };
   }, [tableName]);
 
+  const tableSchema = schemas.find(
+    x => x.table_name === tableName && x.table_schema === schemaName
+  );
+
+  const { filtersAndSort, onRunQuery, initialUserQuery } =
+    useFiltersAndSortFormValues({
+      sourceName,
+      tableSchema,
+    });
+
+  const isFirstRender = useIsFirstRender();
+  useEffect(() => {
+    if (!isFirstRender) {
+      return;
+    }
+
+    const getInitialData = () => {
+      if (!tableSchema) return;
+
+      dispatch(setTable(tableName));
+
+      dispatch(vSetDefaults(curFilter.limit));
+
+      const filterAndSortFromQueryParams =
+        getFiltersAndSortFromUrlQueryParams();
+
+      const initialUserQueryFromUrlParams = adaptFormValuesToQuery(
+        filterAndSortFromQueryParams,
+        (tableSchema?.columns || []).map(column => ({
+          name: column.column_name,
+          dataType: column.data_type,
+        }))
+      );
+
+      const areFiltersAndSortsEmpty =
+        filterAndSortFromQueryParams.filters.length === 0 &&
+        filterAndSortFromQueryParams.sorts.length === 0;
+
+      if (areFiltersAndSortsEmpty) {
+        const localUserQuery = getFiltersAndSortFromLocalStorage({
+          sourceName,
+          tableSchema,
+        });
+
+        dispatch(
+          runFilterQuery({
+            tableSchema,
+            whereAnd: localUserQuery.where.$and,
+            orderBy: localUserQuery.order_by,
+            limit: curFilter.limit,
+            offset: curFilter.offset,
+          })
+        );
+        return;
+      }
+
+      const uniqueTableKey = getUniqueTableKey({ sourceName, tableSchema });
+      if (uniqueTableKey) {
+        saveUserQueryToLocalStorage(
+          uniqueTableKey,
+          initialUserQueryFromUrlParams
+        );
+      }
+
+      dispatch(
+        runFilterQuery({
+          tableSchema,
+          whereAnd: initialUserQueryFromUrlParams.where.$and,
+          orderBy: initialUserQueryFromUrlParams.order_by,
+          limit: curFilter.limit,
+          offset: curFilter.offset,
+        })
+      );
+    };
+
+    getInitialData();
+  }, []);
+
+  useEffect(() => {
+    if (isFirstRender) {
+      return;
+    }
+    const getInitialData = () => {
+      if (!tableSchema) return;
+
+      dispatch(setTable(tableName));
+      dispatch(vSetDefaults(curFilter.limit));
+      dispatch(setOffset(0));
+
+      const localUserQuery = getFiltersAndSortFromLocalStorage({
+        sourceName,
+        tableSchema,
+      });
+
+      dispatch(
+        runFilterQuery({
+          tableSchema,
+          whereAnd: localUserQuery.where.$and,
+          orderBy: localUserQuery.order_by,
+          limit: curFilter.limit,
+          offset: 0,
+        })
+      );
+    };
+
+    getInitialData();
+  }, [tableName]);
+
+  const [paginationUserQuery, setPaginationUserQuery] =
+    useState(initialUserQuery);
+
   if (!isFeatureSupported('tables.browse.enabled')) {
     return (
       <FeatureDisabled
@@ -98,6 +203,9 @@ export const TableBrowseRowsContainer = (
   const tableCount = exists(count) ? count : estimatedCount;
   const shouldHidePagination = !exists(count) && !estimatedCount;
 
+  const onChangePageSize = (newLimit: number) =>
+    dispatch(vSetDefaults(newLimit));
+
   return (
     <RightContainer>
       <TableHeader
@@ -111,28 +219,35 @@ export const TableBrowseRowsContainer = (
         readOnlyMode={readOnlyMode}
       />
       <ViewRows
-        curTableName={tableName}
-        currentSchema={schemaName}
-        dispatch={dispatch}
-        readOnlyMode={readOnlyMode}
-        parentTableName={null}
-        curQuery={query}
-        curFilter={curFilter}
-        curRows={rows}
-        isView={isTableView}
         activePath={activePath}
+        count={tableCount}
+        curDepth={0}
+        curFilter={curFilter}
+        curQuery={query}
+        currentSchema={schemaName}
         currentSource={sourceName}
-        ongoingRequest={ongoingRequest}
+        curRows={rows}
+        curTableName={tableName}
+        dispatch={dispatch}
+        expandedRow={expandedRow}
+        isProgressing={isProgressing}
+        isView={isTableView}
         lastError={lastError}
         lastSuccess={lastSuccess}
-        schemas={schemas}
-        curDepth={0}
-        count={tableCount}
-        shouldHidePagination={shouldHidePagination}
-        expandedRow={expandedRow}
         manualTriggers={manualTriggers}
+        ongoingRequest={ongoingRequest}
+        parentTableName={null}
+        readOnlyMode={readOnlyMode}
+        schemas={schemas}
+        shouldHidePagination={shouldHidePagination}
         useCustomPagination={shouldUseCustomPagination}
-        isProgressing={isProgressing}
+        filtersAndSort={filtersAndSort}
+        onRunQuery={(newUserQuery: UserQuery) => {
+          onRunQuery(newUserQuery);
+          setPaginationUserQuery(newUserQuery);
+        }}
+        paginationUserQuery={paginationUserQuery}
+        onChangePageSize={onChangePageSize}
       />
     </RightContainer>
   );

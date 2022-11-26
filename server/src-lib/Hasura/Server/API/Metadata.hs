@@ -34,6 +34,7 @@ import Hasura.RQL.DDL.GraphqlSchemaIntrospection
 import Hasura.RQL.DDL.InheritedRoles
 import Hasura.RQL.DDL.Metadata
 import Hasura.RQL.DDL.Network
+import Hasura.RQL.DDL.OpenTelemetry
 import Hasura.RQL.DDL.Permission
 import Hasura.RQL.DDL.QueryCollection
 import Hasura.RQL.DDL.QueryTags
@@ -57,6 +58,7 @@ import Hasura.RQL.Types.GraphqlSchemaIntrospection
 import Hasura.RQL.Types.Metadata (GetCatalogState, SetCatalogState, emptyMetadataDefaults)
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Network
+import Hasura.RQL.Types.OpenTelemetry
 import Hasura.RQL.Types.Permission
 import Hasura.RQL.Types.QueryCollection
 import Hasura.RQL.Types.Roles
@@ -198,6 +200,9 @@ data RQLMetadataV1
   | RMDropHostFromTLSAllowlist !DropHostFromTLSAllowlist
   | -- QueryTags
     RMSetQueryTagsConfig !SetQueryTagsConfig
+  | -- OpenTelemetry
+    RMSetOpenTelemetryConfig !OpenTelemetryConfig
+  | RMSetOpenTelemetryStatus !OtelStatus
   | -- Debug
     RMDumpInternalState !DumpInternalState
   | RMGetCatalogState !GetCatalogState
@@ -280,6 +285,8 @@ instance FromJSON RQLMetadataV1 where
       "set_graphql_schema_introspection_options" -> RMSetGraphqlSchemaIntrospectionOptions <$> args
       "test_webhook_transform" -> RMTestWebhookTransform <$> args
       "set_query_tags" -> RMSetQueryTagsConfig <$> args
+      "set_opentelemetry_config" -> RMSetOpenTelemetryConfig <$> args
+      "set_opentelemetry_status" -> RMSetOpenTelemetryStatus <$> args
       "bulk" -> RMBulk <$> args
       -- Backend prefixed metadata actions:
       _ -> do
@@ -533,6 +540,8 @@ queryModifiesMetadata = \case
       RMAddHostToTLSAllowlist _ -> True
       RMDropHostFromTLSAllowlist _ -> True
       RMSetQueryTagsConfig _ -> True
+      RMSetOpenTelemetryConfig _ -> True
+      RMSetOpenTelemetryStatus _ -> True
   RMV2 q ->
     case q of
       RMV2ExportMetadata _ -> False
@@ -628,6 +637,7 @@ runMetadataQueryV1M env currentResourceVersion = \case
     dispatchMetadataAndEventTrigger
       ( validateTransforms
           (unUnvalidate1 . cetqRequestTransform . _Just)
+          (unUnvalidate1 . cetqResponseTrasnform . _Just)
           (runCreateEventTriggerQuery . _unUnvalidate1)
       )
       q
@@ -650,6 +660,7 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMCreateCronTrigger q ->
     validateTransforms
       (unUnvalidate . cctRequestTransform . _Just)
+      (unUnvalidate . cctResponseTransform . _Just)
       (runCreateCronTrigger . _unUnvalidate)
       q
   RMDeleteCronTrigger q -> runDeleteCronTrigger q
@@ -661,12 +672,14 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMCreateAction q ->
     validateTransforms
       (unUnvalidate . caDefinition . adRequestTransform . _Just)
+      (unUnvalidate . caDefinition . adResponseTransform . _Just)
       (runCreateAction . _unUnvalidate)
       q
   RMDropAction q -> runDropAction q
   RMUpdateAction q ->
     validateTransforms
       (unUnvalidate . uaDefinition . adRequestTransform . _Just)
+      (unUnvalidate . uaDefinition . adResponseTransform . _Just)
       (runUpdateAction . _unUnvalidate)
       q
   RMCreateActionPermission q -> runCreateActionPermission q
@@ -704,10 +717,13 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMSetCatalogState q -> runSetCatalogState q
   RMTestWebhookTransform q ->
     validateTransforms
-      (unUnvalidate . twtTransformer)
+      (unUnvalidate . twtRequestTransformer)
+      (unUnvalidate . twtResponseTransformer . _Just)
       (runTestWebhookTransform . _unUnvalidate)
       q
   RMSetQueryTagsConfig q -> runSetQueryTagsConfig q
+  RMSetOpenTelemetryConfig q -> runSetOpenTelemetryConfig q
+  RMSetOpenTelemetryStatus q -> runSetOpenTelemetryStatus q
   RMBulk q -> encJFromList <$> indexedMapM (runMetadataQueryM env currentResourceVersion) q
   where
     dispatchMetadata ::

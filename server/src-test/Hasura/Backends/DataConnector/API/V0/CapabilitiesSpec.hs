@@ -24,7 +24,7 @@ spec = do
     jsonOpenApiProperties genCapabilities
   describe "CapabilitiesResponse" $ do
     testToFromJSON
-      (CapabilitiesResponse (defaultCapabilities {_cRelationships = Just RelationshipCapabilities {}}) emptyConfigSchemaResponse)
+      (CapabilitiesResponse (defaultCapabilities {_cRelationships = Just RelationshipCapabilities {}}) emptyConfigSchemaResponse Nothing Nothing)
       [aesonQQ|{"capabilities": {"relationships": {}}, "config_schemas": {"config_schema": {}, "other_schemas": {}}}|]
   describe "ScalarTypesCapabilities" $ do
     testToFromJSONToSchema (ScalarTypesCapabilities (HashMap.singleton StringTy (ScalarTypeCapabilities mempty mempty))) [aesonQQ|{"string": {}}|]
@@ -63,21 +63,21 @@ genMutationCapabilities = pure MutationCapabilities {}
 genSubscriptionCapabilities :: MonadGen m => m SubscriptionCapabilities
 genSubscriptionCapabilities = pure SubscriptionCapabilities {}
 
-genComparisonOperators :: MonadGen m => m ComparisonOperators
+genComparisonOperators :: (MonadGen m, GenBase m ~ Identity) => m ComparisonOperators
 genComparisonOperators =
   ComparisonOperators <$> genHashMap (genGName defaultRange) genScalarType defaultRange
 
-genAggregateFunctions :: MonadGen m => m AggregateFunctions
+genAggregateFunctions :: (MonadGen m, GenBase m ~ Identity) => m AggregateFunctions
 genAggregateFunctions =
   AggregateFunctions <$> genHashMap (genGName defaultRange) genScalarType defaultRange
 
-genScalarTypeCapabilities :: MonadGen m => m ScalarTypeCapabilities
+genScalarTypeCapabilities :: (MonadGen m, GenBase m ~ Identity) => m ScalarTypeCapabilities
 genScalarTypeCapabilities =
   ScalarTypeCapabilities
     <$> genComparisonOperators
     <*> genAggregateFunctions
 
-genScalarTypesCapabilities :: MonadGen m => m ScalarTypesCapabilities
+genScalarTypesCapabilities :: (MonadGen m, GenBase m ~ Identity) => m ScalarTypesCapabilities
 genScalarTypesCapabilities =
   ScalarTypesCapabilities <$> genHashMap genScalarType genScalarTypeCapabilities defaultRange
 

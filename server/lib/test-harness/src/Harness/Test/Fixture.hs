@@ -17,6 +17,7 @@ module Harness.Test.Fixture
     pattern DataConnectorReference,
     pattern DataConnectorSqlite,
     defaultSource,
+    defaultBackendDisplayNameString,
     defaultBackendTypeString,
     schemaKeyword,
     noLocalTestEnvironment,
@@ -25,21 +26,29 @@ module Harness.Test.Fixture
     combineOptions,
     defaultOptions,
     fixtureRepl,
+    combineFixtures,
+    LHSFixture,
+    RHSFixture,
   )
 where
 
 import Control.Monad.Managed (Managed, runManaged, with)
+import Data.Aeson (Value)
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.UUID.V4 (nextRandom)
+import Harness.Backend.Citus qualified as Citus
 import Harness.Backend.Cockroach qualified as Cockroach
 import Harness.Backend.Postgres qualified as Postgres
+import Harness.Backend.Sqlserver qualified as Sqlserver
 import Harness.Exceptions
+import Harness.Logging
 import Harness.Test.BackendType
 import Harness.Test.CustomOptions
 import Harness.Test.SetupAction (SetupAction (..))
-import Harness.TestEnvironment (TestEnvironment (..), TestingMode (..), testLogHarness)
-import Hasura.Prelude
+import Harness.Test.SetupAction qualified as SetupAction
+import Harness.TestEnvironment (Server, TestEnvironment (..), TestingMode (..), testLogHarness)
+import Hasura.Prelude hiding (log)
 import Test.Hspec
   ( ActionWith,
     SpecWith,
@@ -64,10 +73,13 @@ import Test.Hspec
 -- For a more general version that can run tests for any 'Fixture'@ a@, see
 -- 'runWithLocalTestEnvironment'.
 --
--- This function runs setup and teardown for each Spec item individually.
+-- The commented out version of this function runs setup and teardown for each Spec item individually.
+-- however it makes CI punishingly slow, so we defer to the "worse" version for
+-- now. When we come to run specs in parallel this will be helpful.
 run :: NonEmpty (Fixture ()) -> (Options -> SpecWith TestEnvironment) -> SpecWith TestEnvironment
-run fixtures tests = do
-  runWithLocalTestEnvironment fixtures (\opts -> beforeWith (\(te, ()) -> return te) (tests opts))
+run = runSingleSetup
+
+-- runWithLocalTestEnvironment fixtures (\opts -> beforeWith (\(te, ()) -> return te) (tests opts))
 
 {-# DEPRECATED runSingleSetup "runSingleSetup lets all specs in aFixture share a single database environment, which impedes parallelisation and out-of-order execution." #-}
 runSingleSetup :: NonEmpty (Fixture ()) -> (Options -> SpecWith TestEnvironment) -> SpecWith TestEnvironment
@@ -117,7 +129,16 @@ runWithLocalTestEnvironmentInternal aroundSomeWith fixtures tests =
         shouldRunIn fixtureName = \case
           TestNewPostgresVariant {} ->
             Postgres `elem` backendTypesForFixture fixtureName
-          TestAllBackends -> True
+          TestBackend (DataConnector _) ->
+            -- we run all these together so it's harder to miss tests
+            let isDataConnector = \case
+                  DataConnector _dc -> True
+                  _ -> False
+             in any isDataConnector (backendTypesForFixture fixtureName)
+          TestBackend backendType ->
+            backendType `elem` backendTypesForFixture fixtureName
+          TestNoBackends -> S.null (backendTypesForFixture fixtureName)
+          TestEverything -> True
 
     describe (show n) do
       flip aroundSomeWith (tests options) \test testEnvironment ->
@@ -144,23 +165,10 @@ fixtureBracket
       liftIO $ testLogHarness globalTestEnvironment $ "Testing " <> show name <> "..."
       localTestEnvironment <- mkLocalTestEnvironment globalTestEnvironment
       liftIO $ do
-        -- create a unique id to differentiate this set of tests
-        uniqueTestId <- nextRandom
-
-        let globalTestEnvWithUnique =
-              globalTestEnvironment
-                { backendType = case name of
-                    Backend db -> Just db
-                    _ -> Nothing,
-                  uniqueTestId = uniqueTestId
-                }
-
-        -- create databases we need for the tests
-        createDatabases name globalTestEnvWithUnique
-
+        globalTestEnvWithUnique <- setupUniqueGlobalTestEnvironment name globalTestEnvironment
         let testEnvironment = (globalTestEnvWithUnique, localTestEnvironment)
 
-        cleanup <- runSetupActions globalTestEnvironment (setupTeardown testEnvironment)
+        cleanup <- runSetupActions (logger globalTestEnvWithUnique) (setupTeardown testEnvironment)
 
         _ <-
           catchRethrow
@@ -183,6 +191,10 @@ createDatabases fixtureName testEnvironment =
           Postgres.createDatabase testEnvironment
         Cockroach ->
           Cockroach.createDatabase testEnvironment
+        Citus ->
+          Citus.createDatabase testEnvironment
+        SQLServer ->
+          Sqlserver.createDatabase testEnvironment
         _ -> pure ()
     )
     (backendTypesForFixture fixtureName)
@@ -195,9 +207,30 @@ dropDatabases fixtureName testEnvironment =
           Postgres.dropDatabase testEnvironment
         Cockroach ->
           Cockroach.dropDatabase testEnvironment
+        Citus ->
+          Citus.dropDatabase testEnvironment
+        SQLServer ->
+          Sqlserver.dropDatabase testEnvironment
         _ -> pure ()
     )
     (backendTypesForFixture fixtureName)
+
+-- | Tests all run with unique schema names now, so we need to produce a test
+-- environment that points to a unique schema name.
+setupUniqueGlobalTestEnvironment :: FixtureName -> TestEnvironment -> IO TestEnvironment
+setupUniqueGlobalTestEnvironment name globalTestEnvironment = do
+  uniqueTestId <- nextRandom
+
+  let globalTestEnvWithUnique =
+        globalTestEnvironment
+          { backendType = case name of
+              Backend db -> Just db
+              _ -> Nothing,
+            uniqueTestId = uniqueTestId
+          }
+
+  createDatabases name globalTestEnvWithUnique
+  pure globalTestEnvWithUnique
 
 -- | A function that makes it easy to perform setup and teardown when
 -- debugging/developing tests within a repl.
@@ -205,10 +238,12 @@ fixtureRepl ::
   Fixture a ->
   TestEnvironment ->
   IO (IO ())
-fixtureRepl Fixture {mkLocalTestEnvironment, setupTeardown} globalTestEnvironment = do
+fixtureRepl Fixture {name, mkLocalTestEnvironment, setupTeardown} globalTestEnvironment = do
   with (mkLocalTestEnvironment globalTestEnvironment) \localTestEnvironment -> do
-    let testEnvironment = (globalTestEnvironment, localTestEnvironment)
-    cleanup <- runSetupActions globalTestEnvironment (setupTeardown testEnvironment)
+    globalTestEnvWithUnique <- setupUniqueGlobalTestEnvironment name globalTestEnvironment
+
+    let testEnvironment = (globalTestEnvWithUnique, localTestEnvironment)
+    cleanup <- runSetupActions (logger globalTestEnvWithUnique) (setupTeardown testEnvironment)
     return cleanup
 
 -- | Run a list of SetupActions.
@@ -216,9 +251,11 @@ fixtureRepl Fixture {mkLocalTestEnvironment, setupTeardown} globalTestEnvironmen
 -- * If all setup steps complete, return an IO action that runs the teardown actions in reverse order.
 -- * If a setup step fails, the steps that were executed are torn down in reverse order.
 -- * Teardown always collects all the exceptions that are thrown.
-runSetupActions :: TestEnvironment -> [SetupAction] -> IO (IO ())
-runSetupActions testEnv acts = go acts []
+runSetupActions :: Logger -> [SetupAction] -> IO (IO ())
+runSetupActions logger acts = go acts []
   where
+    log = runLogger logger . LogHarness . T.pack
+
     go :: [SetupAction] -> [IO ()] -> IO (IO ())
     go actions cleanupAcc = case actions of
       [] -> return (rethrowAll cleanupAcc)
@@ -230,20 +267,20 @@ runSetupActions testEnv acts = go acts []
         -- commented out.
         case a of
           Left (exn :: SomeException) -> do
-            testLogHarness testEnv $ "Setup failed for step " ++ show (length cleanupAcc) ++ "."
+            log $ "Setup failed for step " ++ show (length cleanupAcc) ++ "."
             rethrowAll
               ( throwIO exn
-                  : ( testLogHarness testEnv ("Teardown failed for step " ++ show (length cleanupAcc) ++ ".")
+                  : ( log ("Teardown failed for step " ++ show (length cleanupAcc) ++ ".")
                         >> teardownAction Nothing
                     )
                   : cleanupAcc
               )
             return (return ())
           Right x -> do
-            testLogHarness testEnv $ "Setup for step " ++ show (length cleanupAcc) ++ " succeeded."
+            log $ "Setup for step " ++ show (length cleanupAcc) ++ " succeeded."
             go
               rest
-              ( ( testLogHarness testEnv ("Teardown for step " ++ show (length cleanupAcc) ++ " succeeded.")
+              ( ( log ("Teardown for step " ++ show (length cleanupAcc) ++ " succeeded.")
                     >> teardownAction (Just x)
                 )
                   : cleanupAcc
@@ -314,3 +351,42 @@ instance Show FixtureName where
 -- | Default function for 'mkLocalTestEnvironment' when there's no local testEnvironment.
 noLocalTestEnvironment :: TestEnvironment -> Managed ()
 noLocalTestEnvironment = const $ pure ()
+
+-- Each left-hand-side (LHS) fixture is responsible for setting up the remote relationship, and
+-- for tearing it down. Each lhs fixture is given the JSON representation for
+-- the table name on the RHS.
+type LHSFixture = Value -> Fixture (Maybe Server)
+
+-- Each right-hand-side (RHS) fixture is responsible for setting up the target table, and for
+-- returning the JSON representation of said table.
+type RHSFixture = (Value, Fixture ())
+
+-- | Combines a left-hand side (LHS) and right-hand side (RHS) fixtures.
+--
+-- The RHS is set up first, then the LHS can create the remote relationship.
+--
+-- Teardown is done in the reverse order.
+--
+-- The metadata is cleared befored each setup.
+combineFixtures :: LHSFixture -> RHSFixture -> Fixture (Maybe Server)
+combineFixtures lhs (tableName, rhs) =
+  (fixture $ Combine lhsName rhsName)
+    { mkLocalTestEnvironment = lhsMkLocalTestEnvironment,
+      setupTeardown = \(testEnvironment, localTestEnvironment) ->
+        [SetupAction.clearMetadata testEnvironment]
+          <> rhsSetupTeardown (testEnvironment, ())
+          <> lhsSetupTeardown (testEnvironment, localTestEnvironment),
+      customOptions = combineOptions lhsOptions rhsOptions
+    }
+  where
+    Fixture
+      { name = lhsName,
+        mkLocalTestEnvironment = lhsMkLocalTestEnvironment,
+        setupTeardown = lhsSetupTeardown,
+        customOptions = lhsOptions
+      } = lhs tableName
+    Fixture
+      { name = rhsName,
+        setupTeardown = rhsSetupTeardown,
+        customOptions = rhsOptions
+      } = rhs

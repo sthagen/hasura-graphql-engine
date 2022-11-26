@@ -51,7 +51,6 @@ import Hasura.RQL.DDL.Endpoint
 import Hasura.RQL.DDL.EventTrigger
 import Hasura.RQL.DDL.InheritedRoles
 import Hasura.RQL.DDL.Metadata.Types
-import Hasura.RQL.DDL.Network
 import Hasura.RQL.DDL.Permission
 import Hasura.RQL.DDL.Relationship
 import Hasura.RQL.DDL.RemoteRelationship
@@ -571,7 +570,6 @@ purgeMetadataObj = \case
   MOCronTrigger ctName -> dropCronTriggerInMetadata ctName
   MOEndpoint epName -> dropEndpointInMetadata epName
   MOInheritedRole role -> dropInheritedRoleInMetadata role
-  MOHostTlsAllowlist host -> dropHostFromAllowList host
   MOQueryCollectionsQuery cName lq -> dropListedQueryFromQueryCollections cName lq
   MODataConnectorAgent agentName ->
     MetadataModifier $
@@ -579,6 +577,8 @@ purgeMetadataObj = \case
         %~ BackendMap.modify @'DataConnector (BackendConfigWrapper . OMap.delete agentName . unBackendConfigWrapper)
   MOOpenTelemetry subobject ->
     case subobject of
+      OtelSubobjectAll ->
+        MetadataModifier $ metaOpenTelemetryConfig .~ emptyOpenTelemetryConfig
       OtelSubobjectExporterOtlp ->
         MetadataModifier $ metaOpenTelemetryConfig . ocExporterOtlp .~ defaultOtelExporterConfig
       OtelSubobjectBatchSpanProcessor ->
@@ -694,15 +694,15 @@ runTestWebhookTransform (TestWebhookTransform env headers urlE payload rt _ sv) 
 
   case result of
     Right transformed ->
-      pure $ packTransformResult $ Right transformed
-    Left (RequestTransformationError _ err) -> pure $ packTransformResult (Left err)
+      packTransformResult $ Right transformed
+    Left (RequestTransformationError _ err) -> packTransformResult (Left err)
     -- NOTE: In the following case we have failed before producing a valid request.
     Left (RequestInitializationError err) ->
       let errorBundle =
             TransformErrorBundle $
               pure $
                 J.object ["error_code" J..= J.String "Request Initialization Error", "message" J..= J.String (tshow err)]
-       in pure $ encJFromJValue $ J.toJSON errorBundle
+       in throw400WithDetail ValidationFailed "request transform validation failed" $ J.toJSON errorBundle
 
 interpolateFromEnv :: MonadError QErr m => Env.Environment -> Text -> m Text
 interpolateFromEnv env url =
@@ -747,14 +747,14 @@ parseEnvTemplate = AT.many1 $ pEnv <|> pLit <|> fmap Right "{"
 indistinct :: Either a a -> a
 indistinct = either id id
 
-packTransformResult :: Either TransformErrorBundle HTTP.Request -> EncJSON
+packTransformResult :: (MonadError QErr m) => Either TransformErrorBundle HTTP.Request -> m EncJSON
 packTransformResult = \case
   Right req ->
-    encJFromJValue $
+    pure . encJFromJValue $
       J.object
         [ "webhook_url" J..= (req ^. HTTP.url),
           "method" J..= (req ^. HTTP.method),
           "headers" J..= (first CI.foldedCase <$> (req ^. HTTP.headers)),
           "body" J..= decodeBody (req ^. HTTP.body)
         ]
-  Left err -> encJFromJValue $ J.toJSON err
+  Left err -> throw400WithDetail ValidationFailed "request transform validation failed" $ J.toJSON err

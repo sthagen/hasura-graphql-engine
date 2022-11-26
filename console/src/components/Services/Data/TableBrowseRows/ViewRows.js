@@ -11,6 +11,7 @@ import {
   FaSort,
   FaTrash,
 } from 'react-icons/fa';
+import clsx from 'clsx';
 import '../../../Common/TableCommon/ReactTableOverrides.css';
 import DragFoldTable, {
   getColWidth,
@@ -63,10 +64,11 @@ import {
 } from '../../../../dataSources';
 import { updateSchemaInfo } from '../DataActions';
 import {
-  persistColumnCollapseChange,
   getPersistedCollapsedColumns,
-  persistColumnOrderChange,
   getPersistedColumnsOrder,
+  persistColumnCollapseChange,
+  persistColumnOrderChange,
+  setPersistedPageSize,
 } from './tableUtils';
 import { compareRows, isTableWithPK } from './utils';
 import { push } from 'react-router-redux';
@@ -74,30 +76,35 @@ import globals from '@/Globals';
 
 const ViewRows = props => {
   const {
-    curTableName,
-    currentSchema,
-    curQuery,
-    curFilter,
-    curRows,
-    curPath = [],
-    parentTableName,
-    curDepth,
     activePath,
-    schemas,
+    count,
+    curDepth,
+    curFilter,
+    curPath = [],
+    curQuery,
+    currentSchema,
+    currentSource,
+    curRows,
+    curTableName,
     dispatch,
-    ongoingRequest,
+    expandedRow,
+    filtersAndSort,
     isProgressing,
+    isView,
     lastError,
     lastSuccess,
-    isView,
-    count,
-    expandedRow,
     manualTriggers = [],
+    onChangePageSize,
+    ongoingRequest,
+    onRunQuery,
+    parentTableName,
     readOnlyMode,
+    schemas,
     shouldHidePagination,
-    currentSource,
     useCustomPagination,
+    paginationUserQuery,
   } = props;
+
   const [invokedRow, setInvokedRow] = useState(null);
   const [invocationFunc, setInvocationFunc] = useState(null);
   const [selectedRows, setSelectedRows] = useState([]);
@@ -765,20 +772,23 @@ const ViewRows = props => {
       }
     });
 
-    const childTabs = childQueries.map((q, i) => {
+    const childTabs = childQueries.map(q => {
       const isActive = q.name === activePath[curDepth + 1] ? 'active' : null;
       return (
-        <li key={i} className={isActive} role="presentation">
-          <a
-            href="#"
+        <div>
+          <Button
+            className={clsx(
+              'mr-2',
+              isActive === 'active' ? 'border-4' : 'border-white'
+            )}
             onClick={e => {
               e.preventDefault();
               dispatch({ type: V_SET_ACTIVE, path: curPath, relname: q.name });
             }}
           >
             {[...activePath.slice(0, 1), ...curPath, q.name].join('.')}
-          </a>
-        </li>
+          </Button>
+        </div>
       );
     });
 
@@ -829,7 +839,7 @@ const ViewRows = props => {
     if (childQueries.length > 0) {
       _childComponent = (
         <div>
-          <ul>{childTabs}</ul>
+          <div className="flex">{childTabs}</div>
           {childViewRows}
         </div>
       );
@@ -837,11 +847,6 @@ const ViewRows = props => {
 
     return _childComponent;
   };
-
-  const [userQuery, setUserQuery] = useState({
-    where: { $and: [] },
-    order_by: [],
-  });
 
   const renderTableBody = () => {
     if (isProgressing) {
@@ -951,8 +956,10 @@ const ViewRows = props => {
     };
 
     const handlePageSizeChange = size => {
-      if (curFilter.size !== size) {
+      if (curFilter.limit !== size) {
         setSelectedRows([]);
+        onChangePageSize(size);
+        setPersistedPageSize(size);
       }
     };
 
@@ -964,10 +971,10 @@ const ViewRows = props => {
           offset={curFilter.offset}
           onChangePage={handlePageChange}
           onChangePageSize={handlePageSizeChange}
-          pageSize={curFilter.size}
+          pageSize={curFilter.limit}
           rows={curRows}
           tableSchema={tableSchema}
-          userQuery={userQuery}
+          userQuery={paginationUserQuery}
         />
       );
     }
@@ -1027,7 +1034,10 @@ const ViewRows = props => {
               [schemaKey]: tableSchema.table_schema,
               name: curTableName,
             }}
-            onRunQuery={newUserQuery => setUserQuery(newUserQuery)}
+            initialFiltersAndSort={filtersAndSort}
+            onRunQuery={newUserQuery => {
+              onRunQuery(newUserQuery);
+            }}
           />
         </div>
       )}

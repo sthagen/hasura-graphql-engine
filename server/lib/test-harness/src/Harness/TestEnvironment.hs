@@ -31,8 +31,6 @@ data TestEnvironment = TestEnvironment
     server :: Server,
     -- | shared function to log information from tests
     logger :: Logger,
-    -- | action to clean up logger
-    loggerCleanup :: IO (),
     -- | a uuid generated for each test suite used to generate a unique
     -- `SchemaName`
     uniqueTestId :: UUID,
@@ -50,14 +48,22 @@ instance Show TestEnvironment where
 -- | Credentials for our testing modes. See 'SpecHook.setupTestingMode' for the
 -- practical consequences of this type.
 data TestingMode
-  = TestAllBackends
-  | TestNewPostgresVariant
+  = -- | run all tests, unfiltered
+    TestEverything
+  | -- | run only tests containing this BackendType (or a RemoteSchema, so
+    -- those aren't missed)
+    TestBackend BackendType
+  | -- | run "all the other tests"
+    TestNoBackends
+  | -- | test a Postgres-compatible using a custom connection string
+    TestNewPostgresVariant
       { postgresSourceUser :: String,
         postgresSourcePassword :: String,
         postgresSourceHost :: String,
         postgresSourcePort :: Word16,
         postgresSourceInitialDatabase :: String
       }
+  deriving (Eq, Ord, Show)
 
 -- | Information about a server that we're working with.
 data Server = Server

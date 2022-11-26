@@ -30,23 +30,10 @@
     }:
     flake-utils.lib.eachDefaultSystem (system:
     let
-      pkgs = import nixpkgs {
-        inherit system;
-        config = {
-          allowUnfree = true;
-        };
-        overlays = [
-          (import ./nix/overlays/ghc.nix)
-          (import ./nix/overlays/msodbcsql18.nix)
-        ];
-      };
+      pkgs = import ./nix/nixpkgs.nix { inherit nixpkgs system; };
     in
     {
-      packages.graphql-parser = (pkgs.haskell.packages.${pkgs.ghcName}.callCabal2nix "graphql-parser" ./server/lib/graphql-parser-hs { }).overrideScope (
-        self: super: {
-          hedgehog = self.hedgehog_1_1_1;
-        }
-      );
+      packages.graphql-parser = pkgs.haskell.packages.${pkgs.ghcName}.graphql-parser;
 
       formatter = pkgs.nixpkgs-fmt;
 

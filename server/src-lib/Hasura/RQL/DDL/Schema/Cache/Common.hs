@@ -22,17 +22,9 @@ module Hasura.RQL.DDL.Schema.Cache.Common
     TablePermissionInputs (..),
     addTableContext,
     bindErrorA,
-    boAllowlist,
-    boApiLimits,
-    boMetricsConfig,
-    boTlsAllowlist,
     boActions,
-    boCronTriggers,
     boCustomTypes,
     boBackendCache,
-    boEndpoints,
-    boOpenTelemetryInfo,
-    boQueryCollections,
     boRemoteSchemas,
     boRoles,
     boSources,
@@ -59,21 +51,14 @@ import Data.Text.Extended
 import Hasura.Base.Error
 import Hasura.Incremental qualified as Inc
 import Hasura.Prelude
-import Hasura.RQL.Types.Allowlist
-import Hasura.RQL.Types.ApiLimit
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
-import Hasura.RQL.Types.Endpoint
-import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.Metadata.Backend (BackendMetadata (..))
 import Hasura.RQL.Types.Metadata.Instances ()
 import Hasura.RQL.Types.Metadata.Object
-import Hasura.RQL.Types.Network
-import Hasura.RQL.Types.OpenTelemetry (OpenTelemetryInfo)
 import Hasura.RQL.Types.Permission
-import Hasura.RQL.Types.QueryCollection
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.Relationships.Remote
 import Hasura.RQL.Types.Roles
@@ -97,8 +82,6 @@ deriving newtype instance Eq (BackendInvalidationKeys b) => Eq (BackendInvalidat
 
 deriving newtype instance Ord (BackendInvalidationKeys b) => Ord (BackendInvalidationKeysWrapper b)
 
-deriving newtype instance Inc.Cacheable (BackendInvalidationKeys b) => Inc.Cacheable (BackendInvalidationKeysWrapper b)
-
 deriving newtype instance Show (BackendInvalidationKeys b) => Show (BackendInvalidationKeysWrapper b)
 
 deriving newtype instance Semigroup (BackendInvalidationKeys b) => Semigroup (BackendInvalidationKeysWrapper b)
@@ -115,8 +98,6 @@ data InvalidationKeys = InvalidationKeys
     _ikBackends :: BackendMap BackendInvalidationKeysWrapper
   }
   deriving (Show, Eq, Generic)
-
-instance Inc.Cacheable InvalidationKeys
 
 instance Inc.Select InvalidationKeys
 
@@ -135,7 +116,7 @@ invalidateKeys CacheInvalidations {..} InvalidationKeys {..} =
     }
   where
     invalidate ::
-      (Eq a, Hashable a) =>
+      Hashable a =>
       a ->
       HashMap a Inc.InvalidationKey ->
       HashMap a Inc.InvalidationKey
@@ -154,8 +135,6 @@ data TableBuildInput b = TableBuildInput
   deriving (Show, Eq, Generic)
 
 instance (Backend b) => NFData (TableBuildInput b)
-
-instance (Backend b) => Inc.Cacheable (TableBuildInput b)
 
 data NonColumnTableInputs b = NonColumnTableInputs
   { _nctiTable :: TableName b,
@@ -178,8 +157,6 @@ data TablePermissionInputs b = TablePermissionInputs
 deriving instance (Backend b) => Show (TablePermissionInputs b)
 
 deriving instance (Backend b) => Eq (TablePermissionInputs b)
-
-instance (Backend b) => Inc.Cacheable (TablePermissionInputs b)
 
 mkTableInputs ::
   TableMetadata b -> (TableBuildInput b, NonColumnTableInputs b, TablePermissionInputs b)
@@ -205,6 +182,8 @@ mkTableInputs TableMetadata {..} =
 -- | The direct output of 'buildSchemaCacheRule'. Contains most of the things necessary to build a
 -- schema cache, but dependencies and inconsistent metadata objects are collected via a separate
 -- 'MonadWriter' side channel.
+--
+-- See also Note [Avoiding GraphQL schema rebuilds when changing irrelevant Metadata]
 data BuildOutputs = BuildOutputs
   { _boSources :: SourceCache,
     _boActions :: ActionCache,
@@ -212,17 +191,9 @@ data BuildOutputs = BuildOutputs
     -- reuse it later if we need to mark the remote schema inconsistent during GraphQL schema
     -- generation (because of field conflicts).
     _boRemoteSchemas :: HashMap RemoteSchemaName (RemoteSchemaCtx, MetadataObject),
-    _boAllowlist :: InlinedAllowlist,
     _boCustomTypes :: AnnotatedCustomTypes,
-    _boCronTriggers :: M.HashMap TriggerName CronTriggerInfo,
-    _boEndpoints :: M.HashMap EndpointName (EndpointMetadata GQLQueryWithText),
-    _boApiLimits :: ApiLimit,
-    _boMetricsConfig :: MetricsConfig,
     _boRoles :: HashMap RoleName Role,
-    _boTlsAllowlist :: [TlsAllow],
-    _boQueryCollections :: QueryCollections,
-    _boBackendCache :: BackendCache,
-    _boOpenTelemetryInfo :: OpenTelemetryInfo
+    _boBackendCache :: BackendCache
   }
 
 $(makeLenses ''BuildOutputs)
@@ -300,7 +271,7 @@ bindErrorA = liftEitherA <<< arrM \m -> (Right <$> m) `catchError` (pure . Left)
 {-# INLINE bindErrorA #-}
 
 withRecordDependencies ::
-  (ArrowWriter (Seq CollectedInfo) arr) =>
+  (ArrowWriter (Seq (Either im MetadataDependency)) arr) =>
   WriterA (Seq SchemaDependency) arr (e, s) a ->
   arr (e, (MetadataObject, (SchemaObjId, s))) a
 withRecordDependencies f = proc (e, (metadataObject, (schemaObjectId, s))) -> do
@@ -310,7 +281,7 @@ withRecordDependencies f = proc (e, (metadataObject, (schemaObjectId, s))) -> do
 {-# INLINEABLE withRecordDependencies #-}
 
 noDuplicates ::
-  (MonadWriter (Seq CollectedInfo) m) =>
+  (MonadWriter (Seq (Either InconsistentMetadata md)) m) =>
   (a -> MetadataObject) ->
   [a] ->
   m (Maybe a)
@@ -320,7 +291,7 @@ noDuplicates mkMetadataObject = \case
   values@(value : _) -> do
     let objectId = _moId $ mkMetadataObject value
         definitions = map (_moDefinition . mkMetadataObject) values
-    tell $ Seq.singleton $ CIInconsistency (DuplicateObjects objectId definitions)
+    tell $ Seq.singleton $ Left (DuplicateObjects objectId definitions)
     return Nothing
 
 -- | Processes a list of catalog metadata into a map of processed information, marking any duplicate
@@ -328,25 +299,26 @@ noDuplicates mkMetadataObject = \case
 buildInfoMap ::
   ( ArrowChoice arr,
     Inc.ArrowDistribute arr,
-    ArrowWriter (Seq CollectedInfo) arr,
-    Eq k,
+    ArrowWriter (Seq (Either InconsistentMetadata md)) arr,
     Hashable k
   ) =>
   (a -> k) ->
   (a -> MetadataObject) ->
   (e, a) `arr` Maybe b ->
   (e, [a]) `arr` HashMap k b
-buildInfoMap extractKey mkMetadataObject buildInfo = proc (e, infos) ->
-  (M.groupOn extractKey infos >- returnA)
-    >-> (|
-          Inc.keyed
-            ( \_ duplicateInfos ->
-                (noDuplicates mkMetadataObject duplicateInfos >- interpretWriter)
-                  >-> (| traverseA (\info -> (e, info) >- buildInfo) |)
-                  >-> (\info -> join info >- returnA)
-            )
-        |)
-    >-> (\infoMap -> catMaybes infoMap >- returnA)
+buildInfoMap extractKey mkMetadataObject buildInfo = proc (e, infos) -> do
+  let groupedInfos = M.groupOn extractKey infos
+  infoMapMaybes <-
+    (|
+      Inc.keyed
+        ( \_ duplicateInfos -> do
+            infoMaybe <- interpretWriter -< noDuplicates mkMetadataObject duplicateInfos
+            case infoMaybe of
+              Nothing -> returnA -< Nothing
+              Just info -> buildInfo -< (e, info)
+        )
+      |) groupedInfos
+  returnA -< catMaybes infoMapMaybes
 {-# INLINEABLE buildInfoMap #-}
 
 -- | Like 'buildInfo', but includes each processed info’s associated 'MetadataObject' in the result.
@@ -355,8 +327,7 @@ buildInfoMap extractKey mkMetadataObject buildInfo = proc (e, infos) ->
 buildInfoMapPreservingMetadata ::
   ( ArrowChoice arr,
     Inc.ArrowDistribute arr,
-    ArrowWriter (Seq CollectedInfo) arr,
-    Eq k,
+    ArrowWriter (Seq (Either InconsistentMetadata MetadataDependency)) arr,
     Hashable k
   ) =>
   (a -> k) ->
@@ -364,8 +335,11 @@ buildInfoMapPreservingMetadata ::
   (e, a) `arr` Maybe b ->
   (e, [a]) `arr` HashMap k (b, MetadataObject)
 buildInfoMapPreservingMetadata extractKey mkMetadataObject buildInfo =
-  buildInfoMap extractKey mkMetadataObject proc (e, info) ->
-    ((e, info) >- buildInfo) >-> \result -> result <&> (,mkMetadataObject info) >- returnA
+  buildInfoMap extractKey mkMetadataObject buildInfoPreserving
+  where
+    buildInfoPreserving = proc (e, info) -> do
+      result <- buildInfo -< (e, info)
+      returnA -< result <&> (,mkMetadataObject info)
 {-# INLINEABLE buildInfoMapPreservingMetadata #-}
 
 addTableContext :: (Backend b) => TableName b -> Text -> Text
