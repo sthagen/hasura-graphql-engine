@@ -401,6 +401,10 @@ runMetadataQuery env logger instanceId userInfo httpManager serverConfigCtx sche
     then case (_sccMaintenanceMode serverConfigCtx, _sccReadOnlyMode serverConfigCtx) of
       (MaintenanceModeDisabled, ReadOnlyModeDisabled) -> do
         -- set modified metadata in storage
+        L.unLogger logger $
+          SchemaSyncLog L.LevelInfo TTMetadataApi $
+            String $
+              "Attempting to put new metadata in storage"
         newResourceVersion <-
           Tracing.trace "setMetadata" $
             setMetadata (fromMaybe currentResourceVersion _rqlMetadataResourceVersion) modMetadata
@@ -602,7 +606,7 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMUpdateSource q -> dispatchMetadata runUpdateSource q
   RMListSourceKinds q -> runListSourceKinds q
   RMGetSourceKindCapabilities q -> runGetSourceKindCapabilities q
-  RMGetSourceTables q -> runGetSourceTables q
+  RMGetSourceTables q -> runGetSourceTables env q
   RMGetTableInfo q -> runGetTableInfo q
   RMTrackTable q -> dispatchMetadata runTrackTableV2Q q
   RMUntrackTable q -> dispatchMetadataAndEventTrigger runUntrackTableQ q

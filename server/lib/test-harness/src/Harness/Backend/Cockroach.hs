@@ -41,13 +41,14 @@ import Harness.Backend.Postgres qualified as Postgres
 import Harness.Constants as Constants
 import Harness.Exceptions
 import Harness.GraphqlEngine qualified as GraphqlEngine
+import Harness.Logging
 import Harness.Quoter.Yaml (interpolateYaml)
 import Harness.Test.BackendType (BackendType (Cockroach), defaultBackendTypeString, defaultSource)
 import Harness.Test.Permissions qualified as Permissions
 import Harness.Test.Schema (BackendScalarType (..), BackendScalarValue (..), ScalarValue (..), SchemaName (..))
 import Harness.Test.Schema qualified as Schema
 import Harness.Test.SetupAction (SetupAction (..))
-import Harness.TestEnvironment (TestEnvironment (..), testLogHarness)
+import Harness.TestEnvironment (TestEnvironment (..), testLogMessage)
 import Hasura.Prelude
 import System.Process.Typed
 
@@ -80,20 +81,13 @@ runWithInitialDb_ testEnvironment =
 -- On error, print something useful for debugging.
 run_ :: HasCallStack => TestEnvironment -> String -> IO ()
 run_ testEnvironment =
-  runInternal testEnvironment (Constants.cockroachConnectionString testEnvironment)
+  runInternal testEnvironment (Constants.cockroachConnectionString (uniqueTestId testEnvironment))
 
 --- | Run a plain SQL query.
 -- On error, print something useful for debugging.
 runInternal :: HasCallStack => TestEnvironment -> String -> String -> IO ()
 runInternal testEnvironment connectionString query = do
-  testLogHarness
-    testEnvironment
-    ( "Executing connection string: "
-        <> connectionString
-        <> "\n"
-        <> "Query: "
-        <> query
-    )
+  testLogMessage testEnvironment $ LogDBQuery (T.pack connectionString) (T.pack query)
   catch
     ( bracket
         ( Postgres.connectPostgreSQL
@@ -125,9 +119,10 @@ defaultSourceMetadata testEnvironment =
 
 defaultSourceConfiguration :: TestEnvironment -> Value
 defaultSourceConfiguration testEnvironment =
-  [interpolateYaml|
+  let databaseUrl = cockroachConnectionString (uniqueTestId testEnvironment)
+   in [interpolateYaml|
     connection_info:
-      database_url: #{ cockroachConnectionString testEnvironment }
+      database_url: #{ databaseUrl }
       pool_settings: {}
   |]
 
@@ -261,7 +256,7 @@ dropDatabase testEnvironment = do
   runWithInitialDb_
     testEnvironment
     ("DROP DATABASE " <> dbName <> ";")
-    `catch` \(ex :: SomeException) -> testLogHarness testEnvironment ("Failed to drop the database: " <> show ex)
+    `catch` \(ex :: SomeException) -> testLogMessage testEnvironment (LogDropDBFailedWarning (T.pack dbName) ex)
 
 -- Because the test harness sets the schema name we use for testing, we need
 -- to make sure it exists before we run the tests.
@@ -298,8 +293,8 @@ setup tables (testEnvironment, _) = do
 -- NOTE: Certain test modules may warrant having their own version.
 -- Because the Fixture takes care of dropping the DB, all we do here is
 -- clear the metadata with `replace_metadata`.
-teardown :: [Schema.Table] -> (TestEnvironment, ()) -> IO ()
-teardown _ (testEnvironment, _) = do
+teardown :: HasCallStack => [Schema.Table] -> (TestEnvironment, ()) -> IO ()
+teardown _ (testEnvironment, _) =
   GraphqlEngine.setSources testEnvironment mempty Nothing
 
 setupTablesAction :: [Schema.Table] -> TestEnvironment -> SetupAction

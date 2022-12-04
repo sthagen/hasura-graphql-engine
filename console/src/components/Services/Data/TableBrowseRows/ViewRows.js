@@ -16,6 +16,7 @@ import '../../../Common/TableCommon/ReactTableOverrides.css';
 import DragFoldTable, {
   getColWidth,
 } from '../../../Common/TableCommon/DragFoldTable';
+import { vMakeTableRequests, vSetLimit } from './ViewActions';
 
 import Dropdown from '../../../Common/Dropdown/Dropdown';
 
@@ -45,7 +46,6 @@ import {
   addOrder,
 } from './FilterActions';
 
-import _push from '../push';
 import { ordinalColSort } from '../utils';
 import Spinner from '../../../Common/Spinner/Spinner';
 
@@ -370,18 +370,20 @@ const ViewRows = props => {
 
           const handleEditClick = () => {
             dispatch({ type: E_SET_EDITITEM, oldItem: row, pkClause });
+            const urlPrefix = globals.urlPrefix;
             dispatch(
-              _push(
-                getTableEditRowRoute(
-                  currentSchema,
-                  currentSource,
-                  curTableName,
-                  true
-                )
-              )
+              push({
+                pathname:
+                  urlPrefix +
+                  getTableEditRowRoute(
+                    currentSchema,
+                    currentSource,
+                    curTableName,
+                    true
+                  ),
+              })
             );
           };
-
           const editTitle = 'Edit row';
 
           return getActionButton(
@@ -693,7 +695,8 @@ const ViewRows = props => {
   };
 
   const curRelName = curPath.length > 0 ? curPath.slice(-1)[0] : null;
-  const tableColumnsSorted = tableSchema.columns
+
+  const tableColumnsSorted = tableSchema?.columns
     .map(col => {
       const customColumnName = getTableCustomColumnName(
         tableSchema,
@@ -792,15 +795,17 @@ const ViewRows = props => {
       );
     });
 
-    const childViewRows = childQueries.map((cq, i) => {
+    const childViewRows = childQueries.map((childQuery, i) => {
       // Render child only if data is available
-      if (curRows[0] && curRows[0][cq.name]) {
-        const rel = tableSchema.relationships.find(r => r.rel_name === cq.name);
+      if (curRows[0] && curRows[0][childQuery.name]) {
+        const rel = tableSchema.relationships.find(
+          r => r.rel_name === childQuery.name
+        );
 
         if (rel) {
           const isObjectRel = rel.rel_type === 'object';
 
-          let childRows = curRows[0][cq.name];
+          let childRows = curRows[0][childQuery.name];
           if (isObjectRel) {
             childRows = [childRows];
           }
@@ -808,26 +813,46 @@ const ViewRows = props => {
 
           const childTable = findTable(schemas, childTableDef);
 
+          const onChangePageSizeNested = newPageSize => {
+            dispatch(vSetLimit(newPageSize, [...curPath, rel.rel_name]));
+            dispatch(vMakeTableRequests());
+          };
+
+          const nestedPaginationUserQuery = {
+            where: { $and: childQuery?.where?.$and || [] },
+            order_by: childQuery?.order_by || [],
+          };
+
+          const limit = childQuery.limit || curFilter.limit;
+          const filter = {
+            ...curFilter,
+            limit,
+          };
+
           return (
             <ViewRows
               key={i}
-              curTableName={childTable.table_name}
-              currentSchema={childTable.table_schema}
-              curQuery={cq}
-              curFilter={curFilter}
-              curPath={[...curPath, rel.rel_name]}
-              curRows={childRows}
-              parentTableName={curTableName}
               activePath={activePath}
-              ongoingRequest={ongoingRequest}
-              lastError={lastError}
-              lastSuccess={lastSuccess}
-              schemas={schemas}
               curDepth={curDepth + 1}
+              curFilter={filter}
+              curPath={[...curPath, rel.rel_name]}
+              curQuery={childQuery}
+              currentSchema={childTable.table_schema}
+              currentSource={currentSource}
+              curRows={childRows}
+              curTableName={childTable.table_name}
               dispatch={dispatch}
               expandedRow={expandedRow}
+              lastError={lastError}
+              lastSuccess={lastSuccess}
+              onChangePageSize={onChangePageSizeNested}
+              ongoingRequest={ongoingRequest}
+              onRunQuery={() => null}
+              paginationUserQuery={nestedPaginationUserQuery}
+              parentTableName={curTableName}
               readOnlyMode={readOnlyMode}
-              currentSource={currentSource}
+              schemas={schemas}
+              useCustomPagination
             />
           );
         }

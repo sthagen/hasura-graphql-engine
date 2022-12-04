@@ -42,13 +42,14 @@ import Harness.Backend.Postgres qualified as Postgres
 import Harness.Constants as Constants
 import Harness.Exceptions
 import Harness.GraphqlEngine qualified as GraphqlEngine
+import Harness.Logging
 import Harness.Quoter.Yaml (interpolateYaml)
 import Harness.Test.BackendType (BackendType (Citus), defaultBackendTypeString, defaultSource)
 import Harness.Test.Permissions qualified as Permissions
 import Harness.Test.Schema (BackendScalarType (..), BackendScalarValue (..), ScalarValue (..), SchemaName (..))
 import Harness.Test.Schema qualified as Schema
 import Harness.Test.SetupAction (SetupAction (..))
-import Harness.TestEnvironment (TestEnvironment (..), testLogHarness)
+import Harness.TestEnvironment (TestEnvironment (..), testLogMessage)
 import Hasura.Prelude
 import System.Process.Typed
 
@@ -80,20 +81,13 @@ runWithInitialDb_ testEnvironment =
 -- | Run a plain SQL query.
 run_ :: HasCallStack => TestEnvironment -> String -> IO ()
 run_ testEnvironment =
-  runInternal testEnvironment (Constants.citusConnectionString testEnvironment)
+  runInternal testEnvironment (Constants.citusConnectionString (uniqueTestId testEnvironment))
 
 --- | Run a plain SQL query.
 -- On error, print something useful for debugging.
 runInternal :: HasCallStack => TestEnvironment -> String -> String -> IO ()
 runInternal testEnvironment connectionString query = do
-  testLogHarness
-    testEnvironment
-    ( "Executing connection string: "
-        <> connectionString
-        <> "\n"
-        <> "Query: "
-        <> query
-    )
+  testLogMessage testEnvironment $ LogDBQuery (T.pack connectionString) (T.pack query)
   catch
     ( bracket
         ( Postgres.connectPostgreSQL
@@ -125,9 +119,10 @@ defaultSourceMetadata testEnvironment =
 
 defaultSourceConfiguration :: TestEnvironment -> Value
 defaultSourceConfiguration testEnvironment =
-  [interpolateYaml|
+  let databaseUrl = citusConnectionString (uniqueTestId testEnvironment)
+   in [interpolateYaml|
     connection_info:
-      database_url: #{ citusConnectionString testEnvironment }
+      database_url: #{ databaseUrl }
       pool_settings: {}
   |]
 
@@ -255,10 +250,11 @@ createDatabase testEnvironment = do
 -- up.
 dropDatabase :: TestEnvironment -> IO ()
 dropDatabase testEnvironment = do
+  let dbName = uniqueDbName (uniqueTestId testEnvironment)
   runWithInitialDb_
     testEnvironment
-    ("DROP DATABASE " <> uniqueDbName (uniqueTestId testEnvironment) <> " WITH (FORCE);")
-    `catch` \(ex :: SomeException) -> testLogHarness testEnvironment ("Failed to drop the database: " <> show ex)
+    ("DROP DATABASE " <> dbName <> " WITH (FORCE);")
+    `catch` \(ex :: SomeException) -> testLogMessage testEnvironment (LogDropDBFailedWarning (T.pack dbName) ex)
 
 -- | Setup the schema in the most expected way.
 -- NOTE: Certain test modules may warrant having their own local version.
@@ -304,18 +300,8 @@ setupPermissionsAction permissions env =
 -- | Teardown the schema and tracking in the most expected way.
 -- NOTE: Certain test modules may warrant having their own version.
 teardown :: HasCallStack => [Schema.Table] -> (TestEnvironment, ()) -> IO ()
-teardown (reverse -> tables) (testEnvironment, _) = do
-  finally
-    -- Teardown relationships first
-    ( forFinally_ tables $ \table ->
-        Schema.untrackRelationships Citus table testEnvironment
-    )
-    -- Then teardown tables
-    ( forFinally_ tables $ \table ->
-        finally
-          (untrackTable testEnvironment table)
-          (dropTable testEnvironment table)
-    )
+teardown _ (testEnvironment, _) =
+  GraphqlEngine.setSources testEnvironment mempty Nothing
 
 -- | Setup the given permissions to the graphql engine in a TestEnvironment.
 setupPermissions :: [Permissions.Permission] -> TestEnvironment -> IO ()

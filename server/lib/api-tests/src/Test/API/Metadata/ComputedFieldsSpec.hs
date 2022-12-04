@@ -13,14 +13,14 @@ import Harness.Quoter.Yaml (interpolateYaml, yaml)
 import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (SchemaName (..), Table (..), table)
 import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (TestEnvironment)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, it)
 
 -- ** Preamble
 
-spec :: SpecWith TestEnvironment
+spec :: SpecWith GlobalTestEnvironment
 spec =
   Fixture.run
     ( NE.fromList
@@ -82,10 +82,7 @@ setupFunctions testEnv =
                       "AS t WHERE t.author_id = a_id and (t.title LIKE `search` OR t.content LIKE `search`)",
                       ");"
                     ],
-            Fixture.teardownAction = \_ ->
-              BigQuery.run_ $
-                T.unpack $
-                  "DROP TABLE FUNCTION " <> fetch_articles_returns_table schemaName <> ";"
+            Fixture.teardownAction = \_ -> pure ()
           },
         Fixture.SetupAction
           { Fixture.setupAction =
@@ -101,10 +98,7 @@ setupFunctions testEnv =
                       "AS t WHERE t.author_id = a_id and (t.title LIKE `search` OR t.content LIKE `search`)",
                       ");"
                     ],
-            Fixture.teardownAction = \_ ->
-              BigQuery.run_ $
-                T.unpack $
-                  "DROP TABLE FUNCTION " <> fetch_articles schemaName <> ";"
+            Fixture.teardownAction = \_ -> pure ()
           },
         Fixture.SetupAction
           { Fixture.setupAction =
@@ -118,10 +112,7 @@ setupFunctions testEnv =
                       articleTableSQL,
                       "AS t);"
                     ],
-            Fixture.teardownAction = \_ ->
-              BigQuery.run_ $
-                T.unpack $
-                  "DROP TABLE FUNCTION " <> function_no_args schemaName <> ";"
+            Fixture.teardownAction = \_ -> pure ()
           },
         Fixture.SetupAction
           { Fixture.setupAction =
@@ -132,10 +123,7 @@ setupFunctions testEnv =
                       add_int schemaName <> "(a INT64, b INT64)",
                       "RETURNS INT64 AS (a + b);"
                     ],
-            Fixture.teardownAction = \_ ->
-              BigQuery.run_ $
-                T.unpack $
-                  "DROP FUNCTION " <> add_int schemaName <> ";"
+            Fixture.teardownAction = \_ -> pure ()
           }
       ]
 

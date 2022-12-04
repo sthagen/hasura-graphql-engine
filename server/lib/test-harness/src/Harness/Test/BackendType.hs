@@ -96,10 +96,12 @@ defaultBackendCapabilities = \case
             aggregate_functions:
               max: DateTime
               min: DateTime
+            graphql_type: String
           string:
             aggregate_functions:
               longest: string
               shortest: string
+            graphql_type: String
     |]
   _ -> Nothing
 
@@ -130,6 +132,8 @@ defaultBackendServerUrl = \case
   DataConnectorSqlite -> Just "http://localhost:65007"
   DataConnector _ -> Nothing
 
+-- workaround until we support schema/dataset keys generically
+-- https://hasurahq.atlassian.net/browse/NDAT-332
 schemaKeyword :: BackendType -> Key
 schemaKeyword = \case
   Postgres -> "schema"

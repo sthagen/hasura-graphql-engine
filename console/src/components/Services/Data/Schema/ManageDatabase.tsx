@@ -339,10 +339,7 @@ const ManageDatabase: React.FC<ManageDatabaseProps> = ({
 
   const [fireLatencyRequest, setFireLatencyRequest] = useState(false);
 
-  const queryResponse = useCheckDatabaseLatency(
-    fireLatencyRequest,
-    dataHeaders
-  );
+  const queryResponse = useCheckDatabaseLatency(fireLatencyRequest);
 
   const checkDatabaseLatency = () => {
     setFireLatencyRequest(true);
@@ -381,7 +378,9 @@ const ManageDatabase: React.FC<ManageDatabaseProps> = ({
   }, [queryResponse.isSuccess, queryResponse.data]);
 
   const showAccelerateProjectSection =
-    !showCheckLatencyButton && !checkHighLatencySources(latencyCheckData);
+    isCloudConsole(globals) &&
+    !showCheckLatencyButton &&
+    !checkHighLatencySources(latencyCheckData);
 
   return (
     <RightContainer>

@@ -15,7 +15,8 @@ import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (TestEnvironment)
+import Harness.Test.SetupAction (permitTeardownFail)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment)
 import Harness.Webhook qualified as Webhook
 import Harness.Yaml (shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
@@ -26,7 +27,7 @@ import Test.Hspec (SpecWith, describe, it)
 --------------------------------------------------------------------------------
 -- Preamble
 
-spec :: SpecWith TestEnvironment
+spec :: SpecWith GlobalTestEnvironment
 spec =
   Fixture.runWithLocalTestEnvironment
     ( NE.fromList
@@ -35,7 +36,7 @@ spec =
               -- so that the server can be referenced while testing
               Fixture.mkLocalTestEnvironment = const Webhook.run,
               Fixture.setupTeardown = \(testEnvironment, (webhookServer, _)) ->
-                [ Postgres.setupTablesActionDiscardingTeardownErrors schema testEnvironment,
+                [ permitTeardownFail (Postgres.setupTablesAction schema testEnvironment),
                   Fixture.SetupAction
                     { Fixture.setupAction = postgresSetup testEnvironment webhookServer,
                       Fixture.teardownAction = \_ -> postgresTeardown testEnvironment
