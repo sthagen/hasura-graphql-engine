@@ -5,7 +5,7 @@ const webpack = require('webpack');
 // un comment this to test out the circular deps
 //const CircularDependencyPlugin = require('circular-dependency-plugin');
 
-const log = (value) =>
+const log = value =>
   console.log(
     util.inspect(value, { showHidden: false, depth: null, colors: true })
   );
@@ -13,7 +13,7 @@ const log = (value) =>
 module.exports = (config, context) => {
   const output = merge(config, {
     output: {
-      publicPath: '',
+      publicPath: 'auto',
     },
     plugins: [
       new webpack.DefinePlugin({
@@ -62,6 +62,23 @@ module.exports = (config, context) => {
     },
     resolve: {
       fallback: {
+        /*
+        Used by :
+        openapi-to-graphql and it's deps (graphql-upload > fs-capacitor)
+        no real polyfill exists, so this turns it into an empty implementation
+         */
+        fs: false,
+        /*
+        Used by :
+        openapi-to-graphql and it's deps (graphql-upload > fs-capacitor)
+         */
+        os: require.resolve('os-browserify/browser'),
+
+        /*
+        Used by :
+        openapi-to-graphql and it's deps (swagger2openapi)
+         */
+        http: require.resolve('stream-http'),
         /*
         Used by :
         @graphql-codegen/typescript and it's deps (@graphql-codegen/visitor-plugin-common && parse-filepath)

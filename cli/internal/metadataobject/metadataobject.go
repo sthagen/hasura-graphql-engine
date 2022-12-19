@@ -35,6 +35,8 @@ const (
 	InheritedRolesKey             string = "inherited_roles"
 	GraphQLSchemaIntrospectionKey string = "graphql_schema_introspection"
 	NetworkKey                    string = "network"
+	MetricsConfigKey              string = "metrics_config"
+	OpentelemetryKey              string = "opentelemetry"
 )
 
 type Objects []Object

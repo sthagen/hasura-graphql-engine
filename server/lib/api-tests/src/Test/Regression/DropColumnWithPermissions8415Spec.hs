@@ -24,7 +24,7 @@ spec :: SpecWith GlobalTestEnvironment
 spec = do
   Fixture.run
     ( NE.fromList
-        [ (Fixture.fixture $ Fixture.Backend Fixture.Postgres)
+        [ (Fixture.fixture $ Fixture.Backend Postgres.backendTypeMetadata)
             { Fixture.setupTeardown = \(testEnv, _) ->
                 [ Postgres.setupTablesAction schema testEnv,
                   Postgres.setupPermissionsAction [updatePermission] testEnv
@@ -63,12 +63,12 @@ author =
 
 updatePermission :: Permissions.Permission
 updatePermission =
-  Permissions.updatePermission
-    { Permissions.permissionTable = authorTableName,
-      Permissions.permissionSource = "postgres",
-      Permissions.permissionRole = "user",
-      Permissions.permissionColumns = ["age"]
-    }
+  Permissions.UpdatePermission
+    Permissions.updatePermission
+      { Permissions.updatePermissionTable = authorTableName,
+        Permissions.updatePermissionRole = "user",
+        Permissions.updatePermissionColumns = ["age"]
+      }
 
 --------------------------------------------------------------------------------
 -- Tests

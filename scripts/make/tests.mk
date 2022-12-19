@@ -45,7 +45,7 @@ test-cockroach: remove-tix-file
 # we have a few tests labeled with 'Postgres' which test their variants, too,
 # so this also starts containers for Postgres variants
 test-postgres: remove-tix-file
-	docker compose up -d --wait postgres cockroach citus
+	docker compose up -d --wait postgres cockroach citus dc-sqlite-agent
 	$(call stop_after, \
 		HASURA_TEST_BACKEND_TYPE=Postgres \
 		cabal run api-tests:exe:api-tests)
@@ -64,6 +64,19 @@ test-no-backends: start-backends remove-tix-file
 test-backends: start-backends remove-tix-file
 	$(call stop_after, \
 		cabal run api-tests:exe:api-tests)
+
+.PHONY: test-matrix
+## test-matrix: postgres test matrix generator
+test-matrix: remove-tix-file
+	docker compose up -d --wait postgres cockroach citus dc-sqlite-agent
+	$(call stop_after, \
+		cabal run api-tests:exe:produce-feature-matrix +RTS -N4 -RTS)
+
+.PHONY: test-backends-pro
+## test-backends-pro: run tests for HGE pro for all backends
+test-backends-pro: start-backends remove-tix-file
+	$(call stop_after, \
+		cabal run api-tests-pro:exe:api-tests-pro)
 
 .PHONY: test-unit
 ## test-unit: run unit tests from main suite
@@ -85,3 +98,9 @@ test-integration-postgres: remove-tix-file
 	$(call stop_after, \
 		HASURA_GRAPHQL_DATABASE_URL='$(TEST_POSTGRES_URL)' \
 			cabal run graphql-engine:test:graphql-engine-test-postgres)
+
+.PHONY: py-tests
+## py-tests: run the python-based test suite
+py-tests:
+	$(call stop_after, \
+		./server/tests-py/run-new.sh)

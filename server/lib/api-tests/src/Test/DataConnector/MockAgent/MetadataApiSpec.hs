@@ -7,22 +7,18 @@ module Test.DataConnector.MockAgent.MetadataApiSpec where
 
 --------------------------------------------------------------------------------
 
-import Control.Lens qualified as Lens
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
-import Data.Aeson.Lens
 import Data.IORef qualified as IORef
 import Data.List.NonEmpty qualified as NE
 import Data.Vector qualified as Vector
 import Harness.Backend.DataConnector.Mock qualified as Mock
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
-import Harness.Test.BackendType (defaultBackendCapabilities, defaultBackendServerUrl)
-import Harness.Test.Fixture (defaultBackendDisplayNameString, defaultBackendTypeString, defaultSource)
+import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment)
-import Harness.TestEnvironment qualified as TE
-import Harness.Yaml (shouldReturnYaml, shouldReturnYamlF)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (backendTypeConfig))
+import Harness.Yaml (shouldReturnYamlF)
 import Hasura.Backends.DataConnector.API.V0.ConfigSchema (Config (..))
 import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it, pendingWith, shouldBe)
@@ -33,7 +29,7 @@ spec :: SpecWith GlobalTestEnvironment
 spec =
   Fixture.runWithLocalTestEnvironment
     ( NE.fromList
-        [ (Fixture.fixture $ Fixture.Backend Fixture.DataConnectorMock)
+        [ (Fixture.fixture $ Fixture.Backend Mock.backendTypeMetadata)
             { Fixture.mkLocalTestEnvironment = Mock.mkLocalTestEnvironment,
               Fixture.setupTeardown = \(testEnv, mockEnv) ->
                 [Mock.setupAction sourceMetadata Mock.agentConfig (testEnv, mockEnv)]
@@ -44,8 +40,8 @@ spec =
 
 sourceMetadata :: Aeson.Value
 sourceMetadata =
-  let source = defaultSource Fixture.DataConnectorMock
-      backendType = defaultBackendTypeString Fixture.DataConnectorMock
+  let source = BackendType.backendSourceName Mock.backendTypeMetadata
+      backendType = BackendType.backendTypeString Mock.backendTypeMetadata
    in [yaml|
         name : *source
         kind: *backendType
@@ -68,7 +64,7 @@ tests opts = do
           sortYamlArray (Aeson.Array a) = pure $ Aeson.Array (Vector.fromList (sort (Vector.toList a)))
           sortYamlArray _ = fail "Should return Array"
 
-      case defaultSource <$> TE.backendType testEnvironment of
+      case BackendType.backendSourceName <$> backendTypeConfig testEnvironment of
         Nothing -> pendingWith "Backend not found for testEnvironment"
         Just sourceString -> do
           queryConfig <- IORef.readIORef maeQueryConfig

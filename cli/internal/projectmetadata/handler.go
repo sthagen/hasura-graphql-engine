@@ -328,9 +328,11 @@ type Metadata struct {
 	APILimits        interface{} `yaml:"api_limits,omitempty" mapstructure:"api_limits,omitempty"`
 	RestEndpoints    interface{} `yaml:"rest_endpoints,omitempty" mapstructure:"rest_endpoints,omitempty"`
 	InheritedRoles   interface{} `yaml:"inherited_roles,omitempty" mapstructure:"inherited_roles,omitempty"`
+	Opentelemetry    interface{} `yaml:"opentelemetry,omitempty" mapstructure:"opentelemetry,omitempty"`
 
 	// HGE Pro
 	GraphQLSchemaIntrospection interface{} `yaml:"graphql_schema_introspection,omitempty" mapstructure:"graphql_schema_introspection,omitempty"`
+	MetricsConfig              interface{} `yaml:"metrics_config,omitempty" mapstructure:"metrics_config,omitempty"`
 
 	// note: update metadatautil/json.metadata to reflect changes made here
 }

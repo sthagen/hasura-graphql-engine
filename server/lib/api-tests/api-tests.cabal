@@ -10,6 +10,10 @@ library
   hs-source-dirs: src
   default-language: GHC2021
 
+  ghc-options:
+    -Wall
+    -Werror
+
   default-extensions:
     BlockArguments
     DataKinds
@@ -61,9 +65,11 @@ library
   exposed-modules:
     Spec
     SpecHook
+    Test.API.ConcurrentBulkSpec
     Test.API.ExplainSpec
     Test.API.Metadata.ComputedFieldsSpec
     Test.API.Metadata.InconsistentSpec
+    Test.API.Metadata.TransparentDefaultsSpec
     Test.API.Schema.RunSQLSpec
     Test.Auth.Authorization.DisableRootFields.Common
     Test.Auth.Authorization.DisableRootFields.DefaultRootFieldsSpec
@@ -118,13 +124,17 @@ library
     Test.Mutations.Update.PrimaryKeySpec
     Test.Mutations.Upsert.OnConflictSpec
     Test.PortedFromPytest.TestGraphQLQueryBasicCitus
+    Test.PortedFromPytest.TestGraphQLQueryFunctions
     Test.Queries.AggregationSpec
+    Test.Queries.CustomFunctions.PortedSpec
     Test.Queries.DistinctSpec
     Test.Queries.FilterSearch.AggregationPredicatesSpec
     Test.Queries.FilterSearch.FilterSearchSpec
     Test.Queries.NestedObjectSpec
     Test.Queries.Paginate.LimitSpec
     Test.Queries.Paginate.OffsetSpec
+    Test.Queries.Simple.InvalidQuerySpec
+    Test.Queries.Simple.MissingTableSpec
     Test.Queries.Simple.NoQueriesAvailableSpec
     Test.Queries.Simple.ObjectQueriesSpec
     Test.Queries.Simple.OperationNameSpec
@@ -157,6 +167,7 @@ library
     Test.Schema.CustomFieldsSpec
     Test.Schema.DataValidations.Permissions.InsertSpec
     Test.Schema.DataValidations.Permissions.SelectSpec
+    Test.Schema.DataValidations.Permissions.UpdateSpec
     Test.Schema.DefaultValues.DefaultValuesSpec
     Test.Schema.DefaultValues.OnConflictSpec
     Test.Schema.EnumsSpec
@@ -180,6 +191,7 @@ library
 
 executable api-tests
   build-depends:
+    , lens-aeson
     , api-tests
     , base
     , hspec
@@ -307,6 +319,6 @@ executable produce-feature-matrix
     -Wall
     -Werror
     -threaded
-    -rtsopts "-with-rtsopts=-N"
+    -rtsopts "-with-rtsopts=-N4"
 
   main-is: Main.hs

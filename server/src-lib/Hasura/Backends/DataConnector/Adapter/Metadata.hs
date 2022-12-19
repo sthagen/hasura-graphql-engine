@@ -24,7 +24,7 @@ import Hasura.Backends.DataConnector.Adapter.ConfigTransform (transformConnSourc
 import Hasura.Backends.DataConnector.Adapter.Types qualified as DC
 import Hasura.Backends.DataConnector.Agent.Client (AgentClientContext (..), runAgentClientT)
 import Hasura.Backends.Postgres.SQL.Types (PGDescription (..))
-import Hasura.Base.Error (Code (..), QErr, decodeValue, throw400, throw400WithDetail, throw500, withPathK)
+import Hasura.Base.Error (Code (..), QErr (..), decodeValue, throw400, throw400WithDetail, throw500, withPathK)
 import Hasura.Incremental qualified as Inc
 import Hasura.Incremental.Select qualified as Inc
 import Hasura.Logging (Hasura, Logger)
@@ -183,30 +183,32 @@ resolveDatabaseMetadata' ::
   SourceTypeCustomization ->
   m (Either QErr (ResolvedSource 'DataConnector))
 resolveDatabaseMetadata' _ sc@DC.SourceConfig {_scSchema = API.SchemaResponse {..}, ..} customization =
-  -- We need agents to provide the foreign key contraints inside 'API.SchemaResponse'
   let foreignKeys = fmap API._tiForeignKeys _srTables
       tables = Map.fromList $ do
         API.TableInfo {..} <- _srTables
         let primaryKeyColumns = Seq.fromList $ coerce <$> _tiPrimaryKey
         let meta =
               RQL.T.T.DBTableMetadata
-                { _ptmiOid = OID 0,
+                { _ptmiOid = OID 0, -- TODO: This is wrong and needs to be fixed. It is used for diffing tables and seeing what's new/deleted/altered, so reusing 0 for all tables is problematic.
                   _ptmiColumns = do
                     API.ColumnInfo {..} <- _tiColumns
                     pure $
                       RQL.T.C.RawColumnInfo
                         { rciName = Witch.from _ciName,
-                          rciPosition = 1,
+                          rciPosition = 1, -- TODO: This is very wrong and needs to be fixed. It is used for diffing tables and seeing what's new/deleted/altered, so reusing 1 for all columns is problematic.
                           rciType = DC.mkScalarType _scCapabilities _ciType,
                           rciIsNullable = _ciNullable,
                           rciDescription = fmap GQL.Description _ciDescription,
-                          -- TODO: Add Column Mutability to the 'TableInfo'
-                          rciMutability = RQL.T.C.ColumnMutability False False
+                          rciMutability = RQL.T.C.ColumnMutability _ciInsertable _ciUpdatable
                         },
                   _ptmiPrimaryKey = RQL.T.T.PrimaryKey (RQL.T.T.Constraint (DC.ConstraintName "") (OID 0)) <$> NESeq.nonEmptySeq primaryKeyColumns,
                   _ptmiUniqueConstraints = mempty,
                   _ptmiForeignKeys = buildForeignKeySet foreignKeys,
-                  _ptmiViewInfo = Just $ RQL.T.T.ViewInfo False False False,
+                  _ptmiViewInfo =
+                    ( if _tiType == API.Table && _tiInsertable && _tiUpdatable && _tiDeletable
+                        then Nothing
+                        else Just $ RQL.T.T.ViewInfo _tiInsertable _tiUpdatable _tiDeletable
+                    ),
                   _ptmiDescription = fmap PGDescription _tiDescription,
                   _ptmiExtraTableMetadata = ()
                 }
