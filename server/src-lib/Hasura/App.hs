@@ -53,7 +53,7 @@ import Control.Monad.Morph (hoist)
 import Control.Monad.STM (atomically)
 import Control.Monad.Stateless
 import Control.Monad.Trans.Control (MonadBaseControl (..))
-import Control.Monad.Trans.Managed (ManagedT (..), allocate_)
+import Control.Monad.Trans.Managed (ManagedT (..), allocate, allocate_)
 import Control.Retry qualified as Retry
 import Data.Aeson qualified as A
 import Data.ByteString.Char8 qualified as BC
@@ -348,7 +348,10 @@ initialiseServeCtx env GlobalCtx {..} so@ServeOptions {..} serverMetrics = do
   -- log postgres connection info
   unLogger logger $ connInfoToLog _gcMetadataDbConnInfo
 
-  metadataDbPool <- liftIO $ PG.initPGPool _gcMetadataDbConnInfo soConnParams pgLogger
+  metadataDbPool <-
+    allocate
+      (liftIO $ PG.initPGPool _gcMetadataDbConnInfo soConnParams pgLogger)
+      (liftIO . PG.destroyPGPool)
 
   let maybeDefaultSourceConfig =
         fst _gcDefaultPostgresConnInfo <&> \(dbUrlConf, _) ->
@@ -566,10 +569,11 @@ runHGEServer ::
   -- | A hook which can be called to indicate when the server is started succesfully
   Maybe (IO ()) ->
   PrometheusMetrics ->
+  Tracing.SamplingPolicy ->
   ManagedT m ()
-runHGEServer setupHook env serveOptions serveCtx initTime postPollHook serverMetrics ekgStore startupStatusHook prometheusMetrics = do
+runHGEServer setupHook env serveOptions serveCtx initTime postPollHook serverMetrics ekgStore startupStatusHook prometheusMetrics traceSamplingPolicy = do
   waiApplication <-
-    mkHGEServer setupHook env serveOptions serveCtx postPollHook serverMetrics ekgStore prometheusMetrics
+    mkHGEServer setupHook env serveOptions serveCtx postPollHook serverMetrics ekgStore prometheusMetrics traceSamplingPolicy
 
   let logger = _lsLogger $ _scLoggers serveCtx
   -- `startupStatusHook`: add `Service started successfully` message to config_status
@@ -657,8 +661,9 @@ mkHGEServer ::
   ServerMetrics ->
   EKG.Store EKG.EmptyMetrics ->
   PrometheusMetrics ->
+  Tracing.SamplingPolicy ->
   ManagedT m Application
-mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} postPollHook serverMetrics ekgStore prometheusMetrics = do
+mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} postPollHook serverMetrics ekgStore prometheusMetrics traceSamplingPolicy = do
   -- Comment this to enable expensive assertions from "GHC.AssertNF". These
   -- will log lines to STDOUT containing "not in normal form". In the future we
   -- could try to integrate this into our tests. For now this is a development
@@ -729,6 +734,7 @@ mkHGEServer setupHook env ServeOptions {..} ServeCtx {..} postPollHook serverMet
           soEnableMetadataQueryLogging
           soDefaultNamingConvention
           soMetadataDefaults
+          traceSamplingPolicy
 
   let serverConfigCtx =
         ServerConfigCtx

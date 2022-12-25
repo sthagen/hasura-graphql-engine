@@ -9,6 +9,8 @@ module Harness.Test.Fixture
     runSingleSetup,
     runWithLocalTestEnvironment,
     runWithLocalTestEnvironmentSingleSetup,
+    runWithLocalTestEnvironmentInternal,
+    createDatabases,
     Fixture (..),
     fixture,
     FixtureName (..),
@@ -42,6 +44,7 @@ import Harness.Exceptions
 import Harness.Logging
 import Harness.Test.BackendType
 import Harness.Test.CustomOptions
+import Harness.Test.FixtureName
 import Harness.Test.SetupAction (SetupAction (..))
 import Harness.Test.SetupAction qualified as SetupAction
 import Harness.TestEnvironment
@@ -155,7 +158,10 @@ runWithLocalTestEnvironmentInternal aroundSomeWith fixtures tests =
 -- We want to be able to report exceptions happening both during the tests
 -- and at teardown, which is why we use a custom re-implementation of
 -- @bracket@.
-fixtureBracket :: Fixture b -> (ActionWith (TestEnvironment, b)) -> ActionWith GlobalTestEnvironment
+fixtureBracket ::
+  Fixture b ->
+  (ActionWith (TestEnvironment, b)) ->
+  ActionWith GlobalTestEnvironment
 fixtureBracket
   Fixture
     { name,
@@ -228,9 +234,7 @@ setupTestEnvironment name globalTestEnvironment = do
 
   let testEnvironment =
         TestEnvironment
-          { backendTypeConfig = case name of
-              Backend db -> Just db
-              _ -> Nothing,
+          { fixtureName = name,
             uniqueTestId = uniqueTestId,
             globalEnvironment = globalTestEnvironment,
             testingRole = Nothing
@@ -338,23 +342,6 @@ fixture name = Fixture {..}
     setupTeardown = const []
     mkLocalTestEnvironment = noLocalTestEnvironment
     customOptions = Nothing
-
--- | A name describing the given context.
-data FixtureName
-  = Backend BackendTypeConfig
-  | RemoteGraphQLServer
-  | Combine FixtureName FixtureName
-
-backendTypesForFixture :: FixtureName -> S.Set BackendType
-backendTypesForFixture (Backend be) = S.singleton (backendType be)
-backendTypesForFixture RemoteGraphQLServer = mempty
-backendTypesForFixture (Combine a b) =
-  backendTypesForFixture a <> backendTypesForFixture b
-
-instance Show FixtureName where
-  show (Backend backend) = show (backendType backend)
-  show RemoteGraphQLServer = "RemoteGraphQLServer"
-  show (Combine name1 name2) = show name1 ++ "-" ++ show name2
 
 -- | Default function for 'mkLocalTestEnvironment' when there's no local testEnvironment.
 noLocalTestEnvironment :: TestEnvironment -> Managed ()

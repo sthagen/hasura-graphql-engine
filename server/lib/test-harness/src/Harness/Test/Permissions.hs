@@ -26,6 +26,7 @@ where
 import Control.Exception (SomeException, finally, try)
 import Data.Aeson qualified as Aeson
 import Data.List (subsequences)
+import Data.Text qualified as Text
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
 import Harness.Test.BackendType (BackendTypeConfig)
@@ -47,7 +48,8 @@ data Permission
   deriving (Eq, Show)
 
 data SelectPermissionDetails = SelectPermissionDetails
-  { selectPermissionTable :: Text,
+  { selectPermissionSource :: Maybe Text,
+    selectPermissionTable :: Text,
     selectPermissionRole :: Text,
     selectPermissionColumns :: [Text],
     selectPermissionRows :: Aeson.Value,
@@ -57,7 +59,8 @@ data SelectPermissionDetails = SelectPermissionDetails
   deriving (Eq, Show)
 
 data UpdatePermissionDetails = UpdatePermissionDetails
-  { updatePermissionTable :: Text,
+  { updatePermissionSource :: Maybe Text,
+    updatePermissionTable :: Text,
     updatePermissionRole :: Text,
     updatePermissionColumns :: [Text],
     updatePermissionRows :: Aeson.Value
@@ -65,7 +68,8 @@ data UpdatePermissionDetails = UpdatePermissionDetails
   deriving (Eq, Show)
 
 data InsertPermissionDetails = InsertPermissionDetails
-  { insertPermissionTable :: Text,
+  { insertPermissionSource :: Maybe Text,
+    insertPermissionTable :: Text,
     insertPermissionRole :: Text,
     insertPermissionColumns :: [Text],
     insertPermissionRows :: Aeson.Value
@@ -75,7 +79,8 @@ data InsertPermissionDetails = InsertPermissionDetails
 selectPermission :: SelectPermissionDetails
 selectPermission =
   SelectPermissionDetails
-    { selectPermissionTable = mempty,
+    { selectPermissionSource = Nothing,
+      selectPermissionTable = mempty,
       selectPermissionRole = mempty,
       selectPermissionColumns = mempty,
       selectPermissionRows = [yaml|{}|],
@@ -86,7 +91,8 @@ selectPermission =
 updatePermission :: UpdatePermissionDetails
 updatePermission =
   UpdatePermissionDetails
-    { updatePermissionTable = mempty,
+    { updatePermissionSource = Nothing,
+      updatePermissionTable = mempty,
       updatePermissionRole = mempty,
       updatePermissionColumns = mempty,
       updatePermissionRows = [yaml|{}|]
@@ -95,7 +101,8 @@ updatePermission =
 insertPermission :: InsertPermissionDetails
 insertPermission =
   InsertPermissionDetails
-    { insertPermissionTable = mempty,
+    { insertPermissionSource = Nothing,
+      insertPermissionTable = mempty,
       insertPermissionRole = mempty,
       insertPermissionColumns = mempty,
       insertPermissionRows = [yaml|{}|]
@@ -152,7 +159,7 @@ withPermissions (toList -> permissions) = mapSpecForest (map go)
       traverse_ (createPermission testEnvironment) permissions'
 
       test testEnvironment {testingRole = Just "success"}
-        `finally` for_ (backendTypeConfig testEnvironment) \config ->
+        `finally` for_ (getBackendTypeConfig testEnvironment) \config ->
           traverse_ (dropPermission config testEnvironment) permissions'
 
     failing :: (ActionWith TestEnvironment -> IO ()) -> ActionWith TestEnvironment -> IO ()
@@ -178,7 +185,7 @@ withPermissions (toList -> permissions) = mapSpecForest (map go)
                     pure ()
 
           attempt (test testEnvironment {testingRole = Just "failure"})
-            `finally` for_ (backendTypeConfig testEnvironment) \config ->
+            `finally` for_ (getBackendTypeConfig testEnvironment) \config ->
               traverse_ (dropPermission config testEnvironment) permissions'
 
 -- | Update the role on a given permission.
@@ -193,10 +200,14 @@ withRole role = \case
 -- should implement their own variation in its harness module.
 createPermission :: TestEnvironment -> Permission -> IO ()
 createPermission testEnvironment (InsertPermission InsertPermissionDetails {..}) = do
-  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ backendTypeConfig testEnvironment
+  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
       schemaName = Schema.getSchemaName testEnvironment
       backendType = BackendType.backendTypeString backendTypeMetadata
-      sourceName = BackendType.backendSourceName backendTypeMetadata
+      sourceName =
+        maybe
+          (BackendType.backendSourceName backendTypeMetadata)
+          Text.unpack
+          insertPermissionSource
       requestType = backendType <> "_create_insert_permission"
       qualifiedTable = Schema.mkTableField backendTypeMetadata schemaName insertPermissionTable
   GraphqlEngine.postMetadata_
@@ -214,10 +225,14 @@ createPermission testEnvironment (InsertPermission InsertPermissionDetails {..})
           set: {}
     |]
 createPermission testEnvironment (UpdatePermission UpdatePermissionDetails {..}) = do
-  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ backendTypeConfig testEnvironment
+  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
       schemaName = Schema.getSchemaName testEnvironment
       backendType = BackendType.backendTypeString backendTypeMetadata
-      sourceName = BackendType.backendSourceName backendTypeMetadata
+      sourceName =
+        maybe
+          (BackendType.backendSourceName backendTypeMetadata)
+          Text.unpack
+          updatePermissionSource
       requestType = backendType <> "_create_update_permission"
       qualifiedTable = Schema.mkTableField backendTypeMetadata schemaName updatePermissionTable
   GraphqlEngine.postMetadata_
@@ -235,10 +250,14 @@ createPermission testEnvironment (UpdatePermission UpdatePermissionDetails {..})
           set: {}
     |]
 createPermission testEnvironment (SelectPermission SelectPermissionDetails {..}) = do
-  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ backendTypeConfig testEnvironment
+  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
       schemaName = Schema.getSchemaName testEnvironment
       backendType = BackendType.backendTypeString backendTypeMetadata
-      sourceName = BackendType.backendSourceName backendTypeMetadata
+      sourceName =
+        maybe
+          (BackendType.backendSourceName backendTypeMetadata)
+          Text.unpack
+          selectPermissionSource
       requestType = backendType <> "_create_select_permission"
       qualifiedTable = Schema.mkTableField backendTypeMetadata schemaName selectPermissionTable
   GraphqlEngine.postMetadata_
