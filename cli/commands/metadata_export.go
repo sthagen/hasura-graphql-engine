@@ -9,11 +9,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const longHelpMetadataExportCmd = `Export Hasura metadata and save it in the` + " ``/metadata``" + ` directory.
+const longHelpMetadataExportCmd = `Export Hasura Metadata and save it in the` + " ``/metadata``" + ` directory.
 The output is a collection of yaml files which captures all the Metadata required
 by the GraphQL Engine. This includes info about tables that are tracked,
 permission rules, relationships, and event triggers that are defined
-on those tables.`
+on those tables.
+
+Further reading:
+- https://hasura.io/docs/latest/migrations-metadata-seeds/manage-metadata/
+- https://hasura.io/docs/latest/migrations-metadata-seeds/metadata-format/
+`
 
 func newMetadataExportCmd(ec *cli.ExecutionContext) *cobra.Command {
 	opts := &MetadataExportOptions{

@@ -43,7 +43,11 @@ func NewInitCmd(ec *cli.ExecutionContext) *cobra.Command {
 	initCmd := &cobra.Command{
 		Use:   "init [directory-name]",
 		Short: "Initialize a new Hasura GraphQL Engine project",
-		Long:  "This is generally the first command that you would run in a new project. It creates a directory with the necessary files and directories to configure an instance of the Hasura GraphQL Engine. You can pass various flags to customize the behavior of the command and pre-configure environment variables.",
+		Long: `This is generally the first command that you would run in a new project. It creates a directory with the necessary files and directories to configure an instance of the Hasura GraphQL Engine. You can pass various flags to customize the behavior of the command and pre-configure environment variables.
+		
+Further reading:
+- https://hasura.io/docs/latest/migrations-metadata-seeds/migrations-metadata-setup/
+`,
 		Example: `  # Create a directory to store migrations
   hasura init [directory-name]
 
@@ -52,7 +56,7 @@ func NewInitCmd(ec *cli.ExecutionContext) *cobra.Command {
   # Create a directory with endpoint and admin secret configured:
   hasura init <my-project> --endpoint https://my-graphql-engine.com --admin-secret adminsecretkey
 
-  # Create a hasura project in the current working directory
+  # Create a Hasura Project in the current working directory
   hasura init .
 
   # See https://hasura.io/docs/latest/graphql/core/migrations/index.html for more details`,
@@ -81,9 +85,9 @@ func NewInitCmd(ec *cli.ExecutionContext) *cobra.Command {
 	f := initCmd.Flags()
 	f.Var(cli.NewConfigVersionValue(cli.V3, &opts.Version), "version", "config version to be used")
 	f.StringVar(&opts.InitDir, "directory", "", "name of directory where files will be created")
-	f.StringVar(&opts.Endpoint, "endpoint", "", "http(s) endpoint for Hasura GraphQL engine")
-	f.StringVar(&opts.AdminSecret, "admin-secret", "", "admin secret for Hasura GraphQL engine")
-	f.StringVar(&opts.AdminSecret, "access-key", "", "access key for Hasura GraphQL engine")
+	f.StringVar(&opts.Endpoint, "endpoint", "", "http(s) endpoint for Hasura GraphQL Engine")
+	f.StringVar(&opts.AdminSecret, "admin-secret", "", "admin secret for Hasura GraphQL Engine")
+	f.StringVar(&opts.AdminSecret, "access-key", "", "access key for Hasura GraphQL Engine")
 
 	f.String("install-manifest", "", "install manifest to be cloned")
 	if err := f.MarkDeprecated("install-manifest", "refer: https://github.com/hasura/graphql-engine/tree/stable/install-manifests"); err != nil {

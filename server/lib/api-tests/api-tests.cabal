@@ -71,6 +71,7 @@ library
     Test.API.ConcurrentBulkSpec
     Test.API.ExplainSpec
     Test.API.Metadata.ComputedFieldsSpec
+    Test.API.Metadata.SuggestRelationshipsSpec
     Test.API.Metadata.InconsistentSpec
     Test.API.Metadata.TransparentDefaultsSpec
     Test.API.Schema.RunSQLSpec
@@ -103,6 +104,7 @@ library
     Test.DataConnector.MockAgent.TransformedConfigurationSpec
     Test.DataConnector.QuerySpec
     Test.DataConnector.SelectPermissionsSpec
+    Test.EventTriggers.EventTriggersSpecialCharactersSpec
     Test.EventTriggers.MSSQL.EventTriggerDropSourceCleanupSpec
     Test.EventTriggers.MSSQL.EventTriggersForReplicationSpec
     Test.EventTriggers.MSSQL.EventTriggersUniqueNameSpec

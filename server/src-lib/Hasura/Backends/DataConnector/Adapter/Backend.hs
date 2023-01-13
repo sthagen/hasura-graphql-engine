@@ -19,6 +19,7 @@ import Data.Text.Casing qualified as C
 import Data.Text.Extended ((<<>))
 import Hasura.Backends.DataConnector.API qualified as API
 import Hasura.Backends.DataConnector.Adapter.Types qualified as DC
+import Hasura.Backends.DataConnector.Adapter.Types.Mutations qualified as DC
 import Hasura.Base.Error (Code (ValidationFailed), QErr, runAesonParser, throw400)
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
@@ -68,8 +69,8 @@ instance Backend 'DataConnector where
   type ComputedFieldImplicitArguments 'DataConnector = Unimplemented
   type ComputedFieldReturn 'DataConnector = Unimplemented
 
+  type UpdateVariant 'DataConnector = DC.DataConnectorUpdateVariant
   type BackendInsert 'DataConnector = DC.BackendInsert
-  type BackendUpdate 'DataConnector = DC.BackendUpdate
 
   type XComputedField 'DataConnector = XDisable
   type XRelay 'DataConnector = XDisable
@@ -81,15 +82,10 @@ instance Backend 'DataConnector where
   type HealthCheckTest 'DataConnector = Void
 
   isComparableType :: ScalarType 'DataConnector -> Bool
-  isComparableType = \case
-    DC.NumberTy -> True
-    DC.StringTy -> True
-    DC.BoolTy -> False
-    DC.CustomTy _ _ -> False
+  isComparableType = const False
 
   isNumType :: ScalarType 'DataConnector -> Bool
-  isNumType DC.NumberTy = True
-  isNumType _ = False
+  isNumType = const False
 
   getCustomAggregateOperators :: DC.SourceConfig -> HashMap G.Name (HashMap DC.ScalarType DC.ScalarType)
   getCustomAggregateOperators DC.SourceConfig {..} =
@@ -179,10 +175,7 @@ parseValue :: DC.ScalarType -> J.Value -> J.Parser J.Value
 parseValue type' val =
   case (type', val) of
     (_, J.Null) -> pure J.Null
-    (DC.StringTy, value) -> J.String <$> J.parseJSON value
-    (DC.BoolTy, value) -> J.Bool <$> J.parseJSON value
-    (DC.NumberTy, value) -> J.Number <$> J.parseJSON value
-    (DC.CustomTy _ graphQLType, value) -> case graphQLType of
+    (DC.ScalarType _ graphQLType, value) -> case graphQLType of
       Nothing -> pure value
       Just DC.GraphQLInt -> (J.Number . fromIntegral) <$> J.parseJSON @Int value
       Just DC.GraphQLFloat -> (J.Number . fromFloatDigits) <$> J.parseJSON @Double value
@@ -195,4 +188,7 @@ parseValue type' val =
 columnTypeToScalarType :: ColumnType 'DataConnector -> DC.ScalarType
 columnTypeToScalarType = \case
   ColumnScalar scalarType -> scalarType
-  ColumnEnumReference _ -> DC.StringTy
+  -- Data connectors does not yet support enum tables.
+  -- If/when we add this support, we probably want to
+  -- embed the enum scalar type name within the `EnumReference` record type
+  ColumnEnumReference _ -> error "columnTypeToScalarType got enum"

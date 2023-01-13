@@ -23,14 +23,18 @@ func newActionsCreateCmd(ec *cli.ExecutionContext, v *viper.Viper) *cobra.Comman
 	actionsCreateCmd := &cobra.Command{
 		Use:   "create [action-name]",
 		Short: "Create a Hasura Action",
-		Long:  "This command allows you to create an Action to extend Hasura's schema with custom business logic using queries and mutations. Optional flags can be used to derive the Action from an existing GraphQL query or mutation. Additionally, codegen can be bundled with the creation of the Action to provide you ready-to-use boilerplate with your framework of choice.",
+		Long: `This command allows you to create an Action to extend Hasura's schema with custom business logic using queries and mutations. Optional flags can be used to derive the Action from an existing GraphQL query or mutation. Additionally, codegen can be bundled with the creation of the Action to provide you ready-to-use boilerplate with your framework of choice.
+		
+Further Reading:
+- https://hasura.io/docs/latest/actions/create/
+`,
 		Example: `  # Create a Hasura Action
   hasura actions create [action-name]
 
   # Create a Hasura Action with codegen
   hasura actions create [action-name] --with-codegen
 
-  # Create a Hasura Action by deriving from a hasura operation
+  # Create a Hasura Action by deriving from a Hasura operation
   hasura actions create [action-name] --derive-from ''
 
   # Create a Hasura Action with a different kind or webhook
@@ -50,9 +54,9 @@ func newActionsCreateCmd(ec *cli.ExecutionContext, v *viper.Viper) *cobra.Comman
 	f := actionsCreateCmd.Flags()
 
 	f.StringVar(&opts.deriveFrom, "derive-from", "", "derive action from a Hasura operation")
-	f.BoolVar(&opts.withCodegen, "with-codegen", false, "create action along with codegen")
-	f.String("kind", "", "kind to use in action")
-	f.String("webhook", "", "webhook to use in action")
+	f.BoolVar(&opts.withCodegen, "with-codegen", false, "create Action along with codegen")
+	f.String("kind", "", "kind to use in Action")
+	f.String("webhook", "", "webhook to use in Action")
 
 	// bind to viper
 	util.BindPFlag(v, "actions.kind", f.Lookup("kind"))

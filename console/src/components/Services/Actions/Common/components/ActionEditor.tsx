@@ -146,9 +146,14 @@ const ActionEditor: React.FC<ActionEditorProps> = ({
             isProConsole(window.__env) &&
             (isImportFromOASEnabled ? (
               <div className="mb-xs">
-                <Button icon={<FaMagic />} onClick={onOpenActionGenerator}>
-                  Import from OpenAPI
-                </Button>
+                <Analytics
+                  name="action-tab-btn-import-action-from-openapi"
+                  passHtmlAttributesToChildren
+                >
+                  <Button icon={<FaMagic />} onClick={onOpenActionGenerator}>
+                    Import from OpenAPI
+                  </Button>
+                </Analytics>
               </div>
             ) : (
               <FeatureFlagToast
@@ -252,7 +257,7 @@ const ActionEditor: React.FC<ActionEditorProps> = ({
                       BETA
                     </Badge>
                     <div className="text-muted font-normal">
-                      Generate GraphQL types from the currenty
+                      Generate GraphQL types from the current
                       <p>state of an existing tracked table.</p>
                     </div>
                   </div>
