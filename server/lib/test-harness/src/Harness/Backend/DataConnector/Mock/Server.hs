@@ -1,8 +1,10 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Mock Agent Warp server backend
 module Harness.Backend.DataConnector.Mock.Server
-  ( MockConfig (..),
+  ( AgentRequest (..),
+    MockConfig (..),
     chinookMock,
     mockAgentPort,
     runMockServer,
@@ -23,13 +25,17 @@ import Servant
 
 --------------------------------------------------------------------------------
 
--- Note: Only the _queryResponse field allows mock errors at present.
--- This can be extended at a later point if required.
---
+data AgentRequest
+  = Schema
+  | Query API.QueryRequest
+  | Mutation API.MutationRequest
+  deriving stock (Eq, Show)
+
 data MockConfig = MockConfig
   { _capabilitiesResponse :: API.CapabilitiesResponse,
     _schemaResponse :: API.SchemaResponse,
-    _queryResponse :: API.QueryRequest -> Either API.ErrorResponse API.QueryResponse
+    _queryResponse :: API.QueryRequest -> Either API.ErrorResponse API.QueryResponse,
+    _mutationResponse :: API.MutationRequest -> Either API.ErrorResponse API.MutationResponse
   }
 
 mkTableName :: Text -> API.TableName
@@ -43,7 +49,15 @@ capabilities =
         API.Capabilities
           { API._cDataSchema = API.defaultDataSchemaCapabilities,
             API._cQueries = Just API.QueryCapabilities,
-            API._cMutations = Nothing,
+            API._cMutations =
+              Just $
+                API.MutationCapabilities
+                  { API._mcInsertCapabilities = Just API.InsertCapabilities {API._icSupportsNestedInserts = False},
+                    API._mcUpdateCapabilities = Just API.UpdateCapabilities,
+                    API._mcDeleteCapabilities = Just API.DeleteCapabilities,
+                    API._mcAtomicitySupportLevel = Just API.HeterogeneousOperationsAtomicity,
+                    API._mcReturningCapabilities = Just API.ReturningCapabilities
+                  },
             API._cSubscriptions = Nothing,
             API._cScalarTypes = scalarTypesCapabilities,
             API._cRelationships = Just API.RelationshipCapabilities {},
@@ -54,7 +68,8 @@ capabilities =
                   },
             API._cMetrics = Just API.MetricsCapabilities {},
             API._cExplain = Just API.ExplainCapabilities {},
-            API._cRaw = Just API.RawCapabilities {}
+            API._cRaw = Just API.RawCapabilities {},
+            API._cDatasets = Just API.DatasetCapabilities {}
           },
       _crConfigSchemaResponse =
         API.ConfigSchemaResponse
@@ -82,18 +97,23 @@ capabilities =
     scalarTypesCapabilities =
       API.ScalarTypesCapabilities $
         HashMap.fromList
-          [ mkScalarTypeCapability "number" minMaxFunctions $ Just API.GraphQLFloat,
-            mkScalarTypeCapability "string" minMaxFunctions $ Just API.GraphQLString,
-            mkScalarTypeCapability "MyInt" mempty $ Just API.GraphQLInt,
-            mkScalarTypeCapability "MyFloat" mempty $ Just API.GraphQLFloat,
-            mkScalarTypeCapability "MyString" mempty $ Just API.GraphQLString,
-            mkScalarTypeCapability "MyBoolean" mempty $ Just API.GraphQLBoolean,
-            mkScalarTypeCapability "MyID" mempty $ Just API.GraphQLID,
-            mkScalarTypeCapability "MyAnything" mempty Nothing
+          [ mkScalarTypeCapability "number" minMaxFunctions numericUpdateOperators $ Just API.GraphQLFloat,
+            mkScalarTypeCapability "string" minMaxFunctions mempty $ Just API.GraphQLString,
+            mkScalarTypeCapability "MyInt" mempty numericUpdateOperators $ Just API.GraphQLInt,
+            mkScalarTypeCapability "MyFloat" mempty numericUpdateOperators $ Just API.GraphQLFloat,
+            mkScalarTypeCapability "MyString" mempty mempty $ Just API.GraphQLString,
+            mkScalarTypeCapability "MyBoolean" mempty mempty $ Just API.GraphQLBoolean,
+            mkScalarTypeCapability "MyID" mempty mempty $ Just API.GraphQLID,
+            mkScalarTypeCapability "MyAnything" mempty mempty Nothing
           ]
-    mkScalarTypeCapability :: Text -> (API.ScalarType -> API.AggregateFunctions) -> Maybe API.GraphQLType -> (API.ScalarType, API.ScalarTypeCapabilities)
-    mkScalarTypeCapability name aggregateFunctions gqlType =
-      (scalarType, API.ScalarTypeCapabilities mempty (aggregateFunctions scalarType) gqlType)
+    mkScalarTypeCapability ::
+      Text ->
+      (API.ScalarType -> API.AggregateFunctions) ->
+      (API.ScalarType -> API.UpdateColumnOperators) ->
+      Maybe API.GraphQLType ->
+      (API.ScalarType, API.ScalarTypeCapabilities)
+    mkScalarTypeCapability name aggregateFunctions updateColumnOperators gqlType =
+      (scalarType, API.ScalarTypeCapabilities mempty (aggregateFunctions scalarType) (updateColumnOperators scalarType) gqlType)
       where
         scalarType = API.ScalarType name
 
@@ -103,6 +123,12 @@ capabilities =
         HashMap.fromList $
           (,resultType)
             <$> [[G.name|min|], [G.name|max|]]
+
+    numericUpdateOperators :: API.ScalarType -> API.UpdateColumnOperators
+    numericUpdateOperators scalarType =
+      API.UpdateColumnOperators $
+        HashMap.fromList $
+          [(API.UpdateColumnOperatorName [G.name|inc|], API.UpdateColumnOperatorDefinition scalarType)]
 
 -- | Stock Schema for a Chinook Agent
 schema :: API.SchemaResponse
@@ -744,7 +770,8 @@ chinookMock =
   MockConfig
     { _capabilitiesResponse = capabilities,
       _schemaResponse = schema,
-      _queryResponse = \_ -> Right $ API.QueryResponse (Just []) Nothing
+      _queryResponse = \_request -> Right $ API.QueryResponse (Just []) Nothing,
+      _mutationResponse = \_request -> Right $ API.MutationResponse []
     }
 
 --------------------------------------------------------------------------------
@@ -754,28 +781,34 @@ mockCapabilitiesHandler mcfg = liftIO $ do
   cfg <- I.readIORef mcfg
   pure $ inject $ SOP.I $ _capabilitiesResponse cfg
 
-mockSchemaHandler :: I.IORef MockConfig -> I.IORef (Maybe API.Config) -> API.SourceName -> API.Config -> Handler (Union API.SchemaResponses)
-mockSchemaHandler mcfg mQueryConfig _sourceName queryConfig = liftIO $ do
+mockSchemaHandler :: I.IORef MockConfig -> I.IORef (Maybe AgentRequest) -> I.IORef (Maybe API.Config) -> API.SourceName -> API.Config -> Handler (Union API.SchemaResponses)
+mockSchemaHandler mcfg mRecordedRequest mRecordedRequestConfig _sourceName requestConfig = liftIO $ do
   cfg <- I.readIORef mcfg
-  I.writeIORef mQueryConfig (Just queryConfig)
+  I.writeIORef mRecordedRequest (Just Schema)
+  I.writeIORef mRecordedRequestConfig (Just requestConfig)
   pure $ inject $ SOP.I $ _schemaResponse cfg
 
-mockQueryHandler :: I.IORef MockConfig -> I.IORef (Maybe API.QueryRequest) -> I.IORef (Maybe API.Config) -> API.SourceName -> API.Config -> API.QueryRequest -> Handler (Union API.QueryResponses)
-mockQueryHandler mcfg mquery mQueryCfg _sourceName queryConfig query = liftIO $ do
+mockQueryHandler :: I.IORef MockConfig -> I.IORef (Maybe AgentRequest) -> I.IORef (Maybe API.Config) -> API.SourceName -> API.Config -> API.QueryRequest -> Handler (Union API.QueryResponses)
+mockQueryHandler mcfg mRecordedRequest mRecordedRequestConfig _sourceName requestConfig query = liftIO $ do
   handler <- fmap _queryResponse $ I.readIORef mcfg
-  I.writeIORef mquery (Just query)
-  I.writeIORef mQueryCfg (Just queryConfig)
+  I.writeIORef mRecordedRequest (Just $ Query query)
+  I.writeIORef mRecordedRequestConfig (Just requestConfig)
   case handler query of
-    Left e -> pure $ inject $ SOP.I e
-    Right r -> pure $ inject $ SOP.I r
+    Left err -> pure $ inject $ SOP.I err
+    Right response -> pure $ inject $ SOP.I response
+
+mockMutationHandler :: I.IORef MockConfig -> I.IORef (Maybe AgentRequest) -> I.IORef (Maybe API.Config) -> API.SourceName -> API.Config -> API.MutationRequest -> Handler (Union API.MutationResponses)
+mockMutationHandler mcfg mRecordedRequest mRecordedRequestConfig _sourceName requestConfig mutation = liftIO $ do
+  handler <- fmap _mutationResponse $ I.readIORef mcfg
+  I.writeIORef mRecordedRequest (Just $ Mutation mutation)
+  I.writeIORef mRecordedRequestConfig (Just requestConfig)
+  case handler mutation of
+    Left err -> pure $ inject $ SOP.I err
+    Right response -> pure $ inject $ SOP.I response
 
 -- Returns an empty explain response for now
 explainHandler :: API.SourceName -> API.Config -> API.QueryRequest -> Handler API.ExplainResponse
 explainHandler _sourceName _queryConfig _query = pure $ API.ExplainResponse [] ""
-
--- Returns an empty mutation response for now
-mutationsHandler :: API.SourceName -> API.Config -> API.MutationRequest -> Handler (Union API.MutationResponses)
-mutationsHandler _ _ _ = pure . inject . SOP.I $ API.MutationResponse []
 
 healthcheckHandler :: Maybe API.SourceName -> Maybe API.Config -> Handler NoContent
 healthcheckHandler _sourceName _config = pure NoContent
@@ -786,21 +819,29 @@ metricsHandler = pure "# NOTE: Metrics would go here."
 rawHandler :: API.SourceName -> API.Config -> API.RawRequest -> Handler API.RawResponse
 rawHandler _ _ _ = pure $ API.RawResponse [] -- NOTE: Raw query response would go here.
 
-dcMockableServer :: I.IORef MockConfig -> I.IORef (Maybe API.QueryRequest) -> I.IORef (Maybe API.Config) -> Server API.Api
-dcMockableServer mcfg mquery mQueryConfig =
+datasetHandler :: (API.DatasetTemplateName -> Handler API.DatasetGetResponse) :<|> ((API.DatasetCloneName -> API.DatasetPostRequest -> Handler API.DatasetPostResponse) :<|> (API.DatasetCloneName -> Handler API.DatasetDeleteResponse))
+datasetHandler = datasetGetHandler :<|> datasetPostHandler :<|> datasetDeleteHandler
+  where
+    datasetGetHandler _ = pure $ API.datasetGetSuccess
+    datasetPostHandler _ _ = pure $ API.DatasetPostResponse API.emptyConfig
+    datasetDeleteHandler _ = pure $ API.datasetDeleteSuccess
+
+dcMockableServer :: I.IORef MockConfig -> I.IORef (Maybe AgentRequest) -> I.IORef (Maybe API.Config) -> Server API.Api
+dcMockableServer mcfg mRecordedRequest mRecordedRequestConfig =
   mockCapabilitiesHandler mcfg
-    :<|> mockSchemaHandler mcfg mQueryConfig
-    :<|> mockQueryHandler mcfg mquery mQueryConfig
+    :<|> mockSchemaHandler mcfg mRecordedRequest mRecordedRequestConfig
+    :<|> mockQueryHandler mcfg mRecordedRequest mRecordedRequestConfig
     :<|> explainHandler
-    :<|> mutationsHandler
+    :<|> mockMutationHandler mcfg mRecordedRequest mRecordedRequestConfig
     :<|> healthcheckHandler
     :<|> metricsHandler
     :<|> rawHandler
+    :<|> datasetHandler
 
 mockAgentPort :: Warp.Port
 mockAgentPort = 65006
 
-runMockServer :: I.IORef MockConfig -> I.IORef (Maybe API.QueryRequest) -> I.IORef (Maybe API.Config) -> IO ()
-runMockServer mcfg mquery mQueryConfig = do
-  let app = serve (Proxy :: Proxy API.Api) $ dcMockableServer mcfg mquery mQueryConfig
+runMockServer :: I.IORef MockConfig -> I.IORef (Maybe AgentRequest) -> I.IORef (Maybe API.Config) -> IO ()
+runMockServer mcfg mRecordedRequest mRecordedRequestConfig = do
+  let app = serve (Proxy :: Proxy API.Api) $ dcMockableServer mcfg mRecordedRequest mRecordedRequestConfig
   Warp.run mockAgentPort app

@@ -35,6 +35,11 @@ const numberCapabilities: ScalarTypeCapabilities = {
     var_samp: 'number',
     variance: 'number'
   },
+  update_column_operators: {
+    inc: {
+      argument_type: 'number'
+    }
+  },
   graphql_type: 'Float'
 }
 
@@ -57,7 +62,8 @@ const capabilities: Capabilities = {
       supports_relations: true
     }
   },
-  scalar_types: scalarTypes
+  scalar_types: scalarTypes,
+  datasets: {}
 }
 
 export const capabilitiesResponse: CapabilitiesResponse = {

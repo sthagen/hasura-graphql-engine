@@ -4,22 +4,10 @@
   "projectType": "application",
   "targets": {
     "build-server-assets": {
-      "executor": "@nrwl/workspace:run-commands",
+      "executor": "@hasura/internal-plugin:build-server-assets",
       "inputs": ["{workspaceRoot}/dist/apps/console-ee/**"],
       "outputs": ["dist/apps/server-assets-console-ee"],
-      "dependsOn": ["build"],
-      "options": {
-        "commands": [
-          "rm -rf dist/apps/server-assets-console-ee",
-          "cp -r dist/apps/console-ee dist/apps/server-assets-console-ee",
-          "mkdir -p dist/apps/server-assets-console-ee/versioned",
-          "mv dist/apps/server-assets-console-ee/*.js dist/apps/server-assets-console-ee/versioned",
-          "mv dist/apps/server-assets-console-ee/*.css dist/apps/server-assets-console-ee/versioned",
-          "gzip -r -f dist/apps/server-assets-console-ee/versioned",
-          "mv dist/apps/server-assets-console-ee/*.map dist/apps/server-assets-console-ee/*.txt  dist/apps/server-assets-console-ee/versioned"
-        ],
-        "parallel": false
-      }
+      "dependsOn": ["build"]
     },
     "build": {
       "executor": "@nrwl/web:webpack",
@@ -41,8 +29,7 @@
           }
         ],
         "styles": [
-          "apps/console-ee/src/css/tailwind.css",
-          "apps/console-ee/src/css/legacy-boostrap.css"
+          "apps/console-ee/src/css/tailwind.css"
         ],
         "scripts": [],
         "webpackConfig": "apps/console-ee/custom-webpack.config.js",
@@ -55,7 +42,7 @@
           "extractLicenses": false,
           "optimization": false,
           "sourceMap": true,
-          "vendorChunk": false
+          "vendorChunk": true
         },
         "production": {
           "fileReplacements": [
@@ -68,10 +55,10 @@
           "outputHashing": "none",
           "extractCss": false,
           "sourceMap": true,
-          "namedChunks": false,
-          "generateIndexHtml": false,
+          "namedChunks": true,
+          "generateIndexHtml": true,
           "extractLicenses": true,
-          "vendorChunk": false
+          "vendorChunk": true
         }
       }
     },
