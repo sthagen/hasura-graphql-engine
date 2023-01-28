@@ -104,7 +104,7 @@ export const metadataQueryTypes = [
   'dc_delete_agent',
 ] as const;
 
-export type MetadataQueryType = typeof metadataQueryTypes[number];
+export type MetadataQueryType = (typeof metadataQueryTypes)[number];
 
 export type MetadataQueries = Record<Driver, Record<MetadataQueryType, string>>;
 
@@ -475,11 +475,14 @@ export const generateCreateEventTriggerQuery = (
         : null,
       enable_manual: state.operations.enable_manual,
       retry_conf: state.retryConf,
-      headers: transformHeaders(state.headers),
-      cleanup_config: {
-        ...defaultState.cleanupConfig,
-        ...state.cleanupConfig,
-      },
+      ...(state.cleanupConfig
+        ? {
+            cleanup_config: {
+              ...defaultState.cleanupConfig,
+              ...state.cleanupConfig,
+            },
+          }
+        : {}),
       replace,
       request_transform: requestTransform,
     },

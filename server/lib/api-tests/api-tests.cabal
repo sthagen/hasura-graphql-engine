@@ -74,6 +74,7 @@ library
     Test.API.Metadata.ComputedFieldsSpec
     Test.API.Metadata.SuggestRelationshipsSpec
     Test.API.Metadata.InconsistentSpec
+    Test.API.Metadata.TestConnectionTemplateSpec
     Test.API.Metadata.TransparentDefaultsSpec
     Test.API.Metadata.NativeAccessSpec
     Test.API.Schema.RunSQLSpec
@@ -100,6 +101,7 @@ library
     Test.DataConnector.MockAgent.AggregateQuerySpec
     Test.DataConnector.MockAgent.BasicQuerySpec
     Test.DataConnector.MockAgent.CustomScalarsSpec
+    Test.DataConnector.MockAgent.DeleteMutationsSpec
     Test.DataConnector.MockAgent.ErrorSpec
     Test.DataConnector.MockAgent.InsertMutationsSpec
     Test.DataConnector.MockAgent.MetadataApiSpec
@@ -141,6 +143,7 @@ library
     Test.Queries.DistinctSpec
     Test.Queries.FilterSearch.AggregationPredicatesSpec
     Test.Queries.FilterSearch.FilterSearchSpec
+    Test.Queries.NativeAccess.NativeAccessQueriesSpec
     Test.Queries.NestedObjectSpec
     Test.Queries.Paginate.LimitSpec
     Test.Queries.Paginate.OffsetSpec

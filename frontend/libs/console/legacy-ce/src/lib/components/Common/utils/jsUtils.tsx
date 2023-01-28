@@ -11,37 +11,37 @@ export const isNotDefined = (value: unknown) => {
 };
 
 /*
- * Deprecated: Use "isNull" instead
+ * @deprecated use "isNull" instead
  */
 export const exists = (value: unknown) => {
   return value !== null && value !== undefined;
 };
 
-export const isArray = (value: unknown) => {
+export const isArray = (value: unknown): value is any[] => {
   return Array.isArray(value);
 };
 
-export const isObject = (value: unknown) => {
+export const isObject = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null;
 };
 
-export const isString = (value: unknown) => {
+export const isString = (value: unknown): value is string => {
   return typeof value === 'string';
 };
 
-export const isNumber = (value: unknown) => {
+export const isNumber = (value: unknown): value is number => {
   return typeof value === 'number';
 };
 
-export const isFloat = (value: unknown) => {
+export const isFloat = (value: unknown): value is number => {
   return typeof value === 'number' && value % 1 !== 0;
 };
 
-export const isBoolean = (value: unknown) => {
+export const isBoolean = (value: unknown): value is boolean => {
   return typeof value === 'boolean';
 };
 
-export const isPromise = (value: any) => {
+export const isPromise = (value: any): value is typeof Promise => {
   if (!value) return false;
   return value.constructor.name === 'Promise';
 };
@@ -192,7 +192,7 @@ export function getAllJsonPaths(
   const handleSubJson = (subJson: any, newPrefix: string) => {
     const subPaths = getAllJsonPaths(subJson, leafKeys, newPrefix);
 
-    subPaths.forEach((subPath: typeof subPaths[0]) => {
+    subPaths.forEach((subPath: (typeof subPaths)[0]) => {
       paths.push(subPath);
     });
 

@@ -42,6 +42,7 @@ import {
   RunSQLResponse,
   RunSQLSelectResponse,
   RunSQLCommandResponse,
+  runMetadataQuery,
 } from './api';
 import { getAllSourceKinds } from './common/getAllSourceKinds';
 import { getTableName } from './common/getTableName';
@@ -104,7 +105,11 @@ export type Database = {
       props: GetTableRowsProps
     ) => Promise<TableRow[] | Feature.NotImplemented>;
   };
-  modify?: null;
+  config: {
+    getDefaultQueryRoot: (
+      table: Table
+    ) => Promise<string | Feature.NotImplemented>;
+  };
 };
 
 const drivers: Record<SupportedDrivers, Database> = {
@@ -416,6 +421,21 @@ export const DataSource = (httpClient: AxiosInstance) => ({
 
     return operators;
   },
+  getDefaultQueryRoot: async ({
+    dataSourceName,
+    table,
+  }: {
+    dataSourceName: string;
+    table: Table;
+  }) => {
+    const database = await getDatabaseMethods({ dataSourceName, httpClient });
+
+    const result = await database.config.getDefaultQueryRoot(table);
+
+    if (result === Feature.NotImplemented) return Feature.NotImplemented;
+
+    return result;
+  },
 });
 
 export { GDCTable } from './gdc';
@@ -429,6 +449,7 @@ export {
   RunSQLResponse,
   RunSQLSelectResponse,
   RunSQLCommandResponse,
+  runMetadataQuery,
   getDriverPrefix,
   runIntrospectionQuery,
   AlloyDbTable,

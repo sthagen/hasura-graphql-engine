@@ -29,11 +29,9 @@
             "output": "common"
           }
         ],
-        "styles": [
-          "apps/console-ce/src/css/tailwind.css"
-        ],
+        "styles": ["apps/console-ce/src/css/tailwind.css"],
         "scripts": [],
-        "webpackConfig": "apps/console-ce/custom-webpack.config.js",
+        "webpackConfig": "custom-webpack.config.js",
         "postcssConfig": "apps/console-ce/postcss.config.js"
       },
       "configurations": {

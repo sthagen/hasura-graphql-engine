@@ -7,13 +7,13 @@ import { FaTimes } from 'react-icons/fa';
 import { Button, ButtonProps } from '../Button/Button';
 
 export type FooterProps = {
-  callToAction: string;
+  callToAction?: string;
   callToActionLoadingText?: string;
   callToActionIcon?: ButtonProps['icon'];
   callToActionIconPosition?: ButtonProps['iconPosition'];
   callToDeny?: string;
   onSubmit?: () => void;
-  onClose: () => void;
+  onClose?: () => void;
   isLoading?: boolean;
   className?: string;
   onSubmitAnalyticsName?: string;
@@ -84,19 +84,21 @@ const Backdrop = () => (
   <RadixDialog.Overlay className="fixed top-0 left-0 h-full w-full bg-gray-900/90 backdrop-blur-sm z-[100]" />
 );
 
-type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'max';
+type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'xxl' | 'xxxl' | 'max';
 
 const dialogSizing: Record<DialogSize, string> = {
   sm: 'max-w-xl',
   md: 'max-w-2xl',
   lg: 'max-w-3xl',
   xl: 'max-w-4xl',
+  xxl: 'max-w-5xl',
+  xxxl: 'max-w-6xl',
   max: 'max-w-max',
 };
 
 export type DialogProps = {
   children: string | React.ReactElement;
-  title: string | React.ReactElement;
+  title?: string | React.ReactElement;
   titleTooltip?: string;
   description?: string;
   hasBackdrop?: boolean;
@@ -138,7 +140,7 @@ export const Dialog = ({
         </RadixDialog.Close>
       )}
       {!!title && (
-        <RadixDialog.Title className="flex items-top mb-1 pl-sm pt-sm pr-sm text-xl font-semibold">
+        <RadixDialog.Title className="flex items-top mb-1 pl-md pt-md pr-md text-xl font-semibold">
           {title}
           {!!titleTooltip && (
             <IconTooltip className="-ml-1" message={titleTooltip} />
@@ -146,7 +148,7 @@ export const Dialog = ({
         </RadixDialog.Title>
       )}
       {!!description && (
-        <RadixDialog.Description className="text-muted pl-sm pb-sm pr-sm ">
+        <RadixDialog.Description className="text-muted pl-md pb-md pr-md ">
           {description}
         </RadixDialog.Description>
       )}

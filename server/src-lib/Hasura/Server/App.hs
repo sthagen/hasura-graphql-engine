@@ -82,7 +82,7 @@ import Hasura.Server.API.V2Query qualified as V2Q
 import Hasura.Server.Auth (AuthMode (..), UserAuthentication (..))
 import Hasura.Server.Compression
 import Hasura.Server.Cors
-import Hasura.Server.Init
+import Hasura.Server.Init hiding (checkFeatureFlag)
 import Hasura.Server.Limits
 import Hasura.Server.Logging
 import Hasura.Server.Metrics (ServerMetrics)
@@ -143,7 +143,8 @@ data ServerCtx = ServerCtx
     scShutdownLatch :: ShutdownLatch,
     scMetaVersionRef :: STM.TMVar MetadataResourceVersion,
     scPrometheusMetrics :: PrometheusMetrics,
-    scTraceSamplingPolicy :: Tracing.SamplingPolicy
+    scTraceSamplingPolicy :: Tracing.SamplingPolicy,
+    scCheckFeatureFlag :: !(FeatureFlag -> IO Bool)
   }
 
 -- | Collection of the LoggerCtx, the regular Logger and the PGLogger
@@ -312,7 +313,7 @@ mkSpockAction serverCtx@ServerCtx {..} qErrEncoder qErrModifier apiHandler = do
 
   let runTraceT ::
         forall m1 a1.
-        (MonadIO m1, Tracing.HasReporter m1) =>
+        (MonadIO m1, MonadBaseControl IO m1, Tracing.HasReporter m1) =>
         Tracing.TraceT m1 a1 ->
         m1 a1
       runTraceT = do
@@ -448,6 +449,7 @@ v1QueryHandler query = do
       eventingMode <- asks (scEventingMode . hcServerCtx)
       readOnlyMode <- asks (scEnableReadOnlyMode . hcServerCtx)
       defaultNamingCase <- asks (scDefaultNamingConvention . hcServerCtx)
+      checkFeatureFlag <- asks (scCheckFeatureFlag . hcServerCtx)
       let serverConfigCtx =
             ServerConfigCtx
               functionPermsCtx
@@ -459,7 +461,7 @@ v1QueryHandler query = do
               readOnlyMode
               defaultNamingCase
               metadataDefaults
-              defaultUsePQNP
+              checkFeatureFlag
       runQuery
         env
         logger
@@ -500,7 +502,7 @@ v1MetadataHandler query = Tracing.trace "Metadata" $ do
   _sccReadOnlyMode <- asks (scEnableReadOnlyMode . hcServerCtx)
   _sccDefaultNamingConvention <- asks (scDefaultNamingConvention . hcServerCtx)
   _sccMetadataDefaults <- asks (scMetadataDefaults . hcServerCtx)
-  let _sccUsePQNP = defaultUsePQNP
+  _sccCheckFeatureFlag <- asks (scCheckFeatureFlag . hcServerCtx)
   let serverConfigCtx = ServerConfigCtx {..}
   r <-
     withSchemaCacheUpdate
@@ -556,6 +558,7 @@ v2QueryHandler query = Tracing.trace "v2 Query" $ do
       readOnlyMode <- asks (scEnableReadOnlyMode . hcServerCtx)
       defaultNamingCase <- asks (scDefaultNamingConvention . hcServerCtx)
       defaultMetadata <- asks (scMetadataDefaults . hcServerCtx)
+      checkFeatureFlag <- asks (scCheckFeatureFlag . hcServerCtx)
       let serverConfigCtx =
             ServerConfigCtx
               functionPermsCtx
@@ -567,7 +570,7 @@ v2QueryHandler query = Tracing.trace "v2 Query" $ do
               readOnlyMode
               defaultNamingCase
               defaultMetadata
-              defaultUsePQNP
+              checkFeatureFlag
 
       V2Q.runQuery env instanceId userInfo schemaCache httpMgr serverConfigCtx query
 
@@ -666,7 +669,8 @@ gqlExplainHandler query = do
   onlyAdmin
   scRef <- asks (scCacheRef . hcServerCtx)
   sc <- liftIO $ getSchemaCache scRef
-  res <- GE.explainGQLQuery sc query
+  reqHeaders <- asks hcReqHeaders
+  res <- GE.explainGQLQuery sc reqHeaders query
   return $ HttpResponse res []
 
 v1Alpha1PGDumpHandler :: (MonadIO m, MonadError QErr m, MonadReader HandlerCtx m) => PGD.PGDumpReqBody -> m APIResp

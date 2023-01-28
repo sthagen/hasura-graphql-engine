@@ -571,6 +571,7 @@ library
                      , Hasura.Backends.Postgres.DDL.Source
                      , Hasura.Backends.Postgres.DDL.Source.Version
                      , Hasura.Backends.Postgres.DDL.Table
+                     , Hasura.Backends.Postgres.Execute.ConnectionTemplate
                      , Hasura.Backends.Postgres.Execute.Subscription
                      , Hasura.Backends.Postgres.Execute.Insert
                      , Hasura.Backends.Postgres.Execute.Mutation
@@ -680,6 +681,7 @@ library
                      , Hasura.Server.Init.Arg.PrettyPrinter
                      , Hasura.Server.Init.Config
                      , Hasura.Server.Init.Env
+                     , Hasura.Server.Init.FeatureFlag
                      , Hasura.Server.Init.Logging
                      , Hasura.Server.Limits
                      , Hasura.Server.Logging
@@ -792,9 +794,11 @@ library
                      , Hasura.RQL.DDL.Action
                      , Hasura.RQL.DDL.ApiLimit
                      , Hasura.RQL.DDL.ComputedField
+                     , Hasura.RQL.DDL.ConnectionTemplate
                      , Hasura.RQL.DDL.CustomTypes
                      , Hasura.RQL.DDL.DataConnector
                      , Hasura.RQL.DDL.Endpoint
+                     , Hasura.RQL.DDL.FeatureFlag
                      , Hasura.RQL.DDL.GraphqlSchemaIntrospection
                      , Hasura.RQL.DDL.InheritedRoles
                      , Hasura.RQL.DDL.Headers
