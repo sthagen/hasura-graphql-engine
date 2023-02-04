@@ -31,7 +31,6 @@ module Hasura.Backends.Postgres.SQL.DML
     OrderType (OTAsc, OTDesc),
     QIdentifier (QIdentifier),
     Qual (QualTable, QualVar, QualifiedIdentifier),
-    RawSQL (..),
     RetExp (RetExp),
     SQLConflict (..),
     SQLConflictTarget (SQLColumn, SQLConstraint),
@@ -114,6 +113,7 @@ import Data.String (fromString)
 import Data.Text (pack)
 import Data.Text.Extended
 import Hasura.Backends.Postgres.SQL.Types
+import Hasura.NativeQuery.Metadata
 import Hasura.Prelude
 import Hasura.SQL.Types
 import Text.Builder qualified as TB
@@ -1170,7 +1170,7 @@ data TopLevelCTE
   | CTEInsert SQLInsert
   | CTEUpdate SQLUpdate
   | CTEDelete SQLDelete
-  | CTEUnsafeRawSQL RawSQL
+  | CTEUnsafeRawSQL (InterpolatedQuery SQLExp)
   deriving (Show, Eq)
 
 instance ToSQL TopLevelCTE where
@@ -1179,10 +1179,15 @@ instance ToSQL TopLevelCTE where
     CTEInsert q -> toSQL q
     CTEUpdate q -> toSQL q
     CTEDelete q -> toSQL q
-    CTEUnsafeRawSQL (RawSQL q) -> TB.text q
-
-newtype RawSQL = RawSQL Text
-  deriving newtype (Eq, Ord, Show)
+    CTEUnsafeRawSQL (InterpolatedQuery parts) ->
+      foldMap
+        ( \case
+            IIText t -> TB.text t
+            IIVariable v -> toSQL v
+        )
+        parts
+        -- if the user has a comment on the last line, this will make sure it doesn't interrupt the rest of the query
+        <> "\n"
 
 -- | A @SELECT@ statement with Common Table Expressions.
 --   <https://www.postgresql.org/docs/current/queries-with.html>

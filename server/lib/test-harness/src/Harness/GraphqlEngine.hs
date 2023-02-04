@@ -46,7 +46,6 @@ where
 
 import Control.Concurrent.Async qualified as Async
 import Control.Monad.Trans.Managed (ManagedT (..), lowerManagedT)
--- import Hasura.RQL.Types.Metadata (emptyMetadataDefaults)
 import Data.Aeson (Value, fromJSON, object, (.=))
 import Data.Aeson.Encode.Pretty as AP
 import Data.Aeson.Types (Pair)
@@ -291,7 +290,7 @@ startServerThread = do
           dataconnector:
             foobar:
               display_name: FOOBARDB
-              uri: "http://localhost:65007" |]
+              uri: "http://localhost:65005" |]
   thread <-
     Async.async
       ( runApp
@@ -301,7 +300,7 @@ startServerThread = do
             }
       )
   let server = Server {port = fromIntegral port, urlPrefix, thread}
-  Http.healthCheck (serverUrl server)
+  Http.healthCheck (serverUrl server <> "/healthz")
   pure server
 
 -------------------------------------------------------------------------------
