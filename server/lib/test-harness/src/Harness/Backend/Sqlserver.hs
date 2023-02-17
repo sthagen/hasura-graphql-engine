@@ -55,6 +55,7 @@ backendTypeMetadata =
       backendCapabilities = Nothing,
       backendTypeString = "mssql",
       backendDisplayNameString = "mssql",
+      backendReleaseNameString = Nothing,
       backendServerUrl = Nothing,
       backendSchemaKeyword = "schema"
     }
@@ -231,7 +232,7 @@ insertTable testEnvironment Schema.Table {tableName, tableColumns, tableData}
 --   More information can be found in the mssql docs:
 --   https://docs.microsoft.com/en-us/sql/relational-databases/databases/database-identifiers
 wrapIdentifier :: Text -> Text
-wrapIdentifier identifier = "[" <> identifier <> "]"
+wrapIdentifier identifier = "[" <> T.replace "]" "]]" identifier <> "]"
 
 -- | 'ScalarValue' serializer for Mssql
 serialize :: ScalarValue -> Text

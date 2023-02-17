@@ -15,7 +15,8 @@
     "build:ee": "nx run console-ee:build",
     "server-build:ee": "nx run console-ee:build-server-assets",
     "format:write": "nx format:write --base=main",
-    "format:write:all": "nx format:write --all"
+    "format:write:all": "nx format:write --all",
+    "generate-control-plane-gql-types": "graphql-codegen --config control-plane-graphql-codegen.yml"
   },
   "private": true,
   "overrides": {
@@ -119,6 +120,7 @@
     "lodash.isobject": "^3.0.2",
     "lodash.merge": "4.6.2",
     "lodash.pickby": "^4.6.0",
+    "lodash.set": "^4.3.2",
     "lodash.uniqueid": "^4.0.1",
     "lru-memoize": "1.0.0",
     "luxon": "^1.17.2",
@@ -260,6 +262,7 @@
     "@types/lodash.isobject": "^3.0.7",
     "@types/lodash.merge": "^4.6.6",
     "@types/lodash.pickby": "^4.6.7",
+    "@types/lodash.set": "^4.3.7",
     "@types/lodash.uniqueid": "^4.0.7",
     "@types/mini-css-extract-plugin": "0.9.1",
     "@types/node": "16.11.7",
@@ -353,6 +356,7 @@
     "remark-external-links": "8.0.0",
     "remark-slug": "6.1.0",
     "start-server-and-test": "^1.15.3",
+    "storybook-addon-console-env": "^1.0.0",
     "storybook-dark-mode": "^1.1.0",
     "stream-browserify": "^3.0.0",
     "stream-http": "^3.2.0",

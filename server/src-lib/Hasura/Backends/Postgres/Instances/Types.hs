@@ -12,12 +12,12 @@ where
 import Autodocodec (HasCodec (codec))
 import Data.Aeson (FromJSON)
 import Data.Aeson qualified as J
+import Data.Environment qualified as Env
 import Data.Kind (Type)
 import Data.Typeable
 import Hasura.Backends.Postgres.Connection qualified as Postgres
 import Hasura.Backends.Postgres.Connection.VersionCheck (runCockroachVersionCheck)
 import Hasura.Backends.Postgres.Execute.ConnectionTemplate qualified as Postgres
-import Hasura.Backends.Postgres.Instances.NativeQueries (validateNativeQuery)
 import Hasura.Backends.Postgres.Instances.PingSource (runCockroachDBPing)
 import Hasura.Backends.Postgres.SQL.DML qualified as Postgres
 import Hasura.Backends.Postgres.SQL.Types qualified as Postgres
@@ -29,8 +29,6 @@ import Hasura.Backends.Postgres.Types.Function qualified as Postgres
 import Hasura.Backends.Postgres.Types.Insert qualified as Postgres (BackendInsert)
 import Hasura.Backends.Postgres.Types.Update qualified as Postgres
 import Hasura.Base.Error
-import Hasura.NativeQuery.IR (NativeQueryImpl)
-import Hasura.NativeQuery.Metadata
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp.AggregationPredicates qualified as Agg
 import Hasura.RQL.Types.Backend
@@ -59,11 +57,11 @@ class
   where
   type PgExtraTableMetadata pgKind :: Type
 
-  versionCheckImpl :: SourceConnConfiguration ('Postgres pgKind) -> IO (Either QErr ())
-  versionCheckImpl = const (pure $ Right ())
+  versionCheckImpl :: Env.Environment -> SourceConnConfiguration ('Postgres pgKind) -> IO (Either QErr ())
+  versionCheckImpl = const $ const (pure $ Right ())
 
-  runPingSourceImpl :: (String -> IO ()) -> SourceName -> SourceConnConfiguration ('Postgres pgKind) -> IO ()
-  runPingSourceImpl _ _ _ = pure ()
+  runPingSourceImpl :: Env.Environment -> (String -> IO ()) -> SourceName -> SourceConnConfiguration ('Postgres pgKind) -> IO ()
+  runPingSourceImpl _ _ _ _ = pure ()
 
 instance PostgresBackend 'Vanilla where
   type PgExtraTableMetadata 'Vanilla = ()
@@ -116,8 +114,6 @@ instance
 
   type ExtraTableMetadata ('Postgres pgKind) = PgExtraTableMetadata pgKind
   type BackendInsert ('Postgres pgKind) = Postgres.BackendInsert pgKind
-
-  type NativeQuery ('Postgres pgKind) = NativeQueryImpl ('Postgres pgKind)
 
   type XComputedField ('Postgres pgKind) = XEnable
   type XRelay ('Postgres pgKind) = XEnable
@@ -172,19 +168,3 @@ instance
   where
   type SourceConfig ('Postgres pgKind) = Postgres.PGSourceConfig
   type SourceConnConfiguration ('Postgres pgKind) = Postgres.PostgresConnConfiguration
-
-instance
-  ( HasTag ('Postgres pgKind),
-    Typeable ('Postgres pgKind),
-    PostgresBackend pgKind,
-    FromJSON (BackendSourceKind ('Postgres pgKind)),
-    HasCodec (BackendSourceKind ('Postgres pgKind))
-  ) =>
-  NativeQueryMetadata ('Postgres pgKind)
-  where
-  type NativeQueryInfo ('Postgres pgKind) = NativeQueryInfoImpl ('Postgres pgKind)
-  type TrackNativeQuery ('Postgres pgKind) = TrackNativeQueryImpl ('Postgres pgKind)
-  trackNativeQuerySource = tnqSource
-  nativeQueryInfoName = nqiiRootFieldName
-  nativeQueryTrackToInfo = defaultNativeQueryTrackToInfo
-  validateNativeQueryAgainstSource = validateNativeQuery

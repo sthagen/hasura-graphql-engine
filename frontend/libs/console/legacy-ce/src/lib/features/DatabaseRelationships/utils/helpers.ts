@@ -1,3 +1,4 @@
+import { isSchemaTable } from '@/features/DataSource/utils';
 import { Table } from '@/features/hasura-metadata-types';
 import isObject from 'lodash.isobject';
 
@@ -17,8 +18,8 @@ export const getTableDisplayName = (table: Table): string => {
     return table;
   }
 
-  if (typeof table === 'object' && 'name' in table) {
-    return (table as { name: string }).name;
+  if (typeof table === 'object' && isSchemaTable(table)) {
+    return table.name;
   }
 
   if (isObject(table)) {

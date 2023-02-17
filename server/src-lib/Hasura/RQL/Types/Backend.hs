@@ -16,6 +16,7 @@ where
 import Autodocodec (HasCodec)
 import Control.Lens.TH (makePrisms)
 import Data.Aeson.Extended
+import Data.Environment qualified as Env
 import Data.Kind (Type)
 import Data.Text.Casing (GQLNameIdentifier)
 import Data.Text.Extended
@@ -23,7 +24,6 @@ import Data.Typeable (Typeable)
 import Hasura.Base.Error
 import Hasura.Base.ToErrorValue
 import Hasura.EncJSON (EncJSON)
-import Hasura.NativeQuery.Types
 import Hasura.Prelude
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.HealthCheckImplementation (HealthCheckImplementation)
@@ -110,6 +110,7 @@ class
     HasCodec (BackendSourceKind b),
     HasCodec (Column b),
     HasCodec (FunctionName b),
+    HasCodec (ScalarType b),
     HasCodec (TableName b),
     ToJSON (BackendConfig b),
     ToJSON (Column b),
@@ -160,9 +161,7 @@ class
     Traversable (BooleanOperators b),
     Traversable (UpdateVariant b),
     Traversable (BackendInsert b),
-    Traversable (AggregationPredicates b),
-    Traversable (NativeQuery b),
-    NativeQueryMetadata b
+    Traversable (AggregationPredicates b)
   ) =>
   Backend (b :: BackendType)
   where
@@ -238,14 +237,14 @@ class
   healthCheckImplementation = Nothing
 
   -- | An Implementation for version checking when adding a source.
-  versionCheckImplementation :: SourceConnConfiguration b -> IO (Either QErr ())
-  versionCheckImplementation = const (pure $ Right ())
+  versionCheckImplementation :: Env.Environment -> SourceConnConfiguration b -> IO (Either QErr ())
+  versionCheckImplementation = const (const (pure $ Right ()))
 
   -- | A backend type can opt into providing an implementation for
   -- fingerprinted pings to the source,
   -- useful for attribution that the user is using Hasura
-  runPingSource :: (String -> IO ()) -> SourceName -> SourceConnConfiguration b -> IO ()
-  runPingSource _ _ _ = pure ()
+  runPingSource :: Env.Environment -> (String -> IO ()) -> SourceName -> SourceConnConfiguration b -> IO ()
+  runPingSource _ _ _ _ = pure ()
 
   -- Backend-specific IR types
 
@@ -285,15 +284,6 @@ class
   type BackendInsert b :: Type -> Type
 
   type BackendInsert b = Const Void
-
-  -- | Intermediate representation of Native Queries.
-  -- The default implementation makes native queries uninstantiable.
-  --
-  -- It is parameterised over the type of fields, which changes during the IR
-  -- translation phases.
-  type NativeQuery b :: Type -> Type
-
-  type NativeQuery b = Const Void
 
   -- extension types
   type XComputedField b :: Type
