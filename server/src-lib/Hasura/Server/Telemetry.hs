@@ -33,13 +33,14 @@ import Data.Aeson qualified as A
 import Data.ByteString.Lazy qualified as BL
 import Data.HashMap.Strict qualified as HM
 import Data.HashMap.Strict qualified as Map
+import Data.HashMap.Strict.InsOrd qualified as OMap
 import Data.List qualified as L
 import Data.List.Extended qualified as L
 import Data.Text qualified as T
 import Data.Text.Conversions (UTF8 (..), decodeText)
 import Hasura.HTTP
 import Hasura.Logging
-import Hasura.NativeQuery.Metadata (NativeQueryInfo, nqiArguments)
+import Hasura.LogicalModel.Metadata (LogicalModelInfo, lmiArguments)
 import Hasura.Prelude
 import Hasura.RQL.Types.Action
 import Hasura.RQL.Types.Common
@@ -258,7 +259,7 @@ computeMetrics sourceInfo _mtServiceTimings remoteSchemaMap actionCache =
       _mtRemoteSchemas = Map.size <$> remoteSchemaMap
       _mtFunctions = Map.size $ Map.filter (not . isSystemDefined . _fiSystemDefined) sourceFunctionCache
       _mtActions = computeActionsMetrics <$> actionCache
-      _mtNativeQueries = calculateNativeQueries (_siNativeQueries sourceInfo)
+      _mtLogicalModels = countLogicalModels (OMap.elems $ _siLogicalModels sourceInfo)
    in Metrics {..}
   where
     sourceTableCache = _siTables sourceInfo
@@ -271,13 +272,13 @@ computeMetrics sourceInfo _mtServiceTimings remoteSchemaMap actionCache =
     permsOfTbl :: TableInfo b -> [(RoleName, RolePermInfo b)]
     permsOfTbl = Map.toList . _tiRolePermInfoMap
 
-    calculateNativeQueries :: [NativeQueryInfo b] -> NativeQueriesMetrics
-    calculateNativeQueries =
+    countLogicalModels :: [LogicalModelInfo b] -> LogicalModelsMetrics
+    countLogicalModels =
       foldMap
-        ( \naqi ->
-            if null (nqiArguments naqi)
-              then mempty {_nqmWithoutParameters = 1}
-              else mempty {_nqmWithParameters = 1}
+        ( \logimo ->
+            if null (lmiArguments logimo)
+              then mempty {_lmmWithoutParameters = 1}
+              else mempty {_lmmWithParameters = 1}
         )
 
 -- | Compute the relevant metrics for actions from the action cache.

@@ -1,8 +1,8 @@
 import React from 'react';
 import { useFormContext, useFieldArray, useWatch } from 'react-hook-form';
 
-import { Button } from '@/new-components/Button';
-import { Collapse } from '@/new-components/deprecated';
+import { Button } from '../../../../new-components/Button';
+import { Collapse } from '../../../../new-components/deprecated';
 
 import { getIngForm } from '../../../../components/Services/Data/utils';
 import { useIsDisabled } from '../hooks/useIsDisabled';
@@ -78,12 +78,12 @@ const PresetsRow: React.FC<PresetsRowProps> = ({
 
       <div>
         <input
-          id="value"
+          id="columnValue"
           type="text"
           className={className}
           placeholder="Column value"
           disabled={disabled}
-          {...register(`presets.${id}.value`)}
+          {...register(`presets.${id}.columnValue`)}
         />
       </div>
 

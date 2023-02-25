@@ -1,13 +1,13 @@
-import React, { useEffect } from 'react';
-import { useConsoleForm } from '@/new-components/Form';
-import { Button } from '@/new-components/Button';
-import { IndicatorCard } from '@/new-components/IndicatorCard';
+import React, { useEffect, useRef } from 'react';
+import { useConsoleForm } from '../../../new-components/Form';
+import { Button } from '../../../new-components/Button';
+import { IndicatorCard } from '../../../new-components/IndicatorCard';
 import {
   MetadataSelector,
   useMetadata,
   useRoles,
   useSupportedQueryTypes,
-} from '@/features/MetadataAPI';
+} from '../../MetadataAPI';
 
 import { PermissionsSchema, schema } from './../schema';
 import { AccessType, QueryType } from '../types';
@@ -21,11 +21,11 @@ import {
   RowPermissionsSectionWrapper,
 } from './components';
 
-import { ReturnValue, useFormData, useUpdatePermissions } from './hooks';
+import { useFormData, useUpdatePermissions } from './hooks';
 import ColumnRootFieldPermissions from './components/RootFieldPermissions/RootFieldPermissions';
-import { useListAllTableColumns } from '@/features/Data';
-import { useMetadataSource } from '@/features/MetadataAPI';
-import { omit } from 'lodash';
+import { useListAllTableColumns } from '../../Data';
+import { useMetadataSource } from '../../MetadataAPI';
+import useScrollIntoView from './hooks/useScrollIntoView';
 
 export interface ComponentProps {
   dataSourceName: string;
@@ -37,17 +37,6 @@ export interface ComponentProps {
   data: ReturnType<typeof useFormData>['data'];
 }
 
-const getCanSave = (
-  defaultValues: ReturnValue['defaultValues'],
-  newValues: Record<string, any>
-) => {
-  const cloneWithoutClonePermissions = omit(newValues, 'clonePermissions');
-  return (
-    JSON.stringify(cloneWithoutClonePermissions) ===
-    JSON.stringify(defaultValues)
-  );
-};
-
 const Component = (props: ComponentProps) => {
   const {
     dataSourceName,
@@ -58,6 +47,8 @@ const Component = (props: ComponentProps) => {
     handleClose,
     data,
   } = props;
+  const permissionSectionRef = useRef(null);
+  useScrollIntoView(permissionSectionRef, [roleName], { behavior: 'smooth' });
 
   const { data: metadataTables } = useMetadata(
     MetadataSelector.getTables(dataSourceName)
@@ -200,7 +191,11 @@ const Component = (props: ComponentProps) => {
           roles={roles}
         />
 
-        <div className="pt-2 flex gap-2">
+        <div
+          ref={permissionSectionRef}
+          className="pt-2 flex gap-2"
+          id="form-buttons-container"
+        >
           <Button
             type="submit"
             mode="primary"
@@ -209,7 +204,6 @@ const Component = (props: ComponentProps) => {
                 ? 'You must select an option for row permissions'
                 : 'Submit'
             }
-            disabled={getCanSave(defaultValues, getValues())}
             isLoading={updatePermissions.isLoading}
           >
             Save Permissions

@@ -1,5 +1,5 @@
-import { NativeDrivers } from '@/features/hasura-metadata-types';
-import { isPostgres } from '@/metadata/dataSource.utils';
+import { NativeDrivers } from '../../../features/hasura-metadata-types';
+import { isPostgres } from '../../../metadata/dataSource.utils';
 import { currentDriver, dataSource, terminateSql } from '../../../dataSources';
 import { QualifiedTable } from '../../../metadata/types';
 import { Nullable } from './tsUtils';
@@ -7,10 +7,6 @@ import { ConsoleScope } from '../../Main/ConsoleNotification';
 import { BaseTableColumn } from '../../../dataSources/types';
 import { sqlEscapeText } from '../../../dataSources/services/postgresql/sqlUtils';
 import { FixMe } from '../../../types';
-import {
-  checkFeatureSupport,
-  READ_ONLY_RUN_SQL_QUERIES,
-} from '../../../helpers/versionUtils';
 
 export type OrderByType = 'asc' | 'desc';
 export type OrderByNulls = 'first' | 'last';
@@ -45,7 +41,7 @@ export const getRunSqlQuery = (
       source,
       sql: terminateSql(sql),
       cascade,
-      read_only: read_only && !!checkFeatureSupport(READ_ONLY_RUN_SQL_QUERIES),
+      read_only: read_only,
     },
   };
 };

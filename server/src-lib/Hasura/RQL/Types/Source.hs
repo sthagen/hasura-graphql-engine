@@ -13,7 +13,7 @@ module Hasura.RQL.Types.Source
     unsafeSourceName,
     unsafeSourceTables,
     siConfiguration,
-    siNativeQueries,
+    siLogicalModels,
     siFunctions,
     siName,
     siQueryTagsConfig,
@@ -43,6 +43,7 @@ where
 
 import Control.Lens hiding ((.=))
 import Data.Aeson.Extended
+import Data.Environment
 import Data.HashMap.Strict qualified as Map
 import Database.PG.Query qualified as PG
 import Hasura.Base.Error
@@ -53,7 +54,7 @@ import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.HealthCheck
 import Hasura.RQL.Types.Instances ()
-import Hasura.RQL.Types.Metadata.Common (NativeQueries)
+import Hasura.RQL.Types.Metadata.Common (LogicalModels)
 import Hasura.RQL.Types.QueryTags
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
@@ -70,7 +71,7 @@ data SourceInfo b = SourceInfo
   { _siName :: SourceName,
     _siTables :: TableCache b,
     _siFunctions :: FunctionCache b,
-    _siNativeQueries :: NativeQueries b,
+    _siLogicalModels :: LogicalModels b,
     _siConfiguration :: ~(SourceConfig b),
     _siQueryTagsConfig :: Maybe QueryTagsConfig,
     _siCustomization :: ResolvedSourceCustomization
@@ -169,7 +170,7 @@ deriving stock instance Backend b => Eq (ScalarMap b)
 -- 'BackendResolve', instead of listing backends explicitly. It could also be
 -- moved to the app level.
 type SourceResolver b =
-  SourceName -> SourceConnConfiguration b -> IO (Either QErr (SourceConfig b))
+  Environment -> SourceName -> SourceConnConfiguration b -> IO (Either QErr (SourceConfig b))
 
 class (Monad m) => MonadResolveSource m where
   getPGSourceResolver :: m (SourceResolver ('Postgres 'Vanilla))

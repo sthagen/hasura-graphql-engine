@@ -1,39 +1,34 @@
-import { Button } from '@/new-components/Button';
-import { Analytics } from '@/features/Analytics';
+import { Button } from '../../../../../../new-components/Button';
+import { Analytics } from '../../../../../Analytics';
 import React from 'react';
 import {
   FaExclamationCircle,
   FaExternalLinkAlt,
   FaSyncAlt,
 } from 'react-icons/fa';
-import { capitalize } from '@/components/Common/utils/jsUtils';
+import { capitalize } from '../../../../../../components/Common/utils/jsUtils';
 import { UserFacingStep, FallbackApp } from '../../../types';
-import { getErrorText } from '../utils';
+import { getErrorText, getProjectEnvVarPageLink } from '../utils';
 import { LinkButton } from './LinkButton';
 import { transformFallbackAppToLinkButtonProps } from '../fallbackAppUtil';
 
 type Props = {
   step: UserFacingStep;
   error: Record<string, any>;
+  logId: number;
   retryAction: VoidFunction;
   fallbackApps: FallbackApp[];
 };
 
 export function ErrorBox(props: Props) {
-  const { step, error, retryAction, fallbackApps } = props;
+  const { step, error, retryAction, fallbackApps, logId } = props;
 
   const [isRetrying, setIsRetrying] = React.useState(false);
+
+  // mark retry as complete if logId is different
   React.useEffect(() => {
-    let timeout: NodeJS.Timeout;
-    if (isRetrying) {
-      timeout = setTimeout(() => {
-        setIsRetrying(false);
-      }, 5000);
-    }
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [isRetrying]);
+    setIsRetrying(false);
+  }, [logId]);
 
   const onRetryClick = () => {
     if (!isRetrying && retryAction) {
@@ -43,10 +38,37 @@ export function ErrorBox(props: Props) {
   };
 
   const getErrorMessage = () => {
+    let errorMsg: string | React.ReactElement = '';
+
     if (error?.error?.message) {
-      return capitalize(error.error.message);
+      errorMsg = capitalize(error.error.message);
+    } else {
+      errorMsg = JSON.stringify(error);
     }
-    return JSON.stringify(error);
+
+    // add link to project env vars page in case of database connection error
+    if (errorMsg.includes('Database connection error')) {
+      errorMsg = (
+        <>
+          <div className="whitespace-pre-line">{errorMsg}</div>
+          <br />
+          <div>
+            You can update the project environment variables{' '}
+            <a
+              href={getProjectEnvVarPageLink()}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-zinc-400 hover:text-zinc-500"
+            >
+              here
+            </a>
+            .
+          </div>
+        </>
+      );
+    }
+
+    return errorMsg;
   };
 
   return (

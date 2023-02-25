@@ -1,16 +1,34 @@
 import produce from 'immer';
 
-import { allowedMetadataTypes } from '@/features/MetadataAPI';
+import { allowedMetadataTypes } from '../../../MetadataAPI';
 
 import { AccessType } from '../../types';
 import { PermissionsSchema, Presets } from '../../schema';
-import { areTablesEqual } from '@/features/hasura-metadata-api';
-import { Table } from '@/features/hasura-metadata-types';
-import { getTableDisplayName } from '@/features/DatabaseRelationships';
+import { areTablesEqual } from '../../../hasura-metadata-api';
+import { Table } from '../../../hasura-metadata-types';
+import { getTableDisplayName } from '../../../DatabaseRelationships';
+
+const formatFilterValues = (formFilter: Record<string, any>[]) => {
+  return Object.entries(formFilter).reduce<Record<string, any>>(
+    (acc, [operator, value]) => {
+      if (operator === '_and' || operator === '_or') {
+        const filteredEmptyObjects = (value as any[]).filter(
+          p => Object.keys(p).length !== 0
+        );
+        acc[operator] = filteredEmptyObjects;
+        return acc;
+      }
+
+      acc[operator] = value;
+      return acc;
+    },
+    {}
+  );
+};
 
 type SelectPermissionMetadata = {
   columns: string[];
-  presets: Presets;
+  set: Record<string, any>;
   filter: Record<string, any>;
   allow_aggregations?: boolean;
   limit?: number;
@@ -24,29 +42,12 @@ const createSelectObject = (input: PermissionsSchema) => {
       .filter(({ 1: value }) => value)
       .map(([key]) => key);
 
-    // in row permissions builder an extra input is rendered automatically
-    // this will always be empty and needs to be removed
-
-    const filter = Object.entries(input.filter).reduce<Record<string, any>>(
-      (acc, [operator, value]) => {
-        if (operator === '_and' || operator === '_or') {
-          const filteredEmptyObjects = (value as any[]).filter(
-            p => Object.keys(p).length !== 0
-          );
-          acc[operator] = filteredEmptyObjects;
-          return acc;
-        }
-
-        acc[operator] = value;
-        return acc;
-      },
-      {}
-    );
+    const filter = formatFilterValues(input.filter);
 
     const permissionObject: SelectPermissionMetadata = {
       columns,
       filter,
-      presets: [],
+      set: [],
       allow_aggregations: input.aggregationEnabled,
     };
 
@@ -68,6 +69,62 @@ const createSelectObject = (input: PermissionsSchema) => {
   throw new Error('Case not handled');
 };
 
+type InsertPermissionMetadata = {
+  columns: string[];
+  check: Record<string, any>;
+  allow_upsert: boolean;
+  backend_only?: boolean;
+  set: Record<string, any>;
+};
+
+const createInsertObject = (input: PermissionsSchema) => {
+  if (input.queryType === 'insert') {
+    const columns = Object.entries(input.columns)
+      .filter(({ 1: value }) => value)
+      .map(([key]) => key);
+
+    const set =
+      input?.presets?.reduce((acc, preset) => {
+        if (preset.columnName === 'default') return acc;
+        return { ...acc, [preset.columnName]: preset.columnValue };
+      }, {}) ?? {};
+
+    const permissionObject: InsertPermissionMetadata = {
+      columns,
+      check: input.check,
+      allow_upsert: true,
+      set,
+      backend_only: input.backendOnly,
+    };
+
+    return permissionObject;
+  }
+
+  throw new Error('Case not handled');
+};
+
+export type DeletePermissionMetadata = {
+  columns?: string[];
+  set?: Record<string, any>;
+  backend_only: boolean;
+  filter: Record<string, any>;
+};
+
+const createDeleteObject = (input: PermissionsSchema) => {
+  if (input.queryType === 'delete') {
+    const filter = formatFilterValues(input.filter);
+
+    const permissionObject: DeletePermissionMetadata = {
+      backend_only: input.backendOnly || false,
+      filter,
+    };
+
+    return permissionObject;
+  }
+
+  throw new Error('Case not handled');
+};
+
 /**
  * creates the permissions object for the server
  */
@@ -76,11 +133,11 @@ const createPermission = (formData: PermissionsSchema) => {
     case 'select':
       return createSelectObject(formData);
     case 'insert':
-      throw new Error('Case not handled');
+      return createInsertObject(formData);
     case 'update':
       throw new Error('Case not handled');
     case 'delete':
-      throw new Error('Case not handled');
+      return createDeleteObject(formData);
     default:
       throw new Error('Case not handled');
   }
@@ -169,7 +226,7 @@ export const createInsertArgs = ({
           d => {
             if (!areTablesEqual(clonedPermissionTable, table)) {
               d.columns = [];
-              d.presets = [];
+              d.set = {};
             }
 
             return d;

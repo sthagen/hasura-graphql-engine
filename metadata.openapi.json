@@ -1,6 +1,206 @@
 {
     "components": {
         "schemas": {
+            "ActionDefinition_Mutation_GraphQLType_InputWebhook": {
+                "properties": {
+                    "arguments": {
+                        "default": [],
+                        "items": {
+                            "$ref": "#/components/schemas/ArgumentDefinition_GraphQLType"
+                        },
+                        "type": "array"
+                    },
+                    "forward_client_headers": {
+                        "default": false,
+                        "type": "boolean"
+                    },
+                    "handler": {
+                        "type": "string"
+                    },
+                    "headers": {
+                        "default": [],
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "$ref": "#/components/schemas/HeaderConfValue"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/HeaderConfFromEnv"
+                                }
+                            ]
+                        },
+                        "type": "array"
+                    },
+                    "kind": {
+                        "default": "synchronous",
+                        "enum": [
+                            "synchronous",
+                            "asynchronous"
+                        ],
+                        "type": "string"
+                    },
+                    "output_type": {
+                        "type": "string"
+                    },
+                    "request_transform": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RequestTransformV1"
+                            },
+                            {
+                                "$ref": "#/components/schemas/RequestTransformV2"
+                            }
+                        ]
+                    },
+                    "response_transform": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/ResponseTransformV1"
+                            },
+                            {
+                                "$ref": "#/components/schemas/ResponseTransformV2"
+                            }
+                        ]
+                    },
+                    "timeout": {
+                        "default": 30,
+                        "maximum": 9223372036854775807,
+                        "minimum": -9223372036854775808,
+                        "type": "number"
+                    },
+                    "type": {
+                        "enum": [
+                            "mutation"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "output_type",
+                    "type",
+                    "handler"
+                ],
+                "type": "object"
+            },
+            "ActionDefinition_Query_GraphQLType_InputWebhook": {
+                "properties": {
+                    "arguments": {
+                        "default": [],
+                        "items": {
+                            "$ref": "#/components/schemas/ArgumentDefinition_GraphQLType"
+                        },
+                        "type": "array"
+                    },
+                    "forward_client_headers": {
+                        "default": false,
+                        "type": "boolean"
+                    },
+                    "handler": {
+                        "type": "string"
+                    },
+                    "headers": {
+                        "default": [],
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "$ref": "#/components/schemas/HeaderConfValue"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/HeaderConfFromEnv"
+                                }
+                            ]
+                        },
+                        "type": "array"
+                    },
+                    "output_type": {
+                        "type": "string"
+                    },
+                    "request_transform": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RequestTransformV1"
+                            },
+                            {
+                                "$ref": "#/components/schemas/RequestTransformV2"
+                            }
+                        ]
+                    },
+                    "response_transform": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/ResponseTransformV1"
+                            },
+                            {
+                                "$ref": "#/components/schemas/ResponseTransformV2"
+                            }
+                        ]
+                    },
+                    "timeout": {
+                        "default": 30,
+                        "maximum": 9223372036854775807,
+                        "minimum": -9223372036854775808,
+                        "type": "number"
+                    },
+                    "type": {
+                        "enum": [
+                            "query"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "output_type",
+                    "type",
+                    "handler"
+                ],
+                "type": "object"
+            },
+            "ActionMetadata": {
+                "properties": {
+                    "comment": {
+                        "type": "string"
+                    },
+                    "definition": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/ActionDefinition_Query_GraphQLType_InputWebhook"
+                            },
+                            {
+                                "$ref": "#/components/schemas/ActionDefinition_Mutation_GraphQLType_InputWebhook"
+                            }
+                        ]
+                    },
+                    "name": {
+                        "$ref": "#/components/schemas/GraphQLName"
+                    },
+                    "permissions": {
+                        "default": [],
+                        "items": {
+                            "$ref": "#/components/schemas/ActionPermissionMetadata"
+                        },
+                        "type": "array"
+                    }
+                },
+                "required": [
+                    "name",
+                    "definition"
+                ],
+                "type": "object"
+            },
+            "ActionPermissionMetadata": {
+                "properties": {
+                    "comment": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "role"
+                ],
+                "type": "object"
+            },
             "AddReplaceOrRemoveFields": {
                 "properties": {
                     "add_headers": {
@@ -33,6 +233,24 @@
                 },
                 "required": [
                     "enable"
+                ],
+                "type": "object"
+            },
+            "ArgumentDefinition_GraphQLType": {
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "$ref": "#/components/schemas/GraphQLName"
+                    },
+                    "type": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "name",
+                    "type"
                 ],
                 "type": "object"
             },
@@ -295,13 +513,13 @@
                 "type": "object"
             },
             "BigqueryCustomReturnType": {
-                "description": "A return type for a native query.",
+                "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
                             "$ref": "#/components/schemas/ScalarType"
                         },
-                        "description": "Return types for the native query",
+                        "description": "Return types for the logical model",
                         "type": "object"
                     }
                 },
@@ -425,7 +643,7 @@
                 ],
                 "type": "object"
             },
-            "BigqueryNativeQueryInfo": {
+            "BigqueryLogicalModelInfo": {
                 "description": "A query in expressed in native code (SQL) to add to the GraphQL schema with configuration.",
                 "properties": {
                     "arguments": {
@@ -441,14 +659,14 @@
                         "type": "string"
                     },
                     "description": {
-                        "description": "A description of the query which appears in the graphql schema",
+                        "description": "A description of the logical model which appears in the graphql schema",
                         "type": "string"
                     },
                     "returns": {
                         "$ref": "#/components/schemas/BigqueryCustomReturnType"
                     },
                     "root_field_name": {
-                        "description": "Root field name for the native query",
+                        "description": "Root field name for the logical model",
                         "type": "string"
                     }
                 },
@@ -641,16 +859,16 @@
                         ],
                         "type": "string"
                     },
-                    "name": {
-                        "type": "string"
-                    },
-                    "native_queries": {
+                    "logical_models": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/BigqueryNativeQueryInfo"
+                            "$ref": "#/components/schemas/BigqueryLogicalModelInfo"
                         },
                         "nullable": true,
                         "type": "array"
+                    },
+                    "name": {
+                        "type": "string"
                     },
                     "query_tags": {
                         "$ref": "#/components/schemas/QueryTagsConfig"
@@ -979,14 +1197,14 @@
                 "type": "object"
             },
             "CitusCustomReturnType": {
-                "description": "A return type for a native query.",
+                "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
                             "description": "Postgres Scalar Types",
                             "type": "string"
                         },
-                        "description": "Return types for the native query",
+                        "description": "Return types for the logical model",
                         "type": "object"
                     }
                 },
@@ -1213,7 +1431,7 @@
                 ],
                 "type": "object"
             },
-            "CitusNativeQueryInfo": {
+            "CitusLogicalModelInfo": {
                 "description": "A query in expressed in native code (SQL) to add to the GraphQL schema with configuration.",
                 "properties": {
                     "arguments": {
@@ -1230,14 +1448,14 @@
                         "type": "string"
                     },
                     "description": {
-                        "description": "A description of the query which appears in the graphql schema",
+                        "description": "A description of the logical model which appears in the graphql schema",
                         "type": "string"
                     },
                     "returns": {
                         "$ref": "#/components/schemas/CitusCustomReturnType"
                     },
                     "root_field_name": {
-                        "description": "Root field name for the native query",
+                        "description": "Root field name for the logical model",
                         "type": "string"
                     }
                 },
@@ -1457,16 +1675,16 @@
                         ],
                         "type": "string"
                     },
-                    "name": {
-                        "type": "string"
-                    },
-                    "native_queries": {
+                    "logical_models": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/CitusNativeQueryInfo"
+                            "$ref": "#/components/schemas/CitusLogicalModelInfo"
                         },
                         "nullable": true,
                         "type": "array"
+                    },
+                    "name": {
+                        "type": "string"
                     },
                     "query_tags": {
                         "$ref": "#/components/schemas/QueryTagsConfig"
@@ -1802,14 +2020,14 @@
                 "type": "object"
             },
             "CockroachCustomReturnType": {
-                "description": "A return type for a native query.",
+                "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
                             "description": "Postgres Scalar Types",
                             "type": "string"
                         },
-                        "description": "Return types for the native query",
+                        "description": "Return types for the logical model",
                         "type": "object"
                     }
                 },
@@ -2036,7 +2254,7 @@
                 ],
                 "type": "object"
             },
-            "CockroachNativeQueryInfo": {
+            "CockroachLogicalModelInfo": {
                 "description": "A query in expressed in native code (SQL) to add to the GraphQL schema with configuration.",
                 "properties": {
                     "arguments": {
@@ -2053,14 +2271,14 @@
                         "type": "string"
                     },
                     "description": {
-                        "description": "A description of the query which appears in the graphql schema",
+                        "description": "A description of the logical model which appears in the graphql schema",
                         "type": "string"
                     },
                     "returns": {
                         "$ref": "#/components/schemas/CockroachCustomReturnType"
                     },
                     "root_field_name": {
-                        "description": "Root field name for the native query",
+                        "description": "Root field name for the logical model",
                         "type": "string"
                     }
                 },
@@ -2280,16 +2498,16 @@
                         ],
                         "type": "string"
                     },
-                    "name": {
-                        "type": "string"
-                    },
-                    "native_queries": {
+                    "logical_models": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/CockroachNativeQueryInfo"
+                            "$ref": "#/components/schemas/CockroachLogicalModelInfo"
                         },
                         "nullable": true,
                         "type": "array"
+                    },
+                    "name": {
+                        "type": "string"
                     },
                     "query_tags": {
                         "$ref": "#/components/schemas/QueryTagsConfig"
@@ -2620,6 +2838,72 @@
             "CronSchedule": {
                 "type": "string"
             },
+            "CronTriggerMetadata": {
+                "properties": {
+                    "comment": {
+                        "type": "string"
+                    },
+                    "headers": {
+                        "default": [],
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "$ref": "#/components/schemas/HeaderConfValue"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/HeaderConfFromEnv"
+                                }
+                            ]
+                        },
+                        "type": "array"
+                    },
+                    "include_in_metadata": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "payload": {
+                        "additionalProperties": true
+                    },
+                    "request_transform": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RequestTransformV1"
+                            },
+                            {
+                                "$ref": "#/components/schemas/RequestTransformV2"
+                            }
+                        ]
+                    },
+                    "response_transform": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/ResponseTransformV1"
+                            },
+                            {
+                                "$ref": "#/components/schemas/ResponseTransformV2"
+                            }
+                        ]
+                    },
+                    "retry_conf": {
+                        "$ref": "#/components/schemas/STRetryConf"
+                    },
+                    "schedule": {
+                        "$ref": "#/components/schemas/CronSchedule"
+                    },
+                    "webhook": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "name",
+                    "webhook",
+                    "schedule",
+                    "include_in_metadata"
+                ],
+                "type": "object"
+            },
             "CustomRootField": {
                 "properties": {
                     "comment": {
@@ -2734,13 +3018,13 @@
                 "type": "object"
             },
             "DataconnectorCustomReturnType": {
-                "description": "A return type for a native query.",
+                "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
                             "$ref": "#/components/schemas/ScalarType"
                         },
-                        "description": "Return types for the native query",
+                        "description": "Return types for the logical model",
                         "type": "object"
                     }
                 },
@@ -2868,7 +3152,7 @@
                 ],
                 "type": "object"
             },
-            "DataconnectorNativeQueryInfo": {
+            "DataconnectorLogicalModelInfo": {
                 "description": "A query in expressed in native code (SQL) to add to the GraphQL schema with configuration.",
                 "properties": {
                     "arguments": {
@@ -2884,14 +3168,14 @@
                         "type": "string"
                     },
                     "description": {
-                        "description": "A description of the query which appears in the graphql schema",
+                        "description": "A description of the logical model which appears in the graphql schema",
                         "type": "string"
                     },
                     "returns": {
                         "$ref": "#/components/schemas/DataconnectorCustomReturnType"
                     },
                     "root_field_name": {
-                        "description": "Root field name for the native query",
+                        "description": "Root field name for the logical model",
                         "type": "string"
                     }
                 },
@@ -3090,16 +3374,16 @@
                     "kind": {
                         "$ref": "#/components/schemas/GraphQLName"
                     },
-                    "name": {
-                        "type": "string"
-                    },
-                    "native_queries": {
+                    "logical_models": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/DataconnectorNativeQueryInfo"
+                            "$ref": "#/components/schemas/DataconnectorLogicalModelInfo"
                         },
                         "nullable": true,
                         "type": "array"
+                    },
+                    "name": {
+                        "type": "string"
                     },
                     "query_tags": {
                         "$ref": "#/components/schemas/QueryTagsConfig"
@@ -3289,6 +3573,53 @@
                 "required": [
                     "role",
                     "permission"
+                ],
+                "type": "object"
+            },
+            "EndpointDef_QueryReference": {
+                "properties": {
+                    "query": {
+                        "$ref": "#/components/schemas/QueryReference"
+                    }
+                },
+                "required": [
+                    "query"
+                ],
+                "type": "object"
+            },
+            "EndpointMetadata_QueryReference": {
+                "properties": {
+                    "comment": {
+                        "type": "string"
+                    },
+                    "definition": {
+                        "$ref": "#/components/schemas/EndpointDef_QueryReference"
+                    },
+                    "methods": {
+                        "items": {
+                            "enum": [
+                                "GET",
+                                "POST",
+                                "PUT",
+                                "DELETE",
+                                "PATCH"
+                            ],
+                            "type": "string"
+                        },
+                        "type": "array"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "name",
+                    "url",
+                    "methods",
+                    "definition"
                 ],
                 "type": "object"
             },
@@ -3740,9 +4071,10 @@
             "MetadataV3": {
                 "properties": {
                     "actions": {
-                        "description": "action definitions which extend Hasura's schema with custom business logic using custom queries and mutations\n\n\narray of values of unspecified type - this is a placeholder that will eventually be replaced with a more detailed description",
+                        "default": [],
+                        "description": "action definitions which extend Hasura's schema with custom business logic using custom queries and mutations",
                         "items": {
-                            "additionalProperties": true
+                            "$ref": "#/components/schemas/ActionMetadata"
                         },
                         "type": "array"
                     },
@@ -3762,9 +4094,10 @@
                         "description": "TODO\n\n\nobject with unspecified properties - this is a placeholder that will eventually be replaced with a more detailed description"
                     },
                     "cron_triggers": {
-                        "description": "reliably trigger HTTP endpoints to run custom business logic periodically based on a cron schedule\n\n\narray of values of unspecified type - this is a placeholder that will eventually be replaced with a more detailed description",
+                        "default": [],
+                        "description": "reliably trigger HTTP endpoints to run custom business logic periodically based on a cron schedule",
                         "items": {
-                            "additionalProperties": true
+                            "$ref": "#/components/schemas/CronTriggerMetadata"
                         },
                         "type": "array"
                     },
@@ -3811,9 +4144,10 @@
                         "type": "array"
                     },
                     "rest_endpoints": {
-                        "description": "REST interfaces to saved GraphQL queries and mutations\n\n\narray of values of unspecified type - this is a placeholder that will eventually be replaced with a more detailed description",
+                        "default": [],
+                        "description": "REST interfaces to saved GraphQL queries and mutations",
                         "items": {
-                            "additionalProperties": true
+                            "$ref": "#/components/schemas/EndpointMetadata_QueryReference"
                         },
                         "type": "array"
                     },
@@ -3911,13 +4245,13 @@
                 "type": "object"
             },
             "MssqlCustomReturnType": {
-                "description": "A return type for a native query.",
+                "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
                             "$ref": "#/components/schemas/ScalarType"
                         },
-                        "description": "Return types for the native query",
+                        "description": "Return types for the logical model",
                         "type": "object"
                     }
                 },
@@ -4136,7 +4470,7 @@
                 ],
                 "type": "object"
             },
-            "MssqlNativeQueryInfo": {
+            "MssqlLogicalModelInfo": {
                 "description": "A query in expressed in native code (SQL) to add to the GraphQL schema with configuration.",
                 "properties": {
                     "arguments": {
@@ -4152,14 +4486,14 @@
                         "type": "string"
                     },
                     "description": {
-                        "description": "A description of the query which appears in the graphql schema",
+                        "description": "A description of the logical model which appears in the graphql schema",
                         "type": "string"
                     },
                     "returns": {
                         "$ref": "#/components/schemas/MssqlCustomReturnType"
                     },
                     "root_field_name": {
-                        "description": "Root field name for the native query",
+                        "description": "Root field name for the logical model",
                         "type": "string"
                     }
                 },
@@ -4379,16 +4713,16 @@
                         ],
                         "type": "string"
                     },
-                    "name": {
-                        "type": "string"
-                    },
-                    "native_queries": {
+                    "logical_models": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/MssqlNativeQueryInfo"
+                            "$ref": "#/components/schemas/MssqlLogicalModelInfo"
                         },
                         "nullable": true,
                         "type": "array"
+                    },
+                    "name": {
+                        "type": "string"
                     },
                     "query_tags": {
                         "$ref": "#/components/schemas/QueryTagsConfig"
@@ -4790,7 +5124,7 @@
                 "type": "object"
             },
             "MysqlCustomReturnType": {
-                "description": "A return type for a native query.",
+                "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
@@ -4827,7 +5161,7 @@
                             ],
                             "type": "string"
                         },
-                        "description": "Return types for the native query",
+                        "description": "Return types for the logical model",
                         "type": "object"
                     }
                 },
@@ -4952,7 +5286,7 @@
                 ],
                 "type": "object"
             },
-            "MysqlNativeQueryInfo": {
+            "MysqlLogicalModelInfo": {
                 "description": "A query in expressed in native code (SQL) to add to the GraphQL schema with configuration.",
                 "properties": {
                     "arguments": {
@@ -4999,14 +5333,14 @@
                         "type": "string"
                     },
                     "description": {
-                        "description": "A description of the query which appears in the graphql schema",
+                        "description": "A description of the logical model which appears in the graphql schema",
                         "type": "string"
                     },
                     "returns": {
                         "$ref": "#/components/schemas/MysqlCustomReturnType"
                     },
                     "root_field_name": {
-                        "description": "Root field name for the native query",
+                        "description": "Root field name for the logical model",
                         "type": "string"
                     }
                 },
@@ -5223,16 +5557,16 @@
                         ],
                         "type": "string"
                     },
-                    "name": {
-                        "type": "string"
-                    },
-                    "native_queries": {
+                    "logical_models": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/MysqlNativeQueryInfo"
+                            "$ref": "#/components/schemas/MysqlLogicalModelInfo"
                         },
                         "nullable": true,
                         "type": "array"
+                    },
+                    "name": {
+                        "type": "string"
                     },
                     "query_tags": {
                         "$ref": "#/components/schemas/QueryTagsConfig"
@@ -5645,14 +5979,14 @@
                 "type": "object"
             },
             "PostgresCustomReturnType": {
-                "description": "A return type for a native query.",
+                "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
                             "description": "Postgres Scalar Types",
                             "type": "string"
                         },
-                        "description": "Return types for the native query",
+                        "description": "Return types for the logical model",
                         "type": "object"
                     }
                 },
@@ -5879,7 +6213,7 @@
                 ],
                 "type": "object"
             },
-            "PostgresNativeQueryInfo": {
+            "PostgresLogicalModelInfo": {
                 "description": "A query in expressed in native code (SQL) to add to the GraphQL schema with configuration.",
                 "properties": {
                     "arguments": {
@@ -5896,14 +6230,14 @@
                         "type": "string"
                     },
                     "description": {
-                        "description": "A description of the query which appears in the graphql schema",
+                        "description": "A description of the logical model which appears in the graphql schema",
                         "type": "string"
                     },
                     "returns": {
                         "$ref": "#/components/schemas/PostgresCustomReturnType"
                     },
                     "root_field_name": {
-                        "description": "Root field name for the native query",
+                        "description": "Root field name for the logical model",
                         "type": "string"
                     }
                 },
@@ -6237,16 +6571,16 @@
                         ],
                         "type": "string"
                     },
-                    "name": {
-                        "type": "string"
-                    },
-                    "native_queries": {
+                    "logical_models": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/PostgresNativeQueryInfo"
+                            "$ref": "#/components/schemas/PostgresLogicalModelInfo"
                         },
                         "nullable": true,
                         "type": "array"
+                    },
+                    "name": {
+                        "type": "string"
                     },
                     "query_tags": {
                         "$ref": "#/components/schemas/QueryTagsConfig"
@@ -6505,6 +6839,21 @@
                 "required": [
                     "role",
                     "permission"
+                ],
+                "type": "object"
+            },
+            "QueryReference": {
+                "properties": {
+                    "collection_name": {
+                        "type": "string"
+                    },
+                    "query_name": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "collection_name",
+                    "query_name"
                 ],
                 "type": "object"
             },
@@ -7606,6 +7955,29 @@
                     "verify-full"
                 ],
                 "type": "string"
+            },
+            "STRetryConf": {
+                "properties": {
+                    "num_retries": {
+                        "default": 0,
+                        "maximum": 9223372036854775807,
+                        "minimum": -9223372036854775808,
+                        "type": "number"
+                    },
+                    "retry_interval_seconds": {
+                        "default": 10,
+                        "type": "number"
+                    },
+                    "timeout_seconds": {
+                        "default": 60,
+                        "type": "number"
+                    },
+                    "tolerance_seconds": {
+                        "default": 21600,
+                        "type": "number"
+                    }
+                },
+                "type": "object"
             },
             "ScalarType": {
                 "additionalProperties": true,

@@ -11,7 +11,7 @@ import Hasura.Base.Error
 import Hasura.GraphQL.Schema.NamingCase
 import Hasura.Incremental qualified as Inc
 import Hasura.Logging (Hasura, Logger)
-import Hasura.NativeQuery.Metadata (NativeQueryInfo)
+import Hasura.LogicalModel.Metadata (LogicalModelInfo)
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.Types.Backend
@@ -31,8 +31,8 @@ import Hasura.RQL.Types.Table
 import Hasura.SQL.Backend
 import Hasura.SQL.Types
 import Hasura.Server.Migrate.Version
+import Hasura.Services.Network
 import Network.HTTP.Client qualified as HTTP
-import Network.HTTP.Client.Manager (HasHttpManagerM)
 
 class
   ( Backend b,
@@ -76,7 +76,7 @@ class
       ArrowWriter (Seq (Either InconsistentMetadata MetadataDependency)) arr,
       MonadIO m,
       MonadBaseControl IO m,
-      HasHttpManagerM m
+      ProvidesNetwork m
     ) =>
     Logger Hasura ->
     (Inc.Dependency (Maybe (BackendInvalidationKeys b)), BackendConfig b) `arr` BackendInfo b
@@ -109,10 +109,10 @@ class
     m (Either QErr (DBObjectsIntrospection b))
 
   parseBoolExpOperations ::
-    (MonadError QErr m, TableCoreInfoRM b m) =>
+    (MonadError QErr m) =>
     ValueParser b m v ->
-    TableName b ->
-    FieldInfoMap (FieldInfo b) ->
+    FieldInfoMap (FieldInfo b) -> -- The root table's FieldInfoMap
+    FieldInfoMap (FieldInfo b) -> -- The FieldInfoMap of the table currently "in focus"
     ColumnReference b ->
     Value ->
     m [OpExpG b v]
@@ -172,8 +172,8 @@ class
     ) =>
     BoolExpResolver b m v ->
     BoolExpRHSParser b m v ->
-    TableName b ->
-    FieldInfoMap (FieldInfo b) ->
+    FieldInfoMap (FieldInfo b) -> -- The root table's FieldInfoMap
+    FieldInfoMap (FieldInfo b) -> -- The FieldInfoMap of the table currently "in focus"
     ComputedFieldInfo b ->
     Value ->
     m (AnnComputedFieldBoolExp b v)
@@ -187,11 +187,11 @@ class
     SourceConfig b ->
     ExceptT QErr m (RecreateEventTriggers, SourceCatalogMigrationState)
 
-  validateNativeQuery ::
+  validateLogicalModel ::
     (MonadIO m, MonadError QErr m) =>
     Env.Environment ->
     SourceConnConfiguration b ->
-    NativeQueryInfo b ->
+    LogicalModelInfo b ->
     m ()
-  validateNativeQuery _ _ _ =
-    throw500 "validateNativeQuery: not implemented for this backend."
+  validateLogicalModel _ _ _ =
+    throw500 "validateLogicalModel: not implemented for this backend."

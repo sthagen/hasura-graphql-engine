@@ -1,7 +1,7 @@
 import React from 'react';
 import { FaInfo } from 'react-icons/fa';
 import Skeleton from 'react-loading-skeleton';
-import { IndicatorCard } from '@/new-components/IndicatorCard';
+import { IndicatorCard } from '../../../new-components/IndicatorCard';
 import { useRolePermissions } from './hooks/usePermissions';
 import { PermissionsLegend } from './components/PermissionsLegend';
 import { EditableCell, InputCell } from './components/Cells';
@@ -120,7 +120,9 @@ export const PermissionsTable: React.FC<PermissionsTableProps> = ({
                   {permissionTypes.map(({ permissionType, access }) => {
                     // only select is possible on GDC as mutations are not available yet
                     const isEditable =
-                      roleName !== 'admin' && permissionType === 'select';
+                      (roleName !== 'admin' && permissionType === 'select') ||
+                      (roleName !== 'admin' && permissionType === 'insert') ||
+                      (roleName !== 'admin' && permissionType === 'delete');
 
                     if (isNewRole) {
                       return (

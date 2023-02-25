@@ -1,22 +1,20 @@
+import { useEffect, useState } from 'react';
 import inflection from 'inflection';
-import { isEqual } from '@/components/Common/utils/jsUtils';
-import {
-  LocalRelationship,
-  SuggestedRelationship,
-} from '@/features/DatabaseRelationships/types';
-import { getTableDisplayName } from '@/features/DatabaseRelationships/utils/helpers';
-import { getDriverPrefix, runMetadataQuery } from '@/features/DataSource';
+import camelCase from 'lodash.camelcase';
+import { isEqual } from '../../../../../components/Common/utils/jsUtils';
+import { LocalRelationship, SuggestedRelationship } from '../../../types';
+import { getTableDisplayName } from '../../../utils/helpers';
+import { getDriverPrefix, runMetadataQuery } from '../../../../DataSource';
 import {
   areTablesEqual,
   MetadataSelectors,
-} from '@/features/hasura-metadata-api';
-import { useMetadata } from '@/features/hasura-metadata-api/useMetadata';
-import { Table } from '@/features/hasura-metadata-types';
-import { useHttpClient } from '@/features/Network';
-import { useEffect, useState } from 'react';
+} from '../../../../hasura-metadata-api';
+import { useMetadata } from '../../../../hasura-metadata-api/useMetadata';
+import { NamingConvention, Table } from '../../../../hasura-metadata-types';
+import { useHttpClient } from '../../../../Network';
 import { useQuery, useQueryClient } from 'react-query';
-import { generateQueryKeys } from '@/features/DatabaseRelationships/utils/queryClientUtils';
-import { useMetadataMigration } from '@/features/MetadataAPI';
+import { generateQueryKeys } from '../../../utils/queryClientUtils';
+import { useMetadataMigration } from '../../../../MetadataAPI';
 
 type UseSuggestedRelationshipsArgs = {
   dataSourceName: string;
@@ -69,20 +67,24 @@ const formatRelationToTableName = ({
 const makeStringGraphQLCompliant = (text: string) => text.replace(/\./g, '_');
 
 export const addConstraintName = (
-  relationships: SuggestedRelationship[]
+  relationships: SuggestedRelationship[],
+  namingConvention: NamingConvention
 ): SuggestedRelationshipWithName[] =>
   relationships.map(relationship => {
     const fromTable = getTableDisplayName(relationship.from.table);
-    const fromColumns = relationship.from.columns.join('_');
     const toTableName = formatRelationToTableName({
       table: relationship.to.table,
       relationshipType: relationship.type,
     });
-    const toColumns = relationship.to.columns.join('_');
-    const toTableWithColumns = `${toTableName}_${toColumns}`;
-    const constraintName = makeStringGraphQLCompliant(
-      `${fromTable}_${fromColumns}_${toTableWithColumns}`
+
+    const baseConstraintName = makeStringGraphQLCompliant(
+      `${fromTable}_${toTableName}`
     );
+
+    const constraintName =
+      namingConvention === 'graphql-default'
+        ? camelCase(baseConstraintName)
+        : baseConstraintName;
 
     return {
       ...relationship,
@@ -152,6 +154,9 @@ export const useSuggestedRelationships = ({
   const { data: metadataSource } = useMetadata(
     MetadataSelectors.findSource(dataSourceName)
   );
+
+  const namingConvention: NamingConvention =
+    metadataSource?.customization?.naming_convention || 'hasura-default';
 
   const metadataMutation = useMetadataMigration({});
 
@@ -250,7 +255,8 @@ export const useSuggestedRelationships = ({
   });
 
   const relationshipsWithConstraintName = addConstraintName(
-    notExistingRelationships
+    notExistingRelationships,
+    namingConvention
   );
 
   return {

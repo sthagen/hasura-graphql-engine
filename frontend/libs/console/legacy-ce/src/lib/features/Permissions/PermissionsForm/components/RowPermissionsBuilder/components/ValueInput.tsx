@@ -1,11 +1,11 @@
-import { areTablesEqual } from '@/features/hasura-metadata-api';
+import { areTablesEqual } from '../../../../../hasura-metadata-api';
 import { useContext, useEffect } from 'react';
 import { rowPermissionsContext } from './RowPermissionsProvider';
 import { tableContext } from './TableProvider';
-import { Table } from '@/features/hasura-metadata-types';
-import { getTableDisplayName } from '@/features/DatabaseRelationships';
+import { Table } from '../../../../../hasura-metadata-types';
+import { getTableDisplayName } from '../../../../../DatabaseRelationships';
 import { isEmpty } from 'lodash';
-import { Button } from '@/new-components/Button';
+import { Button } from '../../../../../../new-components/Button';
 import { graphQLTypeToJsType, isComparator } from './utils';
 import { ValueInputType } from './ValueInputType';
 
@@ -67,6 +67,8 @@ export const ValueInput = ({
     o => o.operator === comparatorName
   );
   const jsType = typeof graphQLTypeToJsType(value, comparator?.type);
+  const inputType =
+    jsType === 'boolean' ? 'checkbox' : jsType === 'string' ? 'text' : 'number';
 
   return (
     <>
@@ -79,16 +81,15 @@ export const ValueInput = ({
         value={value}
         comparatorType={comparator?.type}
       />
-      {jsType === 'boolean' ||
-        (isComparator(comparatorName) && (
-          <Button
-            disabled={comparatorName === '_where' && isEmpty(table)}
-            onClick={() => setValue(path, 'X-Hasura-User-Id')}
-            mode="default"
-          >
-            [x-hasura-user-id]
-          </Button>
-        ))}
+      {inputType === 'text' && isComparator(comparatorName) && (
+        <Button
+          disabled={comparatorName === '_where' && isEmpty(table)}
+          onClick={() => setValue(path, 'X-Hasura-User-Id')}
+          mode="default"
+        >
+          [x-hasura-user-id]
+        </Button>
+      )}
     </>
   );
 };

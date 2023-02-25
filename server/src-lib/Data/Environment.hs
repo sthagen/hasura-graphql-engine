@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 module Data.Environment
   ( Environment (),
     getEnvironment,
@@ -20,6 +22,8 @@ newtype Environment = Environment (M.Map String String) deriving (Eq, Show, Gene
 
 instance FromJSON Environment
 
+-- 'getEnvironment' is allowed to use 'System.Environment.getEnvironment'
+{-# ANN getEnvironment ("HLINT: ignore Use env_from_function_argument" :: String) #-}
 getEnvironment :: IO Environment
 getEnvironment = mkEnvironment <$> System.Environment.getEnvironment
 

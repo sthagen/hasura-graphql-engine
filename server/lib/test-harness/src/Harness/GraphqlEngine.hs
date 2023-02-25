@@ -61,9 +61,7 @@ import Harness.TestEnvironment (Server (..), TestEnvironment (..), getServer, se
 import Hasura.App qualified as App
 import Hasura.Logging (Hasura)
 import Hasura.Prelude
-import Hasura.Server.App (Loggers (..), ServerCtx (..))
 import Hasura.Server.Init (PostgresConnInfo (..), ServeOptions (..), unsafePort)
-import Hasura.Server.Init.FeatureFlag qualified as FeatureFlag
 import Hasura.Server.Metrics (ServerMetricsSpec, createServerMetrics)
 import Hasura.Server.Prometheus (makeDummyPrometheusMetrics)
 import Hasura.Tracing (sampleAlways)
@@ -317,24 +315,27 @@ runApp serveOptions = do
   env <- Env.getEnvironment
   initTime <- liftIO getCurrentTime
   globalCtx <- App.initGlobalCtx env metadataDbUrl rci
-  (ekgStore, serverMetrics) <- liftIO do
-    store <- EKG.newStore @TestMetricsSpec
-    serverMetrics <- liftIO . createServerMetrics $ EKG.subset ServerSubset store
-    pure (EKG.subset EKG.emptyOf store, serverMetrics)
+  (ekgStore, serverMetrics) <-
+    liftIO $ do
+      store <- EKG.newStore @TestMetricsSpec
+      serverMetrics <-
+        liftIO $ createServerMetrics $ EKG.subset ServerSubset store
+      pure (EKG.subset EKG.emptyOf store, serverMetrics)
   prometheusMetrics <- makeDummyPrometheusMetrics
-  let managedServerCtx = App.initialiseServerCtx env globalCtx serveOptions Nothing serverMetrics prometheusMetrics sampleAlways (FeatureFlag.checkFeatureFlag env)
-  runManagedT managedServerCtx \serverCtx@ServerCtx {..} -> do
-    let Loggers _ _ pgLogger = scLoggers
-    flip App.runPGMetadataStorageAppT (scMetadataDbPool, pgLogger) . lowerManagedT $
-      App.runHGEServer
-        (const $ pure ())
-        env
-        serveOptions
-        serverCtx
-        initTime
-        Nothing
-        ekgStore
-        (FeatureFlag.checkFeatureFlag env)
+  let managedServerCtx = App.initialiseContext env globalCtx serveOptions Nothing serverMetrics prometheusMetrics sampleAlways
+  runManagedT managedServerCtx \(appCtx, appEnv) -> do
+    flip App.runPGMetadataStorageAppT (appCtx, appEnv)
+      . lowerManagedT
+      $ do
+        App.runHGEServer
+          (const $ pure ())
+          env
+          serveOptions
+          appCtx
+          appEnv
+          initTime
+          Nothing
+          ekgStore
 
 -- | Used only for 'runApp' above.
 data TestMetricsSpec name metricType tags

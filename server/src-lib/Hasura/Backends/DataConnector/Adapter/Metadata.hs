@@ -25,7 +25,7 @@ import Hasura.Backends.DataConnector.Adapter.ConfigTransform (transformConnSourc
 import Hasura.Backends.DataConnector.Adapter.Types qualified as DC
 import Hasura.Backends.DataConnector.Agent.Client (AgentClientContext (..), runAgentClientT)
 import Hasura.Backends.Postgres.SQL.Types (PGDescription (..))
-import Hasura.Base.Error (Code (..), QErr (..), decodeValue, throw400, throw400WithDetail, throw500, withPathK)
+import Hasura.Base.Error (Code (..), QErr (..), decodeValue, throw400, throw400WithDetail, withPathK)
 import Hasura.Incremental qualified as Inc
 import Hasura.Incremental.Select qualified as Inc
 import Hasura.Logging (Hasura, Logger)
@@ -37,7 +37,6 @@ import Hasura.RQL.Types.EventTrigger (RecreateEventTriggers (RETDoNothing))
 import Hasura.RQL.Types.Metadata (SourceMetadata (..))
 import Hasura.RQL.Types.Metadata.Backend (BackendMetadata (..))
 import Hasura.RQL.Types.Metadata.Object
-import Hasura.RQL.Types.SchemaCache qualified as SchemaCache
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.Source (DBObjectsIntrospection (..))
 import Hasura.RQL.Types.Table (ForeignKey (_fkConstraint))
@@ -46,11 +45,11 @@ import Hasura.SQL.Backend (BackendSourceKind (..), BackendType (..))
 import Hasura.SQL.Types (CollectableType (..))
 import Hasura.Server.Migrate.Version (SourceCatalogMigrationState (..))
 import Hasura.Server.Utils qualified as HSU
+import Hasura.Services.Network
 import Hasura.Session (SessionVariable, mkSessionVariable)
 import Hasura.Tracing (ignoreTraceT)
 import Language.GraphQL.Draft.Syntax qualified as GQL
 import Network.HTTP.Client qualified as HTTP
-import Network.HTTP.Client.Manager
 import Servant.Client.Core.HasClient ((//))
 import Servant.Client.Generic (genericClient)
 import Witch qualified
@@ -82,7 +81,7 @@ resolveBackendInfo' ::
     ArrowWriter (Seq (Either InconsistentMetadata MetadataDependency)) arr,
     MonadIO m,
     MonadBaseControl IO m,
-    HasHttpManagerM m
+    ProvidesNetwork m
   ) =>
   Logger Hasura ->
   (Inc.Dependency (Maybe (HashMap DC.DataConnectorName Inc.InvalidationKey)), InsOrdHashMap DC.DataConnectorName DC.DataConnectorOptions) `arr` HashMap DC.DataConnectorName DC.DataConnectorInfo
@@ -103,12 +102,12 @@ resolveBackendInfo' logger = proc (invalidationKeys, optionsMap) -> do
         ArrowWriter (Seq (Either InconsistentMetadata MetadataDependency)) arr,
         MonadIO m,
         MonadBaseControl IO m,
-        HasHttpManagerM m
+        ProvidesNetwork m
       ) =>
       (Inc.Dependency (Maybe (HashMap DC.DataConnectorName Inc.InvalidationKey)), DC.DataConnectorName, DC.DataConnectorOptions) `arr` Maybe DC.DataConnectorInfo
     getDataConnectorCapabilitiesIfNeeded = Inc.cache proc (invalidationKeys, dataConnectorName, dataConnectorOptions) -> do
       let metadataObj = MetadataObject (MODataConnectorAgent dataConnectorName) $ J.toJSON dataConnectorName
-      httpMgr <- bindA -< askHttpManager
+      httpMgr <- bindA -< askHTTPManager
       Inc.dependOn -< Inc.selectMaybeD (Inc.ConstS dataConnectorName) invalidationKeys
       (|
         withRecordInconsistency
@@ -245,14 +244,14 @@ buildForeignKeySet (API.ForeignKeys constraints) =
 -- | This is needed to get permissions to work
 parseBoolExpOperations' ::
   forall m v.
-  (MonadError QErr m, SchemaCache.TableCoreInfoRM 'DataConnector m) =>
+  (MonadError QErr m) =>
   RQL.T.C.ValueParser 'DataConnector m v ->
-  DC.TableName ->
+  RQL.T.T.FieldInfoMap (RQL.T.T.FieldInfo 'DataConnector) ->
   RQL.T.T.FieldInfoMap (RQL.T.T.FieldInfo 'DataConnector) ->
   RQL.T.C.ColumnReference 'DataConnector ->
   J.Value ->
   m [OpExpG 'DataConnector v]
-parseBoolExpOperations' rhsParser rootTable fieldInfoMap columnRef value =
+parseBoolExpOperations' rhsParser rootFieldInfoMap fieldInfoMap columnRef value =
   withPathK (toTxt columnRef) $ parseOperations value
   where
     columnType :: RQL.T.C.ColumnType 'DataConnector
@@ -334,11 +333,7 @@ parseBoolExpOperations' rhsParser rootTable fieldInfoMap columnRef value =
           J.Array path -> case toList path of
             [] -> throw400 Unexpected "path cannot be empty"
             [col] -> go IsCurrent fieldInfoMap col
-            [J.String "$", col] -> do
-              rootTableInfo <-
-                SchemaCache.lookupTableCoreInfo rootTable
-                  >>= flip onNothing (throw500 $ "unexpected: " <> rootTable <<> " doesn't exist")
-              go IsRoot (RQL.T.T._tciFieldInfoMap rootTableInfo) col
+            [J.String "$", col] -> go IsRoot rootFieldInfoMap col
             _ -> throw400 NotSupported "Relationship references are not supported in column comparison RHS"
           _ -> throw400 Unexpected "a boolean expression JSON must be either a string or an array"
           where

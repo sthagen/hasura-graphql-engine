@@ -147,7 +147,7 @@ function insertString(relationships: Array<TableRelationships>, op: InsertMutati
 
 function deleteString(relationships: Array<TableRelationships>, op: DeleteMutationOperation): string {
   return `
-    DELETE FROM ${op.table}
+    DELETE FROM ${escapeTableName(op.table)}
     WHERE ${whereString(relationships, op.where || EMPTY_AND, op.table)}
     RETURNING
       ${returningString(relationships, op.returning_fields || {}, op.table)} as row,
@@ -157,7 +157,7 @@ function deleteString(relationships: Array<TableRelationships>, op: DeleteMutati
 
 function updateString(relationships: Array<TableRelationships>, op: UpdateMutationOperation, info: Array<UpdateInfo>): string {
   const result = `
-    UPDATE ${op.table}
+    UPDATE ${escapeTableName(op.table)}
     SET ${setString(info)}
     WHERE ${whereString(relationships, op.where || EMPTY_AND, op.table)}
     RETURNING
@@ -179,22 +179,21 @@ function updateString(relationships: Array<TableRelationships>, op: UpdateMutati
 function getInsertRowInfos(schemas: Array<TableInsertSchema>, op: InsertMutationOperation): Array<RowInfo[]> {
   const schema = getTableInsertSchema(schemas, op.table);
   if(schema == null) {
-    throw(Error(`Couldn't find schema for table ${escapeTableName(op.table)}`));
+    throw(Error(`Couldn't find insert schema for table ${escapeTableName(op.table)}`));
   }
-  return op.rows.map((row, r) => {
-    const rowInfo = mapObjectToArray(row, ([k,v], i) => {
-      const fieldSchema = schema.fields[k];
+  return op.rows.map((row, rowIndex) => {
+    const rowInfo = mapObjectToArray(row, ([fieldName,fieldValue], fieldIndex) => {
+      const fieldSchema = schema.fields[fieldName];
       if(fieldSchema == null) {
-        throw(Error(`Couldn't find schema for field ${k}`));
+        throw(Error(`Couldn't find insert schema for field ${fieldName} for table ${escapeTableName(op.table)}`));
       }
       return {
-        field: k,
+        field: fieldName,
         schema: fieldSchema,
-        variable: `$${escapeVariable(k)}_${r}_${i}`,
-        value: v
+        variable: `$${escapeVariable(fieldName)}_${rowIndex}_${fieldIndex}`,
+        value: fieldValue
       };
     });
-    r++;
     return rowInfo;
   });
 }

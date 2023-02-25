@@ -1,18 +1,18 @@
 /* eslint-disable no-underscore-dangle */
 import React from 'react';
 import { GraphQLError } from 'graphql';
-import { IconTooltip } from '@/new-components/Tooltip';
-import { Button } from '@/new-components/Button';
-import { Analytics, REDACT_EVERYTHING } from '@/features/Analytics';
+import { IconTooltip } from '../../../../../new-components/Tooltip';
+import {
+  Analytics,
+  REDACT_EVERYTHING,
+} from '../../../../../features/Analytics';
 import {
   availableFeatureFlagIds,
-  FeatureFlagToast,
   useIsFeatureFlagEnabled,
-} from '@/features/FeatureFlags';
-import { isProConsole } from '@/utils';
+} from '../../../../../features/FeatureFlags';
 import { FaFileCode, FaMagic, FaTable } from 'react-icons/fa';
-import { DropdownButton } from '@/new-components/DropdownButton';
-import { Badge } from '@/new-components/Badge';
+import { DropdownButton } from '../../../../../new-components/DropdownButton';
+import { Badge } from '../../../../../new-components/Badge';
 import HandlerEditor from './HandlerEditor';
 import ExecutionEditor from './ExecutionEditor';
 import HeaderConfEditor from './HeaderConfEditor';
@@ -55,7 +55,6 @@ type ActionEditorProps = {
     timer: Nullable<NodeJS.Timeout>,
     ast: Nullable<Record<string, any>>
   ) => void;
-  onOpenActionGenerator?: () => void;
 };
 
 const ActionEditor: React.FC<ActionEditorProps> = ({
@@ -77,7 +76,6 @@ const ActionEditor: React.FC<ActionEditorProps> = ({
   toggleForwardClientHeaders,
   actionDefinitionOnChange,
   typeDefinitionOnChange,
-  onOpenActionGenerator,
 }) => {
   const {
     sdl: typesDefinitionSdl,
@@ -142,24 +140,6 @@ const ActionEditor: React.FC<ActionEditorProps> = ({
             You can use the custom types already defined by you or define new
             types in the new types definition editor below.
           </p>
-          {onOpenActionGenerator &&
-            isProConsole(window.__env) &&
-            (isImportFromOASEnabled ? (
-              <div className="mb-xs">
-                <Analytics
-                  name="action-tab-btn-import-action-from-openapi"
-                  passHtmlAttributesToChildren
-                >
-                  <Button icon={<FaMagic />} onClick={onOpenActionGenerator}>
-                    Import from OpenAPI
-                  </Button>
-                </Analytics>
-              </div>
-            ) : (
-              <FeatureFlagToast
-                flagId={availableFeatureFlagIds.importActionFromOpenApiId}
-              />
-            ))}
           <GraphQLEditor
             value={actionDefinitionSdl}
             error={actionDefinitionError}
