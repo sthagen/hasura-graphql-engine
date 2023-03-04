@@ -31,11 +31,11 @@ const mockMetadata: Metadata = {
               'postgres://postgres:test@host.docker.internal:6001/chinook',
             isolation_level: 'repeatable-read',
             pool_settings: {
-              connection_lifetime: 150,
-              idle_timeout: 150,
-              pool_timeout: 150,
-              retries: 150,
-              total_max_connections: 150,
+              connection_lifetime: 100,
+              idle_timeout: 200,
+              pool_timeout: 300,
+              retries: 400,
+              total_max_connections: 500,
             },
             use_prepared_statements: true,
           },
@@ -67,11 +67,10 @@ const mockMetadata: Metadata = {
         tables: [],
         configuration: {
           connection_info: {
-            connection_string: {
-              from_env: 'HASURA_ENV_VAR',
-            },
+            connection_string:
+              'DRIVER={ODBC Driver 17 for SQL Server};SERVER=host.docker.internal;DATABASE=bikes;Uid=SA;Pwd=reallyStrongPwd123',
             pool_settings: {
-              max_connections: 50,
+              total_max_connections: 50,
               idle_timeout: 180,
             },
           },
@@ -85,6 +84,22 @@ const mockMetadata: Metadata = {
           type_names: {
             prefix: 'some_type_name_prefix',
             suffix: 'some_type_name_suffix',
+          },
+        },
+      },
+      {
+        name: 'bigquery_test',
+        kind: 'bigquery',
+        tables: [],
+        configuration: {
+          datasets: ['sample_dataset', 'sample_dataset_2'],
+          global_select_limit: '1.0',
+          project_id: 'hasura-test',
+          service_account: {
+            client_email: 'service-account@someemail.com',
+            private_key:
+              '-----BEGIN PRIVATE KEY-----\nsecretkey\n-----END PRIVATE KEY-----\n',
+            project_id: 'hasura-test',
           },
         },
       },

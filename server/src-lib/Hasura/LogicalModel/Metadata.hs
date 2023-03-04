@@ -1,11 +1,18 @@
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | Metadata representation of a logical model in the metadata,
 --   as well as a parser and prettyprinter for the query code.
 module Hasura.LogicalModel.Metadata
   ( LogicalModelName (..),
-    LogicalModelInfo (..),
+    LogicalModelMetadata (..),
+    lmmArguments,
+    lmmCode,
+    lmmDescription,
+    lmmReturns,
+    lmmRootFieldName,
+    lmmSelectPermissions,
     LogicalModelArgumentName (..),
     InterpolatedItem (..),
     InterpolatedQuery (..),
@@ -16,15 +23,19 @@ where
 
 import Autodocodec
 import Autodocodec qualified as AC
+import Control.Lens (makeLenses)
 import Data.Aeson
 import Data.Bifunctor (first)
+import Data.HashMap.Strict.InsOrd.Autodocodec (sortedElemsCodec)
 import Data.Text qualified as T
 import Hasura.CustomReturnType (CustomReturnType)
 import Hasura.LogicalModel.Types
 import Hasura.Metadata.DTO.Utils (codecNamePrefix)
 import Hasura.Prelude hiding (first)
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.Permission (SelPermDef, _pdRole)
 import Hasura.SQL.Backend
+import Hasura.Session (RoleName)
 
 newtype RawQuery = RawQuery {getRawQuery :: Text}
   deriving newtype (Eq, Ord, Show, FromJSON, ToJSON)
@@ -40,7 +51,7 @@ data InterpolatedItem variable
     IIText Text
   | -- | a captured variable
     IIVariable variable
-  deriving stock (Eq, Ord, Show, Functor, Foldable, Generic, Traversable)
+  deriving stock (Eq, Ord, Show, Functor, Foldable, Data, Generic, Traversable)
 
 -- | Converting an interpolated query back to text.
 --   Should roundtrip with the 'parseInterpolatedQuery'.
@@ -60,7 +71,7 @@ newtype InterpolatedQuery variable = InterpolatedQuery
   { getInterpolatedQuery :: [InterpolatedItem variable]
   }
   deriving newtype (Eq, Ord, Show, Generic)
-  deriving stock (Functor, Foldable, Traversable)
+  deriving stock (Data, Functor, Foldable, Traversable)
 
 deriving newtype instance (Hashable variable) => Hashable (InterpolatedQuery variable)
 
@@ -71,7 +82,7 @@ ppInterpolatedQuery (InterpolatedQuery parts) = foldMap ppInterpolatedItem parts
 
 -- | We store the interpolated query as the user text and parse it back
 --   when converting back to Haskell code.
-instance HasCodec (InterpolatedQuery LogicalModelArgumentName) where
+instance v ~ LogicalModelArgumentName => HasCodec (InterpolatedQuery v) where
   codec =
     CommentCodec
       ("An interpolated query expressed in native code (SQL)")
@@ -79,6 +90,12 @@ instance HasCodec (InterpolatedQuery LogicalModelArgumentName) where
         (first T.unpack . parseInterpolatedQuery)
         ppInterpolatedQuery
         textCodec
+
+deriving via
+  (Autodocodec (InterpolatedQuery LogicalModelArgumentName))
+  instance
+    v ~ LogicalModelArgumentName =>
+    ToJSON (InterpolatedQuery v)
 
 ---------------------------------------
 
@@ -103,40 +120,39 @@ instance NFData LogicalModelArgumentName
 
 ---------------------------------------
 
--- | A representation of a logical model metadata info object.
-data LogicalModelInfo (b :: BackendType) = LogicalModelInfo
-  { lmiRootFieldName :: LogicalModelName,
-    lmiCode :: InterpolatedQuery LogicalModelArgumentName,
-    lmiReturns :: CustomReturnType b,
-    lmiArguments :: HashMap LogicalModelArgumentName (ScalarType b),
-    lmiDescription :: Maybe Text
+-- | The representation of logical models within the metadata structure.
+data LogicalModelMetadata (b :: BackendType) = LogicalModelMetadata
+  { _lmmRootFieldName :: LogicalModelName,
+    _lmmCode :: InterpolatedQuery LogicalModelArgumentName,
+    _lmmReturns :: CustomReturnType b,
+    _lmmArguments :: HashMap LogicalModelArgumentName (ScalarType b),
+    _lmmSelectPermissions :: InsOrdHashMap RoleName (SelPermDef b),
+    _lmmDescription :: Maybe Text
   }
   deriving (Generic)
 
-deriving instance Backend b => Eq (LogicalModelInfo b)
+deriving instance Backend b => Eq (LogicalModelMetadata b)
 
-deriving instance Backend b => Show (LogicalModelInfo b)
+deriving instance Backend b => Show (LogicalModelMetadata b)
 
-instance Backend b => Hashable (LogicalModelInfo b)
-
-instance Backend b => NFData (LogicalModelInfo b)
-
-instance (Backend b) => HasCodec (LogicalModelInfo b) where
+instance (Backend b) => HasCodec (LogicalModelMetadata b) where
   codec =
     CommentCodec
-      ("A query in expressed in native code (SQL) to add to the GraphQL schema with configuration.")
-      $ AC.object (codecNamePrefix @b <> "LogicalModelInfo")
-      $ LogicalModelInfo
+      ("A logical model as represented in metadata.")
+      $ AC.object (codecNamePrefix @b <> "LogicalModelMetadata")
+      $ LogicalModelMetadata
         <$> requiredField "root_field_name" fieldNameDoc
-          AC..= lmiRootFieldName
+          AC..= _lmmRootFieldName
         <*> requiredField "code" sqlDoc
-          AC..= lmiCode
+          AC..= _lmmCode
         <*> requiredField "returns" returnsDoc
-          AC..= lmiReturns
+          AC..= _lmmReturns
         <*> optionalFieldWithDefault "arguments" mempty argumentDoc
-          AC..= lmiArguments
+          AC..= _lmmArguments
+        <*> optSortedList "select_permissions" _pdRole
+          AC..= _lmmSelectPermissions
         <*> optionalField "description" descriptionDoc
-          AC..= lmiDescription
+          AC..= _lmmDescription
     where
       fieldNameDoc = "Root field name for the logical model"
       sqlDoc = "Native code expression (SQL) to run"
@@ -144,15 +160,18 @@ instance (Backend b) => HasCodec (LogicalModelInfo b) where
       returnsDoc = "Return type (table) of the expression"
       descriptionDoc = "A description of the logical model which appears in the graphql schema"
 
-deriving via
-  (Autodocodec (LogicalModelInfo b))
-  instance
-    (Backend b) => (FromJSON (LogicalModelInfo b))
+      optSortedList name keyForElem =
+        AC.optionalFieldWithOmittedDefaultWith' name (sortedElemsCodec keyForElem) mempty
 
 deriving via
-  (Autodocodec (LogicalModelInfo b))
+  (Autodocodec (LogicalModelMetadata b))
   instance
-    (Backend b) => (ToJSON (LogicalModelInfo b))
+    (Backend b) => (FromJSON (LogicalModelMetadata b))
+
+deriving via
+  (Autodocodec (LogicalModelMetadata b))
+  instance
+    (Backend b) => (ToJSON (LogicalModelMetadata b))
 
 -- | extract all of the `{{ variable }}` inside our query string
 parseInterpolatedQuery ::
@@ -192,3 +211,5 @@ parseInterpolatedQuery =
             ('}' : '}' : rest) ->
               (IIVariable (LogicalModelArgumentName $ T.pack beforeCloseCurly) :) <$> consumeString rest
             _ -> Left "Found '{{' without a matching closing '}}'"
+
+makeLenses ''LogicalModelMetadata

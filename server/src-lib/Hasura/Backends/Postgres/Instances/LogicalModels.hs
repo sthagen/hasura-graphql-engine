@@ -11,7 +11,8 @@ import Database.PG.Query qualified as PG
 import Hasura.Backends.Postgres.Connection qualified as PG
 import Hasura.Backends.Postgres.Connection.Connect (withPostgresDB)
 import Hasura.Base.Error
-import Hasura.LogicalModel.Metadata
+import Hasura.LogicalModel.Metadata (InterpolatedItem (IIText, IIVariable), LogicalModelMetadata (..), getInterpolatedQuery)
+import Hasura.LogicalModel.Types (getLogicalModelName)
 import Hasura.Prelude
 import Hasura.SQL.Backend
 
@@ -20,34 +21,39 @@ validateLogicalModel ::
   (MonadIO m, MonadError QErr m) =>
   Env.Environment ->
   PG.PostgresConnConfiguration ->
-  LogicalModelInfo ('Postgres pgKind) ->
+  LogicalModelMetadata ('Postgres pgKind) ->
   m ()
 validateLogicalModel env connConf model = do
-  let name = getLogicalModelName $ lmiRootFieldName model
+  let name = getLogicalModelName $ _lmmRootFieldName model
   let code :: Text
       code = fold $ flip evalState (1 :: Int) do
-        for (getInterpolatedQuery $ lmiCode model) \case
+        for (getInterpolatedQuery $ _lmmCode model) \case
           IIText t -> pure t
           IIVariable _v -> do
             i <- get
             modify (+ 1)
             pure $ "$" <> tshow i
-  result <-
-    liftIO $
-      withPostgresDB env connConf $
-        PG.rawQE
-          ( \e ->
-              (err400 ValidationFailed "Failed to validate query")
-                { qeInternal = Just $ ExtraInternal $ toJSON e
-                }
-          )
-          (PG.fromText $ "PREPARE _logimo_vali_" <> toTxt name <> " AS " <> code)
-          []
-          False
-  case result of
-    -- running the query failed
-    Left err ->
-      throwError err
-    -- running the query succeeded
-    Right () ->
-      pure ()
+      runRaw :: (MonadIO m, MonadError QErr m) => PG.Query -> m ()
+      runRaw stmt =
+        liftEither
+          =<< liftIO
+            ( withPostgresDB
+                env
+                connConf
+                ( PG.rawQE
+                    ( \e ->
+                        (err400 ValidationFailed "Failed to validate query")
+                          { qeInternal = Just $ ExtraInternal $ toJSON e
+                          }
+                    )
+                    stmt
+                    []
+                    False
+                )
+            )
+      prepname = "_logimo_vali_" <> toTxt name
+
+  -- We don't need to deallocate because 'withPostgresDB' opens a connection,
+  -- runs a statement, and then closes the connection. Since a prepared statement only
+  -- lasts the duration of the session, once it closes, it is deallocated as well.
+  runRaw (PG.fromText $ "PREPARE " <> prepname <> " AS " <> code)

@@ -1,6 +1,6 @@
 import { Config }  from "./config";
-import { connect, SqlLogger } from "./db";
-import { coerceUndefinedToNull, coerceUndefinedOrNullToEmptyRecord, isEmptyObject, tableNameEquals, unreachable, stringArrayEquals, ErrorWithStatusCode } from "./util";
+import { defaultMode, SqlLogger, withConnection } from "./db";
+import { coerceUndefinedToNull, coerceUndefinedOrNullToEmptyRecord, isEmptyObject, tableNameEquals, unreachable, stringArrayEquals, ErrorWithStatusCode, mapObject } from "./util";
 import {
     Expression,
     BinaryComparisonOperator,
@@ -20,10 +20,12 @@ import {
     UnaryComparisonOperator,
     ExplainResponse,
     ExistsExpression,
-    ErrorResponse,
     OrderByRelation,
     OrderByElement,
     OrderByTarget,
+    Query,
+    ColumnFieldValue,
+    NullColumnFieldValue,
   } from "@hasura/dc-api-types";
 import { customAlphabet } from "nanoid";
 import { DEBUGGING_TAGS, QUERY_LENGTH_LIMIT } from "./environment";
@@ -341,7 +343,10 @@ function table_query(
   ): string {
   const tableAlias      = generateTableAlias(tableName);
   const aggregateSelect = aggregates_query(ts, tableName, joinInfo, aggregates, wWhere, wLimit, wOffset, wOrder);
-  const fieldSelect     = isEmptyObject(fields) ? [] : [`'rows', JSON_GROUP_ARRAY(j)`];
+  // The use of the JSON function inside JSON_GROUP_ARRAY is necessary from SQLite 3.39.0 due to breaking changes in
+  // SQLite. See https://sqlite.org/forum/forumpost/e3b101fb3234272b for more details. This approach still works fine
+  // for older versions too.
+  const fieldSelect     = isEmptyObject(fields) ? [] : [`'rows', JSON_GROUP_ARRAY(JSON(j))`];
   const fieldFrom       = isEmptyObject(fields) ? '' : (() => {
     const whereClause = where(ts, wWhere, joinInfo, tableName, tableAlias);
     // NOTE: The reuse of the 'j' identifier should be safe due to scoping. This is confirmed in testing.
@@ -661,14 +666,6 @@ function query(request: QueryRequest): string {
   return tag('query', `SELECT ${result} as data`);
 }
 
-/** Format the DB response into a /query response.
- *
- * Note: There should always be one result since 0 rows still generates an empty JSON array.
- */
-function output(rows: any): QueryResponse {
-  return JSON.parse(rows[0].data);
-}
-
 /** Function to add SQL comments to the generated SQL to tag which procedures generated what text.
  *
  * comment('a','b') => '/*\<a>\*\/ b /*\</a>*\/'
@@ -728,20 +725,21 @@ function tag(t: string, s: string): string {
  *
  */
 export async function queryData(config: Config, sqlLogger: SqlLogger, queryRequest: QueryRequest): Promise<QueryResponse> {
-  const db = connect(config, sqlLogger); // TODO: Should this be cached?
-  const q = query(queryRequest);
+  return await withConnection(config, defaultMode, sqlLogger, async db => {
+    const q = query(queryRequest);
 
-  if(q.length > QUERY_LENGTH_LIMIT) {
-    const error = new ErrorWithStatusCode(
-      `Generated SQL Query was too long (${q.length} > ${QUERY_LENGTH_LIMIT})`,
-      500,
-      { "query.length": q.length, "limit": QUERY_LENGTH_LIMIT }
-    );
-    throw error;
-  }
+    if(q.length > QUERY_LENGTH_LIMIT) {
+      const error = new ErrorWithStatusCode(
+        `Generated SQL Query was too long (${q.length} > ${QUERY_LENGTH_LIMIT})`,
+        500,
+        { "query.length": q.length, "limit": QUERY_LENGTH_LIMIT }
+      );
+      throw error;
+    }
 
-  const [result, metadata] = await db.query(q);
-  return output(result);
+    const results = await db.query(q);
+    return JSON.parse(results[0].data);
+  });
 }
 
 /**
@@ -758,13 +756,14 @@ export async function queryData(config: Config, sqlLogger: SqlLogger, queryReque
  * @returns
  */
 export async function explain(config: Config, sqlLogger: SqlLogger, queryRequest: QueryRequest): Promise<ExplainResponse> {
-  const db = connect(config, sqlLogger);
-  const q = query(queryRequest);
-  const [result, metadata] = await db.query(`EXPLAIN QUERY PLAN ${q}`);
-  return {
-    query: q,
-    lines: [ "", ...formatExplainLines(result as AnalysisEntry[])]
-  }
+  return await withConnection(config, defaultMode, sqlLogger, async db => {
+    const q = query(queryRequest);
+    const result = await db.query(`EXPLAIN QUERY PLAN ${q}`);
+    return {
+      query: q,
+      lines: [ "", ...formatExplainLines(result as AnalysisEntry[])]
+    };
+  });
 }
 
 function formatExplainLines(items: AnalysisEntry[]): string[] {

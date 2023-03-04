@@ -3,14 +3,17 @@
 -- | Tests of the Logical Models feature.
 module Test.API.Metadata.LogicalModelsSpec (spec) where
 
+import Data.Aeson qualified as A
 import Data.List.NonEmpty qualified as NE
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.GraphqlEngine qualified as GraphqlEngine
+import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml (yaml)
+import Harness.Quoter.Yaml.InterpolateYaml
 import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment)
-import Harness.Yaml (shouldReturnYaml)
+import Harness.Yaml (shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
 
@@ -82,7 +85,9 @@ tests opts = do
                   target_date: date
                 returns:
                   columns:
-                    divided: integer
+                    divided:
+                      type: integer
+                      description: "a divided thing"
             |]
         )
         [yaml|
@@ -151,7 +156,9 @@ tests opts = do
                   unused: int
                 returns:
                   columns:
-                    divided: integer
+                    divided:
+                      type: integer
+                      description: "a divided thing"
             |]
         )
         [yaml|
@@ -176,7 +183,9 @@ tests opts = do
                   target_date: date
                 returns:
                   columns:
-                    divided: integer
+                    divided:
+                      type: integer
+                      description: "a divided thing"
             |]
         )
         [yaml|
@@ -202,7 +211,9 @@ tests opts = do
                   target_date: date
                 returns:
                   columns:
-                    divided: integer
+                    divided:
+                      type: integer
+                      description: "a divided thing"
             |]
         )
         [yaml|
@@ -227,7 +238,10 @@ tests opts = do
               target_date: date
             returns:
               columns:
-                divided: integer
+                    divided:
+                      type: integer
+                      nullable: false
+                      description: "a divided thing"
         |]
 
     it "Drops a logical model of a function and returns a 200" $ \testEnv -> do
@@ -246,7 +260,9 @@ tests opts = do
                 target_date: date
               returns:
                 columns:
-                  divided: integer
+                  divided:
+                    type: integer
+                    description: "a divided thing"
           |]
 
       shouldReturnYaml
@@ -280,7 +296,9 @@ tests opts = do
                 target_date: date
               returns:
                 columns:
-                  divided: integer
+                  divided:
+                    type: integer
+                    description: "a divided thing"
           |]
 
       _ <-
@@ -307,6 +325,97 @@ tests opts = do
           []
         |]
 
+    it "Descriptions and nullability appear in the schema" $ \testEnv -> do
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadata
+            testEnv
+            [yaml|
+              type: pg_track_logical_model
+              args:
+                type: query
+                source: postgres
+                root_field_name: divided_stuff
+                code: |
+                  SELECT thing / 2 AS divided, null as something_nullable FROM stuff
+                arguments:
+                  unused: int
+                returns:
+                  description: "Return type description"
+                  columns:
+                    divided:
+                      type: integer
+                      description: "A divided thing"
+                    something_nullable:
+                      type: integer
+                      description: "Something nullable"
+                      nullable: true
+            |]
+        )
+        [yaml|
+          message: success
+        |]
+
+      let queryTypesIntrospection :: A.Value
+          queryTypesIntrospection =
+            [graphql|
+                query {
+                  __type(name: "divided_stuff") {
+                    name
+                    description
+                    fields {
+                      name
+                      description
+                      type {
+                        name
+                        kind
+                        ofType {
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+              |]
+
+          expected =
+            [interpolateYaml|
+                {
+                  "data": {
+                    "__type": {
+                      "description": "Return type description",
+                      "fields": [
+                      {
+                        "description": "A divided thing",
+                        "name": "divided",
+                        "type": {
+                          "kind": "NON_NULL",
+                          "name": null,
+                          "ofType": {
+                            "name": "Int"
+                          }
+                        }
+                      },
+                      {
+                        "description": "Something nullable",
+                        "name": "something_nullable",
+                        "type": {
+                          "kind": "SCALAR",
+                          "name": "Int",
+                          "ofType": null
+                        }
+                      }
+                      ],
+                      "name": "divided_stuff"
+                    }
+                  }
+                }
+              |]
+
+      actual <- GraphqlEngine.postGraphql testEnv queryTypesIntrospection
+
+      actual `shouldBeYaml` expected
+
   describe "Validation fails on untrack a logical model" do
     it "when a logical model does not exist" $
       \testEnv -> do
@@ -318,13 +427,13 @@ tests opts = do
               [yaml|
               type: pg_untrack_logical_model
               args:
-                root_field_name: some_native_query
+                root_field_name: some_logical_model
                 source: postgres
             |]
           )
           [yaml|
           code: not-found
-          error: "Logical model 'some_native_query' not found in source 'postgres'."
+          error: "Logical model \"some_logical_model\" not found in source \"postgres\"."
           path: "$.args"
         |]
 
@@ -350,7 +459,9 @@ tests opts = do
                     target_date: date
                   returns:
                     columns:
-                      divided: integer
+                      divided:
+                        type: integer
+                        description: "a divided thing"
               |]
           )
           [yaml|
@@ -390,7 +501,9 @@ tests opts = do
                     target_date: date
                   returns:
                     columns:
-                      divided: integer
+                      divided:
+                        type: integer
+                        description: "a divided thing"
               |]
           )
           [yaml|
@@ -407,4 +520,281 @@ tests opts = do
                 prepared: false
                 statement: "PREPARE _logimo_vali_divided_stuff AS SELECT thing / $1 AS divided FROM does_not_exist WHERE date = $2"
               path: "$.args"
+          |]
+
+  describe "Permissions" do
+    it "Adds a simple logical model function with no arguments a select permission and returns a 200" $ \testEnv -> do
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadata
+            testEnv
+            [yaml|
+              type: bulk
+              args:
+                - type: pg_track_logical_model
+                  args:
+                    type: query
+                    source: postgres
+                    root_field_name: divided_stuff
+                    code: *simpleQuery
+                    arguments:
+                      unused: int
+                    returns:
+                      columns:
+                        divided:
+                          type: integer
+                          description: "a divided thing"
+                - type: pg_create_logical_model_select_permission
+                  args:
+                    source: postgres
+                    root_field_name: divided_stuff
+                    role: "test"
+                    permission:
+                      columns:
+                        - divided
+                      filter: {}
+            |]
+        )
+        [yaml|
+          - message: success
+          - message: success
+        |]
+
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadata
+            testEnv
+            [yaml|
+              type: pg_get_logical_model
+              args:
+                source: postgres
+            |]
+        )
+        [yaml|
+          - root_field_name: divided_stuff
+            code: *simpleQuery
+            arguments:
+              unused: int
+            select_permissions:
+              - role: "test"
+                permission:
+                  columns:
+                    - divided
+                  filter: {}
+            returns:
+              columns:
+                divided:
+                  description: a divided thing
+                  nullable: false
+                  type: integer
+        |]
+
+    it "Fails to adds a select permission to a nonexisting source" $ \testEnv -> do
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadataWithStatus
+            400
+            testEnv
+            [yaml|
+              type: bulk
+              args:
+                - type: pg_create_logical_model_select_permission
+                  args:
+                    source: made_up_source
+                    root_field_name: made_up_logical_model
+                    role: "test"
+                    permission:
+                      columns:
+                        - divided
+                      filter: {}
+            |]
+        )
+        [yaml|
+          code: not-found
+          error: "Source \"made_up_source\" not found."
+          path: "$.args[0].args"
+        |]
+
+    it "Fails to adds a select permission to a nonexisting logical model" $ \testEnv -> do
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadataWithStatus
+            400
+            testEnv
+            [yaml|
+              type: bulk
+              args:
+                - type: pg_create_logical_model_select_permission
+                  args:
+                    source: postgres
+                    root_field_name: made_up_logical_model
+                    role: "test"
+                    permission:
+                      columns:
+                        - divided
+                      filter: {}
+            |]
+        )
+        [yaml|
+          code: "not-found"
+          error: "Logical model \"made_up_logical_model\" not found in source \"postgres\"."
+          path: "$.args[0].args"
+        |]
+
+    it "Adds a logical model, removes it, and returns 200" $ \testEnv -> do
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadata
+            testEnv
+            [yaml|
+              type: bulk
+              args:
+                - type: pg_track_logical_model
+                  args:
+                    type: query
+                    source: postgres
+                    root_field_name: divided_stuff
+                    code: *simpleQuery
+                    arguments:
+                      unused: int
+                    returns:
+                      columns:
+                        divided:
+                          type: integer
+                          description: "a divided thing"
+                - type: pg_create_logical_model_select_permission
+                  args:
+                    source: postgres
+                    root_field_name: divided_stuff
+                    role: "test"
+                    permission:
+                      columns:
+                        - divided
+                      filter: {}
+                - type: pg_drop_logical_model_select_permission
+                  args:
+                    source: postgres
+                    root_field_name: divided_stuff
+                    role: "test"
+            |]
+        )
+        [yaml|
+          - message: success
+          - message: success
+          - message: success
+        |]
+
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadata
+            testEnv
+            [yaml|
+              type: pg_get_logical_model
+              args:
+                source: postgres
+            |]
+        )
+        [yaml|
+          - root_field_name: divided_stuff
+            code: *simpleQuery
+            arguments:
+              unused: int
+            returns:
+              columns:
+                divided:
+                  description: a divided thing
+                  nullable: false
+                  type: integer
+        |]
+
+    it "Fails to drop a select permission on a nonexisting source" $ \testEnv -> do
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadataWithStatus
+            400
+            testEnv
+            [yaml|
+              type: pg_drop_logical_model_select_permission
+              args:
+                source: made_up_source
+                root_field_name: made_up_logical_model
+                role: "test"
+                permission:
+                  columns:
+                    - divided
+                  filter: {}
+            |]
+        )
+        [yaml|
+          code: not-found
+          error: "Source \"made_up_source\" not found."
+          path: "$.args"
+        |]
+
+    it "Fails to drop a select permission from a nonexisting logical model" $ \testEnv -> do
+      shouldReturnYaml
+        opts
+        ( GraphqlEngine.postMetadataWithStatus
+            400
+            testEnv
+            [yaml|
+              type: pg_drop_logical_model_select_permission
+              args:
+                source: postgres
+                root_field_name: made_up_logical_model
+                role: "test"
+            |]
+        )
+        [yaml|
+          code: "not-found"
+          error: "Logical model \"made_up_logical_model\" not found in source \"postgres\"."
+          path: "$.args"
+        |]
+
+  describe "Validation succeeds" do
+    it "when tracking then untracking then re-tracking a logical model" $
+      \testEnv -> do
+        shouldReturnYaml
+          opts
+          ( GraphqlEngine.postMetadata
+              testEnv
+              [yaml|
+                type: bulk
+                args:
+                  - type: pg_track_logical_model
+                    args:
+                      type: query
+                      source: postgres
+                      root_field_name: divided_stuff2
+                      code: *simpleQuery
+                      arguments:
+                        denominator: int
+                        target_date: date
+                      returns:
+                        columns:
+                          divided:
+                            type: integer
+                  - type: pg_untrack_logical_model
+                    args:
+                      root_field_name: divided_stuff2
+                      source: postgres
+                  - type: pg_track_logical_model
+                    args:
+                      type: query
+                      source: postgres
+                      root_field_name: divided_stuff2
+                      code: *simpleQuery
+                      arguments:
+                        denominator: int
+                        target_date: date
+                      returns:
+                        columns:
+                          divided:
+                            type: integer
+            |]
+          )
+          [yaml|
+            - message: success
+            - message: success
+            - message: success
           |]

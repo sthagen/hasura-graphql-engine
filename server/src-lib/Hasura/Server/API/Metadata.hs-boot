@@ -91,6 +91,8 @@ data RQLMetadataV1
     RMGetLogicalModel !(AnyBackend LogicalModels.GetLogicalModel)
   | RMTrackLogicalModel !(AnyBackend LogicalModels.TrackLogicalModel)
   | RMUntrackLogicalModel !(AnyBackend LogicalModels.UntrackLogicalModel)
+  | RMCreateSelectLogicalModelPermission !(AnyBackend (LogicalModels.CreateLogicalModelPermission SelPerm))
+  | RMDropSelectLogicalModelPermission !(AnyBackend LogicalModels.DropLogicalModelPermission)
   | -- Tables event triggers
     RMCreateEventTrigger !(AnyBackend (Unvalidated1 CreateEventTriggerQuery))
   | RMDeleteEventTrigger !(AnyBackend DeleteEventTriggerQuery)
