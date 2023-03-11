@@ -220,6 +220,65 @@
                 },
                 "type": "object"
             },
+            "AllowlistEntry": {
+                "properties": {
+                    "collection": {
+                        "type": "string"
+                    },
+                    "scope": {
+                        "default": {
+                            "global": true
+                        },
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/AllowlistScopeGlobal"
+                            },
+                            {
+                                "$ref": "#/components/schemas/AllowlistScopeRoles"
+                            }
+                        ]
+                    }
+                },
+                "required": [
+                    "collection"
+                ],
+                "type": "object"
+            },
+            "AllowlistScopeGlobal": {
+                "properties": {
+                    "global": {
+                        "enum": [
+                            true
+                        ],
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "global"
+                ],
+                "type": "object"
+            },
+            "AllowlistScopeRoles": {
+                "properties": {
+                    "global": {
+                        "enum": [
+                            false
+                        ],
+                        "type": "boolean"
+                    },
+                    "roles": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array"
+                    }
+                },
+                "required": [
+                    "global",
+                    "roles"
+                ],
+                "type": "object"
+            },
             "ApolloFederationConfig": {
                 "nullable": true,
                 "properties": {
@@ -288,6 +347,27 @@
                 "required": [
                     "schedule",
                     "clear_older_than"
+                ],
+                "type": "object"
+            },
+            "BigQueryComputedFieldDefinition": {
+                "properties": {
+                    "argument_mapping": {
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "type": "object"
+                    },
+                    "function": {
+                        "$ref": "#/components/schemas/BigQueryFunctionName"
+                    },
+                    "return_table": {
+                        "$ref": "#/components/schemas/BigQueryTableName"
+                    }
+                },
+                "required": [
+                    "function",
+                    "argument_mapping"
                 ],
                 "type": "object"
             },
@@ -499,8 +579,7 @@
                         "type": "string"
                     },
                     "definition": {
-                        "additionalProperties": true,
-                        "description": "value with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                        "$ref": "#/components/schemas/BigQueryComputedFieldDefinition"
                     },
                     "name": {
                         "type": "string"
@@ -512,33 +591,12 @@
                 ],
                 "type": "object"
             },
-            "BigqueryCustomColumn": {
-                "description": "A column of a custom return type",
-                "properties": {
-                    "description": {
-                        "description": "Optional description text which appears in the GraphQL Schema",
-                        "type": "string"
-                    },
-                    "nullable": {
-                        "default": false,
-                        "description": "Whether the type is nullable",
-                        "type": "boolean"
-                    },
-                    "type": {
-                        "$ref": "#/components/schemas/ScalarType"
-                    }
-                },
-                "required": [
-                    "type"
-                ],
-                "type": "object"
-            },
             "BigqueryCustomReturnType": {
                 "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/BigqueryCustomColumn"
+                            "$ref": "#/components/schemas/BigqueryNullableScalarType"
                         },
                         "description": "Return types for the logical model",
                         "type": "object"
@@ -673,7 +731,7 @@
                 "properties": {
                     "arguments": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/ScalarType"
+                            "$ref": "#/components/schemas/BigqueryNullableScalarType"
                         },
                         "default": {},
                         "description": "Free variables in the expression and their types",
@@ -706,6 +764,27 @@
                     "root_field_name",
                     "code",
                     "returns"
+                ],
+                "type": "object"
+            },
+            "BigqueryNullableScalarType": {
+                "description": "A scalar type that can be nullable with an optional description",
+                "properties": {
+                    "description": {
+                        "description": "Optional description text which appears in the GraphQL Schema",
+                        "type": "string"
+                    },
+                    "nullable": {
+                        "default": false,
+                        "description": "Whether the type is nullable",
+                        "type": "boolean"
+                    },
+                    "type": {
+                        "$ref": "#/components/schemas/ScalarType"
+                    }
+                },
+                "required": [
+                    "type"
                 ],
                 "type": "object"
             },
@@ -1215,8 +1294,7 @@
                         "type": "string"
                     },
                     "definition": {
-                        "additionalProperties": true,
-                        "description": "value with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                        "$ref": "#/components/schemas/PostgresComputedFieldDefinition"
                     },
                     "name": {
                         "type": "string"
@@ -1228,34 +1306,12 @@
                 ],
                 "type": "object"
             },
-            "CitusCustomColumn": {
-                "description": "A column of a custom return type",
-                "properties": {
-                    "description": {
-                        "description": "Optional description text which appears in the GraphQL Schema",
-                        "type": "string"
-                    },
-                    "nullable": {
-                        "default": false,
-                        "description": "Whether the type is nullable",
-                        "type": "boolean"
-                    },
-                    "type": {
-                        "description": "The type of the column\nPostgres Scalar Types",
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "type"
-                ],
-                "type": "object"
-            },
             "CitusCustomReturnType": {
                 "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/CitusCustomColumn"
+                            "$ref": "#/components/schemas/CitusNullableScalarType"
                         },
                         "description": "Return types for the logical model",
                         "type": "object"
@@ -1493,8 +1549,7 @@
                 "properties": {
                     "arguments": {
                         "additionalProperties": {
-                            "description": "Postgres Scalar Types",
-                            "type": "string"
+                            "$ref": "#/components/schemas/CitusNullableScalarType"
                         },
                         "default": {},
                         "description": "Free variables in the expression and their types",
@@ -1527,6 +1582,28 @@
                     "root_field_name",
                     "code",
                     "returns"
+                ],
+                "type": "object"
+            },
+            "CitusNullableScalarType": {
+                "description": "A scalar type that can be nullable with an optional description",
+                "properties": {
+                    "description": {
+                        "description": "Optional description text which appears in the GraphQL Schema",
+                        "type": "string"
+                    },
+                    "nullable": {
+                        "default": false,
+                        "description": "Whether the type is nullable",
+                        "type": "boolean"
+                    },
+                    "type": {
+                        "description": "The base scalar type\nPostgres Scalar Types",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "type"
                 ],
                 "type": "object"
             },
@@ -2070,8 +2147,7 @@
                         "type": "string"
                     },
                     "definition": {
-                        "additionalProperties": true,
-                        "description": "value with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                        "$ref": "#/components/schemas/PostgresComputedFieldDefinition"
                     },
                     "name": {
                         "type": "string"
@@ -2083,34 +2159,12 @@
                 ],
                 "type": "object"
             },
-            "CockroachCustomColumn": {
-                "description": "A column of a custom return type",
-                "properties": {
-                    "description": {
-                        "description": "Optional description text which appears in the GraphQL Schema",
-                        "type": "string"
-                    },
-                    "nullable": {
-                        "default": false,
-                        "description": "Whether the type is nullable",
-                        "type": "boolean"
-                    },
-                    "type": {
-                        "description": "The type of the column\nPostgres Scalar Types",
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "type"
-                ],
-                "type": "object"
-            },
             "CockroachCustomReturnType": {
                 "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/CockroachCustomColumn"
+                            "$ref": "#/components/schemas/CockroachNullableScalarType"
                         },
                         "description": "Return types for the logical model",
                         "type": "object"
@@ -2348,8 +2402,7 @@
                 "properties": {
                     "arguments": {
                         "additionalProperties": {
-                            "description": "Postgres Scalar Types",
-                            "type": "string"
+                            "$ref": "#/components/schemas/CockroachNullableScalarType"
                         },
                         "default": {},
                         "description": "Free variables in the expression and their types",
@@ -2382,6 +2435,28 @@
                     "root_field_name",
                     "code",
                     "returns"
+                ],
+                "type": "object"
+            },
+            "CockroachNullableScalarType": {
+                "description": "A scalar type that can be nullable with an optional description",
+                "properties": {
+                    "description": {
+                        "description": "Optional description text which appears in the GraphQL Schema",
+                        "type": "string"
+                    },
+                    "nullable": {
+                        "default": false,
+                        "description": "Whether the type is nullable",
+                        "type": "boolean"
+                    },
+                    "type": {
+                        "description": "The base scalar type\nPostgres Scalar Types",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "type"
                 ],
                 "type": "object"
             },
@@ -3100,8 +3175,10 @@
                         "type": "string"
                     },
                     "definition": {
-                        "additionalProperties": true,
-                        "description": "value with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                        "items": {
+                            "type": "null"
+                        },
+                        "type": "array"
                     },
                     "name": {
                         "type": "string"
@@ -3113,33 +3190,12 @@
                 ],
                 "type": "object"
             },
-            "DataconnectorCustomColumn": {
-                "description": "A column of a custom return type",
-                "properties": {
-                    "description": {
-                        "description": "Optional description text which appears in the GraphQL Schema",
-                        "type": "string"
-                    },
-                    "nullable": {
-                        "default": false,
-                        "description": "Whether the type is nullable",
-                        "type": "boolean"
-                    },
-                    "type": {
-                        "$ref": "#/components/schemas/ScalarType"
-                    }
-                },
-                "required": [
-                    "type"
-                ],
-                "type": "object"
-            },
             "DataconnectorCustomReturnType": {
                 "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/DataconnectorCustomColumn"
+                            "$ref": "#/components/schemas/DataconnectorNullableScalarType"
                         },
                         "description": "Return types for the logical model",
                         "type": "object"
@@ -3278,7 +3334,7 @@
                 "properties": {
                     "arguments": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/ScalarType"
+                            "$ref": "#/components/schemas/DataconnectorNullableScalarType"
                         },
                         "default": {},
                         "description": "Free variables in the expression and their types",
@@ -3311,6 +3367,27 @@
                     "root_field_name",
                     "code",
                     "returns"
+                ],
+                "type": "object"
+            },
+            "DataconnectorNullableScalarType": {
+                "description": "A scalar type that can be nullable with an optional description",
+                "properties": {
+                    "description": {
+                        "description": "Optional description text which appears in the GraphQL Schema",
+                        "type": "string"
+                    },
+                    "nullable": {
+                        "default": false,
+                        "description": "Whether the type is nullable",
+                        "type": "boolean"
+                    },
+                    "type": {
+                        "$ref": "#/components/schemas/ScalarType"
+                    }
+                },
+                "required": [
+                    "type"
                 ],
                 "type": "object"
             },
@@ -4207,9 +4284,10 @@
                         "type": "array"
                     },
                     "allowlist": {
-                        "description": "safe GraphQL operations - when allow lists are enabled only these operations are allowed\n\n\narray of values of unspecified type - this is a placeholder that will eventually be replaced with a more detailed description",
+                        "default": [],
+                        "description": "safe GraphQL operations - when allow lists are enabled only these operations are allowed",
                         "items": {
-                            "additionalProperties": true
+                            "$ref": "#/components/schemas/AllowlistEntry"
                         },
                         "type": "array"
                     },
@@ -4237,15 +4315,15 @@
                         "description": "TODO\n\n\nobject with unspecified properties - this is a placeholder that will eventually be replaced with a more detailed description"
                     },
                     "inherited_roles": {
-                        "description": "an inherited role is a way to create a new role which inherits permissions from two or more roles\n\n\narray of values of unspecified type - this is a placeholder that will eventually be replaced with a more detailed description",
+                        "default": [],
+                        "description": "an inherited role is a way to create a new role which inherits permissions from two or more roles",
                         "items": {
-                            "additionalProperties": true
+                            "$ref": "#/components/schemas/Role"
                         },
                         "type": "array"
                     },
                     "metrics_config": {
-                        "additionalProperties": true,
-                        "description": "TODO\n\n\nobject with unspecified properties - this is a placeholder that will eventually be replaced with a more detailed description"
+                        "$ref": "#/components/schemas/MetricsConfig"
                     },
                     "network": {
                         "additionalProperties": true,
@@ -4296,6 +4374,21 @@
                 "required": [
                     "version",
                     "sources"
+                ],
+                "type": "object"
+            },
+            "MetricsConfig": {
+                "properties": {
+                    "analyze_query_variables": {
+                        "type": "boolean"
+                    },
+                    "analyze_response_body": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "analyze_query_variables",
+                    "analyze_response_body"
                 ],
                 "type": "object"
             },
@@ -4359,8 +4452,7 @@
                         "type": "string"
                     },
                     "definition": {
-                        "additionalProperties": true,
-                        "description": "value with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                        "additionalProperties": true
                     },
                     "name": {
                         "type": "string"
@@ -4372,33 +4464,12 @@
                 ],
                 "type": "object"
             },
-            "MssqlCustomColumn": {
-                "description": "A column of a custom return type",
-                "properties": {
-                    "description": {
-                        "description": "Optional description text which appears in the GraphQL Schema",
-                        "type": "string"
-                    },
-                    "nullable": {
-                        "default": false,
-                        "description": "Whether the type is nullable",
-                        "type": "boolean"
-                    },
-                    "type": {
-                        "$ref": "#/components/schemas/ScalarType"
-                    }
-                },
-                "required": [
-                    "type"
-                ],
-                "type": "object"
-            },
             "MssqlCustomReturnType": {
                 "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/MssqlCustomColumn"
+                            "$ref": "#/components/schemas/MssqlNullableScalarType"
                         },
                         "description": "Return types for the logical model",
                         "type": "object"
@@ -4628,7 +4699,7 @@
                 "properties": {
                     "arguments": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/ScalarType"
+                            "$ref": "#/components/schemas/MssqlNullableScalarType"
                         },
                         "default": {},
                         "description": "Free variables in the expression and their types",
@@ -4661,6 +4732,27 @@
                     "root_field_name",
                     "code",
                     "returns"
+                ],
+                "type": "object"
+            },
+            "MssqlNullableScalarType": {
+                "description": "A scalar type that can be nullable with an optional description",
+                "properties": {
+                    "description": {
+                        "description": "Optional description text which appears in the GraphQL Schema",
+                        "type": "string"
+                    },
+                    "nullable": {
+                        "default": false,
+                        "description": "Whether the type is nullable",
+                        "type": "boolean"
+                    },
+                    "type": {
+                        "$ref": "#/components/schemas/ScalarType"
+                    }
+                },
+                "required": [
+                    "type"
                 ],
                 "type": "object"
             },
@@ -5270,8 +5362,7 @@
                         "type": "string"
                     },
                     "definition": {
-                        "additionalProperties": true,
-                        "description": "value with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                        "additionalProperties": true
                     },
                     "name": {
                         "type": "string"
@@ -5283,64 +5374,12 @@
                 ],
                 "type": "object"
             },
-            "MysqlCustomColumn": {
-                "description": "A column of a custom return type",
-                "properties": {
-                    "description": {
-                        "description": "Optional description text which appears in the GraphQL Schema",
-                        "type": "string"
-                    },
-                    "nullable": {
-                        "default": false,
-                        "description": "Whether the type is nullable",
-                        "type": "boolean"
-                    },
-                    "type": {
-                        "description": "The type of the column\nA MySQL scalar type.",
-                        "enum": [
-                            "DATE",
-                            "DECIMAL",
-                            "DECIMAL",
-                            "TINYINT",
-                            "SMALLINT",
-                            "INT",
-                            "FLOAT",
-                            "DOUBLE",
-                            "NULL",
-                            "TIMESTAMP",
-                            "BIGINT",
-                            "MEDIUMINT",
-                            "DATE",
-                            "TIME",
-                            "DATETIME",
-                            "YEAR",
-                            "VARCHAR",
-                            "BIT",
-                            "ENUM",
-                            "SET",
-                            "TINYBLOB",
-                            "MEDIUMBLOB",
-                            "LONGBLOB",
-                            "BLOB",
-                            "VARCHAR",
-                            "TEXT",
-                            "GEOMETRY",
-                            "JSON"
-                        ],
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "type"
-                ],
-                "type": "object"
-            },
             "MysqlCustomReturnType": {
                 "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/MysqlCustomColumn"
+                            "$ref": "#/components/schemas/MysqlNullableScalarType"
                         },
                         "description": "Return types for the logical model",
                         "type": "object"
@@ -5476,38 +5515,7 @@
                 "properties": {
                     "arguments": {
                         "additionalProperties": {
-                            "description": "A MySQL scalar type.",
-                            "enum": [
-                                "DATE",
-                                "DECIMAL",
-                                "DECIMAL",
-                                "TINYINT",
-                                "SMALLINT",
-                                "INT",
-                                "FLOAT",
-                                "DOUBLE",
-                                "NULL",
-                                "TIMESTAMP",
-                                "BIGINT",
-                                "MEDIUMINT",
-                                "DATE",
-                                "TIME",
-                                "DATETIME",
-                                "YEAR",
-                                "VARCHAR",
-                                "BIT",
-                                "ENUM",
-                                "SET",
-                                "TINYBLOB",
-                                "MEDIUMBLOB",
-                                "LONGBLOB",
-                                "BLOB",
-                                "VARCHAR",
-                                "TEXT",
-                                "GEOMETRY",
-                                "JSON"
-                            ],
-                            "type": "string"
+                            "$ref": "#/components/schemas/MysqlNullableScalarType"
                         },
                         "default": {},
                         "description": "Free variables in the expression and their types",
@@ -5540,6 +5548,58 @@
                     "root_field_name",
                     "code",
                     "returns"
+                ],
+                "type": "object"
+            },
+            "MysqlNullableScalarType": {
+                "description": "A scalar type that can be nullable with an optional description",
+                "properties": {
+                    "description": {
+                        "description": "Optional description text which appears in the GraphQL Schema",
+                        "type": "string"
+                    },
+                    "nullable": {
+                        "default": false,
+                        "description": "Whether the type is nullable",
+                        "type": "boolean"
+                    },
+                    "type": {
+                        "description": "The base scalar type\nA MySQL scalar type.",
+                        "enum": [
+                            "DATE",
+                            "DECIMAL",
+                            "DECIMAL",
+                            "TINYINT",
+                            "SMALLINT",
+                            "INT",
+                            "FLOAT",
+                            "DOUBLE",
+                            "NULL",
+                            "TIMESTAMP",
+                            "BIGINT",
+                            "MEDIUMINT",
+                            "DATE",
+                            "TIME",
+                            "DATETIME",
+                            "YEAR",
+                            "VARCHAR",
+                            "BIT",
+                            "ENUM",
+                            "SET",
+                            "TINYBLOB",
+                            "MEDIUMBLOB",
+                            "LONGBLOB",
+                            "BLOB",
+                            "VARCHAR",
+                            "TEXT",
+                            "GEOMETRY",
+                            "JSON"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "type"
                 ],
                 "type": "object"
             },
@@ -6118,6 +6178,31 @@
             "PostgresBoolExp": {
                 "additionalProperties": true
             },
+            "PostgresComputedFieldDefinition": {
+                "properties": {
+                    "function": {
+                        "additionalProperties": true,
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/PostgresQualified_FunctionName"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ]
+                    },
+                    "session_argument": {
+                        "type": "string"
+                    },
+                    "table_argument": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "function"
+                ],
+                "type": "object"
+            },
             "PostgresComputedFieldMetadata": {
                 "properties": {
                     "comment": {
@@ -6126,8 +6211,7 @@
                         "type": "string"
                     },
                     "definition": {
-                        "additionalProperties": true,
-                        "description": "value with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                        "$ref": "#/components/schemas/PostgresComputedFieldDefinition"
                     },
                     "name": {
                         "type": "string"
@@ -6170,34 +6254,12 @@
                 ],
                 "type": "object"
             },
-            "PostgresCustomColumn": {
-                "description": "A column of a custom return type",
-                "properties": {
-                    "description": {
-                        "description": "Optional description text which appears in the GraphQL Schema",
-                        "type": "string"
-                    },
-                    "nullable": {
-                        "default": false,
-                        "description": "Whether the type is nullable",
-                        "type": "boolean"
-                    },
-                    "type": {
-                        "description": "The type of the column\nPostgres Scalar Types",
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "type"
-                ],
-                "type": "object"
-            },
             "PostgresCustomReturnType": {
                 "description": "A return type for a logical model.",
                 "properties": {
                     "columns": {
                         "additionalProperties": {
-                            "$ref": "#/components/schemas/PostgresCustomColumn"
+                            "$ref": "#/components/schemas/PostgresNullableScalarType"
                         },
                         "description": "Return types for the logical model",
                         "type": "object"
@@ -6435,8 +6497,7 @@
                 "properties": {
                     "arguments": {
                         "additionalProperties": {
-                            "description": "Postgres Scalar Types",
-                            "type": "string"
+                            "$ref": "#/components/schemas/PostgresNullableScalarType"
                         },
                         "default": {},
                         "description": "Free variables in the expression and their types",
@@ -6469,6 +6530,28 @@
                     "root_field_name",
                     "code",
                     "returns"
+                ],
+                "type": "object"
+            },
+            "PostgresNullableScalarType": {
+                "description": "A scalar type that can be nullable with an optional description",
+                "properties": {
+                    "description": {
+                        "description": "Optional description text which appears in the GraphQL Schema",
+                        "type": "string"
+                    },
+                    "nullable": {
+                        "default": false,
+                        "description": "Whether the type is nullable",
+                        "type": "boolean"
+                    },
+                    "type": {
+                        "description": "The base scalar type\nPostgres Scalar Types",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "type"
                 ],
                 "type": "object"
             },
@@ -8152,6 +8235,24 @@
                 "required": [
                     "num_retries",
                     "interval_sec"
+                ],
+                "type": "object"
+            },
+            "Role": {
+                "properties": {
+                    "role_name": {
+                        "type": "string"
+                    },
+                    "role_set": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array"
+                    }
+                },
+                "required": [
+                    "role_name",
+                    "role_set"
                 ],
                 "type": "object"
             },

@@ -1,13 +1,14 @@
 import { Button } from '../../new-components/Button';
 import { useState } from 'react';
-import { ListAllTableColumnsReturn } from '../Data/hooks/useListAllTableColumns';
 import { InsertRowArgs } from '../DataSource';
 import { ColumnRow } from './components/ColumnRow';
 import { FormData } from '../Data/hooks/useInsertRow';
 import Skeleton from 'react-loading-skeleton';
+import { convertTableValue } from './InsertRowForm.utils';
+import { ListAllTableColumn } from '../Data/hooks/useListAllTableColumns';
 
 export type InsertRowFormProps = {
-  columns: ListAllTableColumnsReturn['columns'];
+  columns: (ListAllTableColumn & { placeholder: string })[];
   isInserting: boolean;
   isLoading: boolean;
   onInsertRow: (formData: FormData) => void;
@@ -23,10 +24,22 @@ export const InsertRowForm: React.VFC<InsertRowFormProps> = ({
 
   const onInsert = () => {
     const adaptedValues = values.reduce<FormData>((acc, value) => {
+      const columnName = Object.keys(value)[0];
+      const columnValue = Object.values(value)[0];
+
+      const columnDefinition = columns.find(
+        column => column.name === columnName
+      );
+
+      const finalColumnValue = convertTableValue(
+        columnValue,
+        columnDefinition?.dataType
+      );
+
       const formData: FormData = {
-        [Object.keys(value)[0]]: {
+        [columnName]: {
           option: 'value',
-          value: Object.values(value)[0],
+          value: finalColumnValue,
         },
       };
 
@@ -100,20 +113,25 @@ export const InsertRowForm: React.VFC<InsertRowFormProps> = ({
   }
 
   return (
-    <form onSubmit={() => onInsert()}>
-      <div className="flex flex-col my-6 gap-2 max-w-screen-sm">
+    <form
+      onSubmit={() => onInsert()}
+      className="w-full bg-white p-4 rounded-sm border my-2"
+    >
+      <div className="flex flex-col mb-6 gap-3 max-w-screen-md">
         {columns.map(column => (
           <ColumnRow
             key={column.name}
             label={column.name}
             name={column.name}
             onChange={onChange}
+            placeholder={column.placeholder}
             // disable if the column is auto-increment or auto-generated
             isDisabled={false}
             // disable if the column has no default value
             isDefaultDisabled={false}
             isNullDisabled={!column.nullable}
             resetToken={resetToken}
+            dataType={column.dataType}
           />
         ))}
       </div>

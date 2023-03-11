@@ -12,6 +12,7 @@ module Hasura.RQL.Types.Metadata
     dropEventTriggerInMetadata,
     dropFunctionInMetadata,
     dropPermissionInMetadata,
+    dropLogicalModelPermissionInMetadata,
     dropRelationshipInMetadata,
     dropRemoteRelationshipInMetadata,
     dropTableInMetadata,
@@ -54,7 +55,7 @@ import Data.Aeson.Types
 import Data.HashMap.Strict.InsOrd.Extended qualified as OM
 import Data.Monoid (Dual (..), Endo (..))
 import Hasura.Incremental qualified as Inc
-import Hasura.LogicalModel.Metadata (LogicalModelMetadata, LogicalModelName)
+import Hasura.LogicalModel.Metadata (LogicalModelMetadata, LogicalModelName, lmmSelectPermissions)
 import Hasura.Metadata.DTO.MetadataV3 (MetadataV3 (..))
 import Hasura.Metadata.DTO.Placeholder (IsPlaceholder (placeholder))
 import Hasura.Prelude
@@ -383,6 +384,14 @@ dropPermissionInMetadata rn = \case
   PTDelete -> tmDeletePermissions %~ OM.delete rn
   PTUpdate -> tmUpdatePermissions %~ OM.delete rn
 
+dropLogicalModelPermissionInMetadata ::
+  RoleName -> PermType -> LogicalModelMetadata b -> LogicalModelMetadata b
+dropLogicalModelPermissionInMetadata rn = \case
+  PTSelect -> lmmSelectPermissions %~ OM.delete rn
+  PTInsert -> error "Not implemented yet"
+  PTDelete -> error "Not implemented yet"
+  PTUpdate -> error "Not implemented yet"
+
 dropComputedFieldInMetadata ::
   ComputedFieldName -> TableMetadata b -> TableMetadata b
 dropComputedFieldInMetadata name =
@@ -524,14 +533,14 @@ metadataToDTO
       { metaV3Sources = sources,
         metaV3RemoteSchemas = remoteSchemas,
         metaV3QueryCollections = queryCollections,
-        metaV3Allowlist = placeholder <$> allowlistToOrdJSONList allowlist,
+        metaV3Allowlist = allowlist,
         metaV3Actions = actions,
         metaV3CustomTypes = customTypes,
         metaV3CronTriggers = cronTriggers,
         metaV3RestEndpoints = endpoints,
         metaV3ApiLimits = placeholder . objectFromOrdJSON <$> apiLimitsToOrdJSON apiLimits,
-        metaV3MetricsConfig = placeholder . objectFromOrdJSON <$> metricsConfigToOrdJSON metricsConfig,
-        metaV3InheritedRoles = placeholder <$> inheritedRolesToOrdJSONList inheritedRoles,
+        metaV3MetricsConfig = metricsConfig,
+        metaV3InheritedRoles = inheritedRoles,
         metaV3GraphqlSchemaIntrospection = placeholder . objectFromOrdJSON <$> introspectionDisabledRolesToOrdJSON introspectionDisabledRoles,
         metaV3Network = placeholder . objectFromOrdJSON <$> networkConfigToOrdJSON networkConfig,
         metaV3BackendConfigs = placeholder . objectFromOrdJSON <$> backendConfigsToOrdJSON backendConfigs,

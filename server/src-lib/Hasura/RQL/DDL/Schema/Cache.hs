@@ -36,6 +36,7 @@ import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Data.Text.Extended
 import Hasura.Base.Error
+import Hasura.CustomReturnType.Common (toFieldInfo)
 import Hasura.EncJSON
 import Hasura.GraphQL.Schema (buildGQLContext)
 import Hasura.GraphQL.Schema.NamingCase
@@ -705,21 +706,30 @@ buildSchemaCacheRule logger env = proc (metadataNoDefaults, invalidationKeys, st
 
       let functionCache = mapFromL _fiSQLName $ catMaybes functionCacheMaybes
 
-          -- There's currently nothing to "resolve" in the metadata object.
-          -- This will change when e.g. permissions are introduced, which will
-          -- change the logical model cache based on the role.
-          logicalModelCache :: LogicalModelCache b
-          logicalModelCache = mapFromL _lmiRootFieldName do
-            LogicalModelMetadata {..} <- OMap.elems logicalModels
+      logicalModelCacheMaybes <-
+        interpretWriter
+          -< for
+            (OMap.elems logicalModels)
+            \LogicalModelMetadata {..} -> runExceptT do
+              fieldInfoMap <- case toFieldInfo _lmmReturns of
+                Nothing -> pure mempty
+                Just fields -> pure (mapFromL fieldInfoName fields)
 
-            pure
-              LogicalModelInfo
-                { _lmiRootFieldName = _lmmRootFieldName,
-                  _lmiCode = _lmmCode,
-                  _lmiReturns = _lmmReturns,
-                  _lmiArguments = _lmmArguments,
-                  _lmiDescription = _lmmDescription
-                }
+              logicalModelPermissions <-
+                buildLogicalModelPermissions sourceName tableCoreInfos _lmmRootFieldName fieldInfoMap _lmmSelectPermissions orderedRoles
+
+              pure
+                LogicalModelInfo
+                  { _lmiRootFieldName = _lmmRootFieldName,
+                    _lmiCode = _lmmCode,
+                    _lmiReturns = _lmmReturns,
+                    _lmiArguments = _lmmArguments,
+                    _lmiPermissions = logicalModelPermissions,
+                    _lmiDescription = _lmmDescription
+                  }
+
+      let logicalModelCache :: LogicalModelCache b
+          logicalModelCache = mapFromL _lmiRootFieldName (mapMaybe eitherToMaybe logicalModelCacheMaybes)
 
       returnA -< SourceInfo sourceName tableCache functionCache logicalModelCache sourceConfig queryTagsConfig resolvedCustomization
 
@@ -1234,7 +1244,7 @@ buildRemoteSchemaRemoteRelationship allSources remoteSchemaMap remoteSchema remo
           toJSON $
             CreateRemoteSchemaRemoteRelationship remoteSchema typeName _rrName _rrDefinition
       schemaObj = SORemoteSchemaRemoteRelationship remoteSchema typeName _rrName
-      addRemoteRelationshipContext e = "in remote relationship" <> _rrName <<> ": " <> e
+      addRemoteRelationshipContext e = "in remote relationship " <> _rrName <<> ": " <> e
       -- buildRemoteFieldInfo only knows how to construct dependencies on the RHS of the join condition,
       -- so the dependencies on the remote relationship on the LHS entity have to be computed here
       lhsDependency =

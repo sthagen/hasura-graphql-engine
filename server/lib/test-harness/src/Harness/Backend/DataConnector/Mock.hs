@@ -9,6 +9,7 @@ module Harness.Backend.DataConnector.Mock
     teardown,
     agentConfig,
     mkLocalTestEnvironment,
+    mkLocalTestEnvironment',
 
     -- * Mock Test Construction
     MockConfig (..),
@@ -134,8 +135,11 @@ data MockAgentEnvironment = MockAgentEnvironment
 
 -- | Create the 'I.IORef's and launch the servant mock agent.
 mkLocalTestEnvironment :: TestEnvironment -> Managed MockAgentEnvironment
-mkLocalTestEnvironment _ = mkTestResource do
-  maeConfig <- I.newIORef chinookMock
+mkLocalTestEnvironment = mkLocalTestEnvironment' chinookMock
+
+mkLocalTestEnvironment' :: MockConfig -> TestEnvironment -> Managed MockAgentEnvironment
+mkLocalTestEnvironment' mockConfig _ = mkTestResource do
+  maeConfig <- I.newIORef mockConfig
   maeRecordedRequest <- I.newIORef Nothing
   maeRecordedRequestConfig <- I.newIORef Nothing
   maeThread <- Async.async $ runMockServer maeConfig maeRecordedRequest maeRecordedRequestConfig
@@ -160,11 +164,11 @@ mockMutationResponse :: API.MutationResponse -> MockConfig -> MockConfig
 mockMutationResponse mutationResponse mockConfig =
   mockConfig {_mutationResponse = \_ -> Right mutationResponse}
 
-mockAgentGraphqlTest :: HasCallStack => String -> ((MockConfig -> RequestHeaders -> Aeson.Value -> IO MockRequestResults) -> Expectation) -> SpecWith (Arg ((TestEnvironment, MockAgentEnvironment) -> Expectation))
+mockAgentGraphqlTest :: HasCallStack => String -> (TestEnvironment -> (MockConfig -> RequestHeaders -> Aeson.Value -> IO MockRequestResults) -> Expectation) -> SpecWith (Arg ((TestEnvironment, MockAgentEnvironment) -> Expectation))
 mockAgentGraphqlTest name testBody =
   it name $ \(env, agentEnv) ->
     let performGraphqlRequest mockConfig requestHeaders graphqlRequest = performRecordedRequest agentEnv mockConfig (GraphqlEngine.postGraphqlWithHeaders env requestHeaders graphqlRequest)
-     in testBody performGraphqlRequest
+     in testBody env performGraphqlRequest
 
 mockAgentMetadataTest :: HasCallStack => String -> (TestEnvironment -> (MockConfig -> Aeson.Value -> IO MockRequestResults) -> Expectation) -> SpecWith (Arg ((TestEnvironment, MockAgentEnvironment) -> Expectation))
 mockAgentMetadataTest name testBody =

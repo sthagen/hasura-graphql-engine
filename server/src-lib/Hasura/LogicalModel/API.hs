@@ -23,15 +23,15 @@ import Control.Lens (Traversal', has, preview, (^?))
 import Data.Aeson
 import Data.Environment qualified as Env
 import Data.HashMap.Strict.InsOrd.Extended qualified as OMap
-import Data.Text.Extended ((<<>))
+import Data.Text.Extended (toTxt, (<<>))
 import Hasura.Base.Error
 import Hasura.CustomReturnType (CustomReturnType)
 import Hasura.EncJSON
 import Hasura.LogicalModel.Metadata (LogicalModelArgumentName, LogicalModelMetadata (..), lmmSelectPermissions, parseInterpolatedQuery)
-import Hasura.LogicalModel.Types
+import Hasura.LogicalModel.Types (LogicalModelName, NullableScalarType)
 import Hasura.Metadata.DTO.Utils (codecNamePrefix)
 import Hasura.Prelude
-import Hasura.RQL.Types.Backend (Backend, ScalarType, SourceConnConfiguration)
+import Hasura.RQL.Types.Backend (Backend, SourceConnConfiguration)
 import Hasura.RQL.Types.Common (SourceName, defaultSource, sourceNameToText, successMsg)
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.Metadata.Backend
@@ -49,7 +49,7 @@ data TrackLogicalModel (b :: BackendType) = TrackLogicalModel
   { tlmSource :: SourceName,
     tlmRootFieldName :: LogicalModelName,
     tlmCode :: Text,
-    tlmArguments :: HashMap LogicalModelArgumentName (ScalarType b),
+    tlmArguments :: HashMap LogicalModelArgumentName (NullableScalarType b),
     tlmDescription :: Maybe Text,
     tlmReturns :: CustomReturnType b
   }
@@ -177,10 +177,11 @@ runTrackLogicalModel ::
 runTrackLogicalModel env trackLogicalModelRequest = do
   throwIfFeatureDisabled
 
-  sourceConnConfig <-
+  sourceMetadata <-
     maybe (throw400 NotFound $ "Source " <> sourceNameToText source <> " not found.") pure
-      . preview (metaSources . ix source . toSourceMetadata @b . smConfiguration)
+      . preview (metaSources . ix source . toSourceMetadata @b)
       =<< getMetadata
+  let sourceConnConfig = _smConfiguration sourceMetadata
 
   (metadata :: LogicalModelMetadata b) <- do
     liftIO (runExceptT (logicalModelTrackToMetadata @b env sourceConnConfig trackLogicalModelRequest))
@@ -191,6 +192,10 @@ runTrackLogicalModel env trackLogicalModelRequest = do
         MOSourceObjId source $
           AB.mkAnyBackend $
             SMOLogicalModel @b fieldName
+      existingLogicalModels = OMap.keys (_smLogicalModels sourceMetadata)
+
+  when (fieldName `elem` existingLogicalModels) do
+    throw400 AlreadyTracked $ "Logical model '" <> toTxt fieldName <> "' is already tracked."
 
   buildSchemaCacheFor metadataObj $
     MetadataModifier $
