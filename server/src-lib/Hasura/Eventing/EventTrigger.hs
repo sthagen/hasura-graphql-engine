@@ -55,6 +55,7 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Aeson qualified as J
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Aeson.Lens qualified as JL
 import Data.Aeson.TH
 import Data.Has
 import Data.HashMap.Strict qualified as M
@@ -179,10 +180,11 @@ defaultMaxEventThreads = $$(refineTH 100)
 defaultFetchInterval :: DiffTime
 defaultFetchInterval = seconds 1
 
-initEventEngineCtx :: Int -> DiffTime -> Refined NonNegative Int -> STM EventEngineCtx
-initEventEngineCtx maxT _eeCtxFetchInterval _eeCtxFetchSize = do
-  _eeCtxEventThreadsCapacity <- newTVar maxT
-  return $ EventEngineCtx {..}
+initEventEngineCtx :: MonadIO m => Refined Positive Int -> Refined NonNegative Milliseconds -> Refined NonNegative Int -> m EventEngineCtx
+initEventEngineCtx maxThreads fetchInterval _eeCtxFetchSize = do
+  _eeCtxEventThreadsCapacity <- liftIO $ newTVarIO $ unrefine maxThreads
+  let _eeCtxFetchInterval = milliseconds $ unrefine fetchInterval
+  return EventEngineCtx {..}
 
 saveLockedEventTriggerEvents :: MonadIO m => SourceName -> [EventId] -> TVar (HashMap SourceName (Set.Set EventId)) -> m ()
 saveLockedEventTriggerEvents sourceName eventIds lockedEvents =
@@ -246,11 +248,11 @@ type FetchedEventsStatsLogger = FDebounce.Trigger FetchedEventsStats FetchedEven
 -- | Logger to accumulate stats of fetched events over a period of time and log once using @'L.Logger L.Hasura'.
 -- See @'createStatsLogger' for more details.
 createFetchedEventsStatsLogger :: (MonadIO m) => L.Logger L.Hasura -> m FetchedEventsStatsLogger
-createFetchedEventsStatsLogger = createStatsLogger
+createFetchedEventsStatsLogger = L.createStatsLogger
 
 -- | Close the fetched events stats logger.
 closeFetchedEventsStatsLogger :: (MonadIO m) => L.Logger L.Hasura -> FetchedEventsStatsLogger -> m ()
-closeFetchedEventsStatsLogger = closeStatsLogger L.eventTriggerProcessLogType
+closeFetchedEventsStatsLogger = L.closeStatsLogger L.eventTriggerProcessLogType
 
 -- | Log statistics of fetched events. See @'logStats' for more details.
 logFetchedEventsStatistics ::
@@ -259,7 +261,7 @@ logFetchedEventsStatistics ::
   [BackendEventWithSource] ->
   m ()
 logFetchedEventsStatistics logger backendEvents =
-  logStats logger (FetchedEventsStats numEventsFetchedPerSource 1)
+  L.logStats logger (FetchedEventsStats numEventsFetchedPerSource 1)
   where
     numEventsFetchedPerSource =
       let sourceNames = flip map backendEvents $
@@ -280,27 +282,26 @@ logFetchedEventsStatistics logger backendEvents =
 processEventQueue ::
   forall m.
   ( MonadIO m,
-    Tracing.HasReporter m,
     MonadBaseControl IO m,
     LA.Forall (LA.Pure m),
-    MonadMask m
+    MonadMask m,
+    Tracing.MonadTrace m
   ) =>
   L.Logger L.Hasura ->
   FetchedEventsStatsLogger ->
   HTTP.Manager ->
   IO SchemaCache ->
-  EventEngineCtx ->
+  IO EventEngineCtx ->
+  TVar Int ->
   LockedEventsCtx ->
   ServerMetrics ->
   EventTriggerMetrics ->
   MaintenanceMode () ->
   m (Forever m)
-processEventQueue logger statsLogger httpMgr getSchemaCache EventEngineCtx {..} LockedEventsCtx {leEvents} serverMetrics eventTriggerMetrics maintenanceMode = do
+processEventQueue logger statsLogger httpMgr getSchemaCache getEventEngineCtx activeEventProcessingThreads LockedEventsCtx {leEvents} serverMetrics eventTriggerMetrics maintenanceMode = do
   events0 <- popEventsBatch
   return $ Forever (events0, 0, False) go
   where
-    fetchBatchSize = unrefine _eeCtxFetchSize
-
     popEventsBatch :: m [BackendEventWithSource]
     popEventsBatch = do
       {-
@@ -314,6 +315,7 @@ processEventQueue logger statsLogger httpMgr getSchemaCache EventEngineCtx {..} 
         (delivered=t or error=t or archived=t) after a fixed number of tries (assuming it begins with locked='f').
       -}
       allSources <- scSources <$> liftIO getSchemaCache
+      fetchBatchSize <- unrefine . _eeCtxFetchSize <$> liftIO getEventEngineCtx
       events <- liftIO . fmap concat $
         -- fetch pending events across all the sources asynchronously
         LA.forConcurrently (M.toList allSources) \(sourceName, sourceCache) ->
@@ -357,6 +359,8 @@ processEventQueue logger statsLogger httpMgr getSchemaCache EventEngineCtx {..} 
     -- for each in the batch, minding the requested pool size.
     go :: FetchEventArguments -> m FetchEventArguments
     go (events, !fullFetchCount, !alreadyWarned) = do
+      EventEngineCtx {..} <- liftIO getEventEngineCtx
+      let fetchBatchSize = unrefine _eeCtxFetchSize
       -- process events ASAP until we've caught up; only then can we sleep
       when (null events) . liftIO $ sleep _eeCtxFetchInterval
 
@@ -374,21 +378,18 @@ processEventQueue logger statsLogger httpMgr getSchemaCache EventEngineCtx {..} 
               liftIO $
                 atomically $ do
                   -- block until < HASURA_GRAPHQL_EVENTS_HTTP_POOL_SIZE threads:
-                  capacity <- readTVar _eeCtxEventThreadsCapacity
-                  check $ capacity > 0
-                  writeTVar _eeCtxEventThreadsCapacity (capacity - 1)
+                  maxCapacity <- readTVar _eeCtxEventThreadsCapacity
+                  activeThreadCount <- readTVar activeEventProcessingThreads
+                  check $ maxCapacity > activeThreadCount
+                  modifyTVar' activeEventProcessingThreads (+ 1)
               -- since there is some capacity in our worker threads, we can launch another:
-              let restoreCapacity =
-                    liftIO $
-                      atomically $
-                        modifyTVar' _eeCtxEventThreadsCapacity (+ 1)
               t <-
                 LA.async $
                   flip runReaderT (logger, httpMgr) $
                     processEvent eventWithSource'
                       `finally`
                       -- NOTE!: this needs to happen IN THE FORKED THREAD:
-                      restoreCapacity
+                      decrementActiveThreadCount
               LA.link t
 
         -- return when next batch ready; some 'processEvent' threads may be running.
@@ -418,16 +419,36 @@ processEventQueue logger statsLogger httpMgr getSchemaCache EventEngineCtx {..} 
                       "It looks like the events processor is keeping up again."
               return (eventsNext, 0, False)
 
+    decrementActiveThreadCount =
+      liftIO $
+        atomically $
+          modifyTVar' activeEventProcessingThreads (subtract 1)
+
+    -- \| Extract a trace context from an event trigger payload.
+    extractEventContext :: forall io. MonadIO io => J.Value -> io (Maybe Tracing.TraceContext)
+    extractEventContext e = do
+      let traceIdMaybe =
+            Tracing.traceIdFromHex . txtToBs
+              =<< e ^? JL.key "trace_context" . JL.key "trace_id" . JL._String
+      for traceIdMaybe $ \traceId -> do
+        freshSpanId <- Tracing.randomSpanId
+        let parentSpanId =
+              Tracing.spanIdFromHex . txtToBs
+                =<< e ^? JL.key "trace_context" . JL.key "span_id" . JL._String
+            samplingState =
+              Tracing.samplingStateFromHeader $
+                e ^? JL.key "trace_context" . JL.key "sampling_state" . JL._String
+        pure $ Tracing.TraceContext traceId freshSpanId parentSpanId samplingState
+
     processEvent ::
       forall io r b.
       ( MonadIO io,
         MonadReader r io,
         Has HTTP.Manager r,
         Has (L.Logger L.Hasura) r,
-        Tracing.HasReporter io,
         MonadMask io,
-        MonadBaseControl IO io,
-        BackendEventTrigger b
+        BackendEventTrigger b,
+        Tracing.MonadTrace io
       ) =>
       EventWithSource b ->
       io ()
@@ -441,11 +462,11 @@ processEventQueue logger statsLogger httpMgr getSchemaCache EventEngineCtx {..} 
 
       cache <- liftIO getSchemaCache
 
-      tracingCtx <- liftIO (Tracing.extractEventContext (eEvent e))
+      trace <-
+        extractEventContext (eEvent e) <&> \case
+          Nothing -> Tracing.newTrace Tracing.sampleAlways
+          Just ctx -> Tracing.newTraceWith ctx Tracing.sampleAlways
       let spanName eti = "Event trigger: " <> unNonEmptyText (unTriggerName (etiName eti))
-          runTraceT =
-            (maybe Tracing.runTraceT Tracing.runTraceTInContext tracingCtx)
-              Tracing.sampleAlways
 
       maintenanceModeVersionEither :: Either QErr (MaintenanceMode MaintenanceModeVersion) <-
         case maintenanceMode of
@@ -468,7 +489,7 @@ processEventQueue logger statsLogger httpMgr getSchemaCache EventEngineCtx {..} 
               -- For such an event, we unlock the event and retry after a minute
               runExceptT (setRetry sourceConfig e (addUTCTime 60 currentTime) maintenanceModeVersion)
                 >>= flip onLeft logQErr
-            Right eti -> runTraceT (spanName eti) do
+            Right eti -> trace (spanName eti) do
               eventExecutionStartTime <- liftIO getCurrentTime
               let webhook = wciCachedValue $ etiWebhookInfo eti
                   retryConf = etiRetryConf eti

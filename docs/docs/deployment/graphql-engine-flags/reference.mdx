@@ -177,6 +177,19 @@ requests.
 | **Default**         | `GET`                            |
 | **Supported in**    | CE, EE, Cloud                    |
 
+### Send Request Body to Auth Hook
+
+Whether or not to send the request body (graphql request/variables) to the auth hook in `POST` mode.
+
+|                     |                                                 |
+| ------------------- | ----------------------------------------------- |
+| **Flag**            | `--auth-hook-send-request-body <true-or-false>` |
+| **Env var**         | `HASURA_GRAPHQL_AUTH_HOOK_SEND_REQUEST_BODY`    |
+| **Accepted values** | Boolean                                         |
+| **Options**         | `true` or `false`                               |
+| **Default**         | `true`                                          |
+| **Supported in**    | CE, EE, Cloud                                   |
+
 ### BigQuery String Numeric Input
 
 Stringify certain
@@ -195,7 +208,7 @@ for JSON encoding-decoding.
 
 ### Connections per Read-Replica
 
-The maximum number of Postgres connections per [read-replica](databases/connect-db/read-replicas.mdx) that can be opened
+The maximum number of Postgres connections per [read-replica](databases/database-config/read-replicas.mdx) that can be opened
 per stripe. When the maximum is reached we will block until a new connection becomes available, even if there is
 capacity in other stripes.
 
@@ -229,7 +242,7 @@ List of domains, **including scheme (http/https) and port**, to allow for CORS.
 value will block requests from all other domains**.
 
 |                     |                                                                                               |
-| ------------------- | ----------------------------------------------------------------------------------------------|
+| ------------------- | --------------------------------------------------------------------------------------------- |
 | **Flag**            | `--cors-domain <DOMAINS>`                                                                     |
 | **Env var**         | `HASURA_GRAPHQL_CORS_DOMAIN`                                                                  |
 | **Accepted values** | String (comma separated list of domains)                                                      |
@@ -298,6 +311,20 @@ Restrict requests allowed to be executed by the GraphQL Engine to those that are
 | **Options**         | `true` or `false`                    |
 | **Default**         | `false`                              |
 | **Supported in**    | CE, EE, Cloud                        |
+
+### Enable Apollo Federation
+
+Enables the [Apollo Federation](data-federation/apollo-federation.mdx) feature. This allows Hasura to be connected as a
+subgraph in an Apollo supergraph.
+
+|                     |                                           |
+| ------------------- | ----------------------------------------- |
+| **Flag**            | `--enable-apollo-federation`              |
+| **Env var**         | `HASURA_GRAPHQL_ENABLE_APOLLO_FEDERATION` |
+| **Accepted values** | Boolean                                   |
+| **Options**         | `true` or `false`                         |
+| **Default**         | `false`                                   |
+| **Supported in**    | CE, EE, Cloud                             |
 
 ### Enable Console
 
@@ -380,7 +407,7 @@ Setting this enables or disables [anonymous telemetry](/policies/telemetry.mdx).
 
 ### Enabled APIs
 
-List of [APIs](/api-reference/index.mdx) to be enabled on a Hasura GraphQL Engine instance.
+List of [APIs](/api-reference/overview.mdx) to be enabled on a Hasura GraphQL Engine instance.
 
 |                     |                                                      |
 | ------------------- | ---------------------------------------------------- |
@@ -456,8 +483,8 @@ List of experimental features to be enabled.
 
 ### Graceful Shutdown Timeout
 
-The timeout, expressed in seconds, to wait for in-flight events (such as [Event Triggers](/event-triggers/index.mdx) and
-[Scheduled Triggers](/scheduled-triggers/index.mdx)) and async actions to complete before the server shuts down
+The timeout, expressed in seconds, to wait for in-flight events (such as [Event Triggers](/event-triggers/overview.mdx)
+and [Scheduled Triggers](/scheduled-triggers/overview.mdx)) and async actions to complete before the server shuts down
 completely. If the in-flight events are not completed within the timeout, those events are marked as pending.
 
 |                     |                                                        |
@@ -775,7 +802,7 @@ Whether to use TLS to connect to a caching [Redis instance](/enterprise/caching.
 
 ### Read Replica URL
 
-The [URL for a read replica](/databases/connect-db/read-replicas.mdx#adding-read-replica-urls) of the database.
+The [URL for a read replica](/databases/database-config/read-replicas.mdx#adding-read-replica-urls) of the database.
 
 :::warning Notice
 
@@ -913,7 +940,7 @@ Stringify certain [Postgres numeric types](/schema/postgres/postgresql-types.mdx
 
 :::
 
-The number of stripes (connection pools) to maintain per [read replica](/databases/connect-db/read-replicas.mdx).
+The number of stripes (connection pools) to maintain per [read replica](/databases/database-config/read-replicas.mdx).
 
 |                     |                                           |
 | ------------------- | ----------------------------------------- |

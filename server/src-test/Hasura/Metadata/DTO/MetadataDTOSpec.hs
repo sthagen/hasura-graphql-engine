@@ -21,9 +21,11 @@ import Hasura.Metadata.DTO.MetadataV2 (MetadataV2 (..))
 import Hasura.Metadata.DTO.MetadataV3 (MetadataV3 (..))
 import Hasura.Metadata.DTO.Placeholder (PlaceholderArray (PlaceholderArray))
 import Hasura.Prelude
+import Hasura.RQL.Types.ApiLimit (emptyApiLimit)
 import Hasura.RQL.Types.Common (emptyMetricsConfig)
 import Hasura.RQL.Types.CustomTypes (emptyCustomTypes)
 import Hasura.RQL.Types.Metadata (Metadata, MetadataDefaults, metadataToDTO, overrideMetadataDefaults)
+import Hasura.RQL.Types.OpenTelemetry (emptyOpenTelemetryConfig)
 import Test.Hspec
 import Test.Hspec.Expectations.Json (shouldBeJson)
 
@@ -109,13 +111,13 @@ emptyMetadataV3 =
       metaV3CustomTypes = emptyCustomTypes,
       metaV3CronTriggers = mempty,
       metaV3RestEndpoints = mempty,
-      metaV3ApiLimits = Nothing,
+      metaV3ApiLimits = emptyApiLimit,
       metaV3MetricsConfig = emptyMetricsConfig,
       metaV3InheritedRoles = mempty,
       metaV3GraphqlSchemaIntrospection = Nothing,
       metaV3Network = Nothing,
       metaV3BackendConfigs = Nothing,
-      metaV3OpenTelemetryConfig = Nothing
+      metaV3OpenTelemetryConfig = emptyOpenTelemetryConfig
     }
 
 emptyMetadataV2 :: MetadataV2

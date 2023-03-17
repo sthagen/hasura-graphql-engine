@@ -19,6 +19,7 @@ module Hasura.Server.Init.Arg.Command.Serve
     accessKeyOption,
     authHookOption,
     authHookModeOption,
+    authHookSendRequestBodyOption,
     jwtSecretOption,
     unAuthRoleOption,
     corsDomainOption,
@@ -58,6 +59,7 @@ module Hasura.Server.Init.Arg.Command.Serve
     metadataDBExtensionsSchemaOption,
     parseMetadataDefaults,
     metadataDefaultsOption,
+    apolloFederationStatusOption,
 
     -- * Pretty Printer
     serveCmdFooter,
@@ -142,6 +144,7 @@ serveCommandParser =
     <*> parseDefaultNamingConvention
     <*> parseExtensionsSchema
     <*> parseMetadataDefaults
+    <*> parseApolloFederationStatus
 
 --------------------------------------------------------------------------------
 -- Serve Options
@@ -360,7 +363,7 @@ accessKeyOption =
 
 parseAuthHook :: Opt.Parser Config.AuthHookRaw
 parseAuthHook =
-  Config.AuthHookRaw <$> url <*> urlType
+  Config.AuthHookRaw <$> url <*> urlType <*> sendRequestBody
   where
     url =
       Opt.optional $
@@ -377,6 +380,14 @@ parseAuthHook =
               <> Opt.metavar "<GET|POST>"
               <> Opt.help (Config._helpMessage authHookModeOption)
           )
+    sendRequestBody :: Opt.Parser (Maybe Bool) =
+      Opt.optional $
+        Opt.option
+          (Opt.eitherReader Env.fromEnv)
+          ( Opt.long "auth-hook-send-request-body"
+              <> Opt.metavar "<true|false>"
+              <> Opt.help (Config._helpMessage authHookSendRequestBodyOption)
+          )
 
 authHookOption :: Config.Option ()
 authHookOption =
@@ -392,6 +403,14 @@ authHookModeOption =
     { Config._default = Auth.AHTGet,
       Config._envVar = "HASURA_GRAPHQL_AUTH_HOOK_MODE",
       Config._helpMessage = "HTTP method to use for authorization webhook (default: GET)"
+    }
+
+authHookSendRequestBodyOption :: Config.Option Bool
+authHookSendRequestBodyOption =
+  Config.Option
+    { Config._default = True,
+      Config._envVar = "HASURA_GRAPHQL_AUTH_HOOK_SEND_REQUEST_BODY",
+      Config._helpMessage = "Send request body in POST method (default: true)"
     }
 
 parseJwtSecret :: Opt.Parser (Maybe Auth.JWTConfig)
@@ -987,7 +1006,7 @@ experimentalFeaturesOption =
           <> "transformations for permission filters. "
           <> "inherited_roles: ignored; inherited roles cannot be switched off"
           <> "naming_convention: apply naming convention (graphql-default/hasura-default) based on source customization"
-          <> "apollo_federation: use hasura as a subgraph in an Apollo gateway"
+          <> "apollo_federation: use hasura as a subgraph in an Apollo gateway (deprecated)"
           <> "streaming_subscriptions: A streaming subscription streams the response according to the cursor provided by the user"
     }
 
@@ -1122,6 +1141,22 @@ metadataDBExtensionsSchemaOption =
         "Name of the schema where Hasura can install database extensions. Default: public"
     }
 
+apolloFederationStatusOption :: Config.Option (Maybe Types.ApolloFederationStatus)
+apolloFederationStatusOption =
+  Config.Option
+    { Config._default = Nothing,
+      Config._envVar = "HASURA_GRAPHQL_ENABLE_APOLLO_FEDERATION",
+      Config._helpMessage = "Enable Apollo Federation (default: false). This will allow hasura to be used as a subgraph in an Apollo gateway"
+    }
+
+parseApolloFederationStatus :: Opt.Parser (Maybe Types.ApolloFederationStatus)
+parseApolloFederationStatus =
+  (bool Nothing (Just Types.ApolloFederationEnabled))
+    <$> Opt.switch
+      ( Opt.long "enable-apollo-federation"
+          <> Opt.help (Config._helpMessage apolloFederationStatusOption)
+      )
+
 --------------------------------------------------------------------------------
 -- Pretty Printer
 
@@ -1183,6 +1218,7 @@ serveCmdFooter =
         Config.optionPP accessKeyOption,
         Config.optionPP authHookOption,
         Config.optionPP authHookModeOption,
+        Config.optionPP authHookSendRequestBodyOption,
         Config.optionPP jwtSecretOption,
         Config.optionPP unAuthRoleOption,
         Config.optionPP corsDomainOption,
@@ -1218,6 +1254,7 @@ serveCmdFooter =
         Config.optionPP webSocketConnectionInitTimeoutOption,
         Config.optionPP enableMetadataQueryLoggingOption,
         Config.optionPP defaultNamingConventionOption,
-        Config.optionPP metadataDBExtensionsSchemaOption
+        Config.optionPP metadataDBExtensionsSchemaOption,
+        Config.optionPP apolloFederationStatusOption
       ]
     eventEnvs = [Config.optionPP graphqlEventsHttpPoolSizeOption, Config.optionPP graphqlEventsFetchIntervalOption]

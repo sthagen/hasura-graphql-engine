@@ -57,6 +57,8 @@ const getInitialValue = (key: string, type?: PermissionType) => {
       return [{}];
     case '_not':
       return {};
+    case '_is_null':
+      return false;
     case '_exists':
       return {
         _where: {},
@@ -120,9 +122,7 @@ export function graphQLTypeToJsType(
   if (!isScalarType(type)) {
     return value;
   }
-  if (type.name === 'Int' || type.name === 'ID' || type.name === 'Float') {
-    return Number(value);
-  } else if (type.name === 'Boolean') {
+  if (type.name === 'Boolean') {
     return Boolean(value);
   }
 

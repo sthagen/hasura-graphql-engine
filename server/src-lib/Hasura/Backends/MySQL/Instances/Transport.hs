@@ -16,6 +16,7 @@ import Hasura.GraphQL.Transport.HTTP.Protocol
 import Hasura.Logging qualified as L
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
+import Hasura.SQL.AnyBackend (AnyBackend)
 import Hasura.SQL.Backend
 import Hasura.Server.Types (RequestId)
 import Hasura.Session
@@ -41,7 +42,7 @@ runQuery ::
   UserInfo ->
   L.Logger L.Hasura ->
   SourceConfig 'MySQL ->
-  OnBaseMonad IdentityT EncJSON ->
+  OnBaseMonad IdentityT (Maybe (AnyBackend ExecutionStats), EncJSON) ->
   Maybe (PreparedQuery 'MySQL) ->
   ResolvedConnectionTemplate 'MySQL ->
   -- | Also return the time spent in the PG query; for telemetry.
@@ -49,8 +50,8 @@ runQuery ::
 runQuery reqId query fieldName _userInfo logger _sourceConfig tx genSql _ = do
   logQueryLog logger $ mkQueryLog query fieldName genSql reqId
   withElapsedTime $
-    trace ("MySQL Query for root field " <>> fieldName) $
-      run tx
+    newSpan ("MySQL Query for root field " <>> fieldName) $
+      fmap snd (run tx)
 
 runQueryExplain ::
   ( MonadIO m,
@@ -60,7 +61,7 @@ runQueryExplain ::
   ) =>
   DBStepInfo 'MySQL ->
   m EncJSON
-runQueryExplain (DBStepInfo _ _ _ action _) = run action
+runQueryExplain (DBStepInfo _ _ _ action _) = fmap arResult (run action)
 
 run :: (MonadIO m, MonadBaseControl IO m, MonadError QErr m, MonadTrace m) => OnBaseMonad IdentityT a -> m a
 run = runIdentityT . runOnBaseMonad

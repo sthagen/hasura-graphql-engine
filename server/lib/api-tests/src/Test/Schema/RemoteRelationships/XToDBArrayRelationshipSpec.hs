@@ -28,14 +28,14 @@ import Harness.Backend.Cockroach qualified as Cockroach
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.Backend.Sqlserver qualified as SQLServer
 import Harness.GraphqlEngine qualified as GraphqlEngine
+import Harness.Permissions (SelectPermissionDetails (..))
+import Harness.Permissions qualified as Permissions
 import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Yaml (interpolateYaml, yaml)
 import Harness.RemoteServer qualified as RemoteServer
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture (LHSFixture, RHSFixture)
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Permissions (SelectPermissionDetails (..))
-import Harness.Test.Permissions qualified as Permissions
 import Harness.Test.Schema (Table (..))
 import Harness.Test.Schema qualified as Schema
 import Harness.Test.SetupAction qualified as SetupAction
@@ -319,8 +319,11 @@ lhsPostgresSetup rhsTableName (wholeTestEnvironment, _) = do
   Schema.trackTable (Text.unpack lhsSourceName_) artist testEnvironment
 
   -- Setup permissions
-  Permissions.createPermission testEnvironment lhsRole1
-  Permissions.createPermission testEnvironment lhsRole2
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment lhsRole1
+
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment lhsRole2
 
   createRemoteRelationship rhsTableName testEnvironment
 
@@ -342,8 +345,11 @@ lhsCockroachSetup rhsTableName (wholeTestEnvironment, _) = do
   Schema.trackTable (Text.unpack lhsSourceName_) artist testEnvironment
 
   -- Setup permissions
-  Permissions.createPermission testEnvironment lhsRole1
-  Permissions.createPermission testEnvironment lhsRole2
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment lhsRole1
+
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment lhsRole2
 
   createRemoteRelationship rhsTableName testEnvironment
 
@@ -364,8 +370,11 @@ lhsCitusSetup rhsTableName (wholeTestEnvironment, _) = do
   Schema.trackTable (Text.unpack lhsSourceName_) artist testEnvironment
 
   -- Setup permissions
-  Permissions.createPermission testEnvironment lhsRole1
-  Permissions.createPermission testEnvironment lhsRole2
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment lhsRole1
+
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment lhsRole2
 
   createRemoteRelationship rhsTableName testEnvironment
 
@@ -386,8 +395,11 @@ lhsSQLServerSetup rhsTableName (wholeTestEnvironment, _) = do
   Schema.trackTable (Text.unpack lhsSourceName_) artist testEnvironment
 
   -- Setup permissions
-  Permissions.createPermission testEnvironment lhsRole1
-  Permissions.createPermission testEnvironment lhsRole2
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment lhsRole1
+
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment lhsRole2
 
   createRemoteRelationship rhsTableName testEnvironment
 
@@ -593,8 +605,11 @@ rhsPostgresSetup (wholeTestEnvironment, _) = do
   Schema.trackTable (Text.unpack rhsSourceName_) album testEnvironment
 
   -- Setup permissions
-  Permissions.createPermission testEnvironment rhsRole1
-  Permissions.createPermission testEnvironment rhsRole2
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment rhsRole1
+
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment rhsRole2
 
 --------------------------------------------------------------------------------
 -- RHS Cockroach
@@ -613,8 +628,11 @@ rhsCockroachSetup (wholeTestEnvironment, _) = do
   Schema.trackTable (Text.unpack rhsSourceName_) album testEnvironment
 
   -- Setup permissions
-  Permissions.createPermission testEnvironment rhsRole1
-  Permissions.createPermission testEnvironment rhsRole2
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment rhsRole1
+
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment rhsRole2
 
 --------------------------------------------------------------------------------
 -- RHS Citus
@@ -633,8 +651,11 @@ rhsCitusSetup (wholeTestEnvironment, _) = do
   Schema.trackTable (Text.unpack rhsSourceName_) album testEnvironment
 
   -- Setup permissions
-  Permissions.createPermission testEnvironment rhsRole1
-  Permissions.createPermission testEnvironment rhsRole2
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment rhsRole1
+
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment rhsRole2
 
 --------------------------------------------------------------------------------
 -- RHS SQLServer
@@ -653,8 +674,11 @@ rhsSQLServerSetup (wholeTestEnvironment, _) = do
   Schema.trackTable (Text.unpack rhsSourceName_) album testEnvironment
 
   -- Setup permissions
-  Permissions.createPermission testEnvironment rhsRole1
-  Permissions.createPermission testEnvironment rhsRole2
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment rhsRole1
+
+  GraphqlEngine.postMetadata_ testEnvironment do
+    Permissions.createPermissionMetadata testEnvironment rhsRole2
 
 --------------------------------------------------------------------------------
 -- Tests

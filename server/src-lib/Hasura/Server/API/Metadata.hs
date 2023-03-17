@@ -77,7 +77,6 @@ import Hasura.SQL.Backend
 import Hasura.Server.API.Backend
 import Hasura.Server.API.Instances ()
 import Hasura.Server.Logging (SchemaSyncLog (..), SchemaSyncThreadType (TTMetadataApi))
-import Hasura.Server.SchemaCacheRef
 import Hasura.Server.Types
 import Hasura.Server.Utils (APIVersion (..))
 import Hasura.Services
@@ -386,19 +385,19 @@ runMetadataQuery ::
     MonadMetadataStorageQueryAPI m,
     MonadResolveSource m,
     MonadEventLogCleanup m,
-    ProvidesHasuraServices m
+    ProvidesHasuraServices m,
+    MonadGetApiTimeLimit m
   ) =>
   Env.Environment ->
   L.Logger L.Hasura ->
   InstanceId ->
   UserInfo ->
   ServerConfigCtx ->
-  SchemaCacheRef ->
+  RebuildableSchemaCache ->
   RQLMetadata ->
   m (EncJSON, RebuildableSchemaCache)
-runMetadataQuery env logger instanceId userInfo serverConfigCtx schemaCacheRef RQLMetadata {..} = do
-  schemaCache <- liftIO $ fst <$> readSchemaCacheRef schemaCacheRef
-  (metadata, currentResourceVersion) <- Tracing.trace "fetchMetadata" $ liftEitherM fetchMetadata
+runMetadataQuery env logger instanceId userInfo serverConfigCtx schemaCache RQLMetadata {..} = do
+  (metadata, currentResourceVersion) <- Tracing.newSpan "fetchMetadata" $ liftEitherM fetchMetadata
   let exportsMetadata = \case
         RMV1 (RMExportMetadata _) -> True
         RMV2 (RMV2ExportMetadata _) -> True
@@ -438,7 +437,7 @@ runMetadataQuery env logger instanceId userInfo serverConfigCtx schemaCacheRef R
             String $
               "Attempting to put new metadata in storage"
         newResourceVersion <-
-          Tracing.trace "setMetadata" $
+          Tracing.newSpan "setMetadata" $
             liftEitherM $
               setMetadata (fromMaybe currentResourceVersion _rqlMetadataResourceVersion) modMetadata
         L.unLogger logger $
@@ -447,7 +446,7 @@ runMetadataQuery env logger instanceId userInfo serverConfigCtx schemaCacheRef R
               "Put new metadata in storage, received new resource version " <> tshow newResourceVersion
 
         -- notify schema cache sync
-        Tracing.trace "notifySchemaCacheSync" $
+        Tracing.newSpan "notifySchemaCacheSync" $
           liftEitherM $
             notifySchemaCacheSync newResourceVersion instanceId cacheInvalidations
         L.unLogger logger $
@@ -456,7 +455,7 @@ runMetadataQuery env logger instanceId userInfo serverConfigCtx schemaCacheRef R
               "Sent schema cache sync notification at resource version " <> tshow newResourceVersion
 
         (_, modSchemaCache', _) <-
-          Tracing.trace "setMetadataResourceVersionInSchemaCache" $
+          Tracing.newSpan "setMetadataResourceVersionInSchemaCache" $
             setMetadataResourceVersionInSchemaCache newResourceVersion
               & runCacheRWT modSchemaCache
               & peelRun (RunCtx userInfo serverConfigCtx)
@@ -604,7 +603,8 @@ runMetadataQueryM ::
     Has (L.Logger L.Hasura) r,
     MonadError QErr m,
     MonadEventLogCleanup m,
-    ProvidesHasuraServices m
+    ProvidesHasuraServices m,
+    MonadGetApiTimeLimit m
   ) =>
   Env.Environment ->
   MetadataResourceVersion ->
@@ -615,10 +615,10 @@ runMetadataQueryM env currentResourceVersion =
     -- NOTE: This is a good place to install tracing, since it's involved in
     -- the recursive case via "bulk":
     RMV1 q ->
-      Tracing.trace ("v1 " <> T.pack (constrName q)) $
+      Tracing.newSpan ("v1 " <> T.pack (constrName q)) $
         runMetadataQueryV1M env currentResourceVersion q
     RMV2 q ->
-      Tracing.trace ("v2 " <> T.pack (constrName q)) $
+      Tracing.newSpan ("v2 " <> T.pack (constrName q)) $
         runMetadataQueryV2M currentResourceVersion q
 
 runMetadataQueryV1M ::
@@ -635,7 +635,8 @@ runMetadataQueryV1M ::
     Has (L.Logger L.Hasura) r,
     MonadError QErr m,
     MonadEventLogCleanup m,
-    ProvidesHasuraServices m
+    ProvidesHasuraServices m,
+    MonadGetApiTimeLimit m
   ) =>
   Env.Environment ->
   MetadataResourceVersion ->
@@ -804,7 +805,8 @@ runMetadataQueryV2M ::
     MonadReader r m,
     Has (L.Logger L.Hasura) r,
     MonadError QErr m,
-    MonadEventLogCleanup m
+    MonadEventLogCleanup m,
+    MonadGetApiTimeLimit m
   ) =>
   MetadataResourceVersion ->
   RQLMetadataV2 ->

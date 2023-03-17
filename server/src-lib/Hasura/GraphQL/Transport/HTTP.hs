@@ -21,6 +21,7 @@ module Hasura.GraphQL.Transport.HTTP
     AnnotatedResponsePart (..),
     CacheStoreSuccess (..),
     CacheStoreFailure (..),
+    CacheStoreResponse,
     SessVarPred,
     filterVariablesFromQuery,
     runSessVarPred,
@@ -28,7 +29,6 @@ module Hasura.GraphQL.Transport.HTTP
 where
 
 import Control.Lens (Traversal', foldOf, to)
-import Control.Monad.Morph (hoist)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Aeson qualified as J
 import Data.Aeson.Ordered qualified as JO
@@ -47,9 +47,11 @@ import Hasura.GraphQL.Execute.Action qualified as EA
 import Hasura.GraphQL.Execute.Backend qualified as EB
 import Hasura.GraphQL.Execute.RemoteJoin qualified as RJ
 import Hasura.GraphQL.Logging
-  ( MonadQueryLog (logQueryLog),
+  ( MonadExecutionLog,
+    MonadQueryLog (logQueryLog),
     QueryLog (..),
     QueryLogKind (..),
+    statsToAnyBackend,
   )
 import Hasura.GraphQL.Namespace
 import Hasura.GraphQL.ParameterizedQueryHash
@@ -84,8 +86,7 @@ import Hasura.Server.Telemetry.Counters qualified as Telem
 import Hasura.Server.Types (RequestId)
 import Hasura.Services.Network
 import Hasura.Session
-import Hasura.Tracing (MonadTrace, TraceT, trace)
-import Hasura.Tracing qualified as Tracing
+import Hasura.Tracing (MonadTrace, TraceT, newSpan)
 import Language.GraphQL.Draft.Syntax qualified as G
 import Network.HTTP.Types qualified as HTTP
 import Network.Wai.Extended qualified as Wai
@@ -136,7 +137,7 @@ class Monad m => MonadExecuteQuery m where
     -- the client should store it locally.  The value ([], Just json) represents
     -- that the client should not store the response locally, but we do have a
     -- server-side cache value that can be used to avoid query execution.
-    TraceT (ExceptT QErr m) (HTTP.ResponseHeaders, Maybe EncJSON)
+    m (Either QErr (HTTP.ResponseHeaders, Maybe EncJSON))
 
   -- | Store a json response for a query that we've executed in the cache.  Note
   -- that, as part of this, 'cacheStore' has to decide whether the response is
@@ -152,7 +153,7 @@ class Monad m => MonadExecuteQuery m where
     -- | Result of a query execution
     EncJSON ->
     -- | Always succeeds
-    TraceT (ExceptT QErr m) CacheStoreResponse
+    m (Either QErr CacheStoreResponse)
 
   default cacheLookup ::
     (m ~ t n, MonadTrans t, MonadExecuteQuery n) =>
@@ -160,22 +161,22 @@ class Monad m => MonadExecuteQuery m where
     [ActionsInfo] ->
     QueryCacheKey ->
     Maybe CachedDirective ->
-    TraceT (ExceptT QErr m) (HTTP.ResponseHeaders, Maybe EncJSON)
-  cacheLookup a b c d = hoist (hoist lift) $ cacheLookup a b c d
+    m (Either QErr (HTTP.ResponseHeaders, Maybe EncJSON))
+  cacheLookup a b c d = lift $ cacheLookup a b c d
 
   default cacheStore ::
     (m ~ t n, MonadTrans t, MonadExecuteQuery n) =>
     QueryCacheKey ->
     Maybe CachedDirective ->
     EncJSON ->
-    TraceT (ExceptT QErr m) CacheStoreResponse
-  cacheStore a b c = hoist (hoist lift) $ cacheStore a b c
+    m (Either QErr CacheStoreResponse)
+  cacheStore a b c = lift $ cacheStore a b c
 
 instance MonadExecuteQuery m => MonadExecuteQuery (ReaderT r m)
 
-instance MonadExecuteQuery m => MonadExecuteQuery (ExceptT r m)
+instance MonadExecuteQuery m => MonadExecuteQuery (ExceptT e m)
 
-instance MonadExecuteQuery m => MonadExecuteQuery (TraceT m)
+instance (MonadExecuteQuery m, MonadIO m) => MonadExecuteQuery (TraceT m)
 
 -- | A partial response, e.g. from a remote schema call or postgres
 -- postgres query, which we'll assemble into the final response for
@@ -303,6 +304,7 @@ runGQ ::
     MonadReader E.ExecutionCtx m,
     E.MonadGQLExecutionCheck m,
     MonadQueryLog m,
+    MonadExecutionLog m,
     MonadTrace m,
     MonadExecuteQuery m,
     MonadMetadataStorage m,
@@ -387,7 +389,7 @@ runGQ env logger reqId userInfo ipAddress reqHeaders queryType reqUnparsed = do
       E.ResolvedExecutionPlan ->
       m AnnotatedResponse
     executePlan reqParsed runLimits execPlan = case execPlan of
-      E.QueryExecutionPlan queryPlans asts dirMap -> trace "Query" $ do
+      E.QueryExecutionPlan queryPlans asts dirMap -> newSpan "Query" $ do
         -- Attempt to lookup a cached response in the query cache.
         -- 'keyedLookup' is a monadic action possibly returning a cache hit.
         -- 'keyedStore' is a function to write a new response to the cache.
@@ -470,7 +472,7 @@ runGQ env logger reqId userInfo ipAddress reqHeaders queryType reqUnparsed = do
           AB.dispatchAnyBackend @BackendTransport
             exists
             \(EB.DBStepInfo _ sourceConfig genSql tx resolvedConnectionTemplate :: EB.DBStepInfo b) ->
-              runDBQuery @b reqId reqUnparsed fieldName userInfo logger sourceConfig tx genSql resolvedConnectionTemplate
+              runDBQuery @b reqId reqUnparsed fieldName userInfo logger sourceConfig (fmap (statsToAnyBackend @b) tx) genSql resolvedConnectionTemplate
         finalResponse <-
           RJ.processRemoteJoins reqId logger env reqHeaders userInfo resp remoteJoins reqUnparsed
         pure $ AnnotatedResponsePart telemTimeIO_DT Telem.Local finalResponse []
@@ -503,7 +505,7 @@ runGQ env logger reqId userInfo ipAddress reqHeaders queryType reqUnparsed = do
           AB.dispatchAnyBackend @BackendTransport
             exists
             \(EB.DBStepInfo _ sourceConfig genSql tx resolvedConnectionTemplate :: EB.DBStepInfo b) ->
-              runDBMutation @b reqId reqUnparsed fieldName userInfo logger sourceConfig tx genSql resolvedConnectionTemplate
+              runDBMutation @b reqId reqUnparsed fieldName userInfo logger sourceConfig (fmap EB.arResult tx) genSql resolvedConnectionTemplate
         finalResponse <-
           RJ.processRemoteJoins reqId logger env reqHeaders userInfo resp remoteJoins reqUnparsed
         pure $ AnnotatedResponsePart telemTimeIO_DT Telem.Local finalResponse responseHeaders
@@ -574,10 +576,8 @@ runGQ env logger reqId userInfo ipAddress reqHeaders queryType reqUnparsed = do
                   queryPlans
           cacheKey = QueryCacheKey reqParsed (_uiRole userInfo) filteredSessionVars
           cachedDirective = runIdentity <$> DM.lookup cached dirMap
-       in ( Tracing.interpTraceT (liftEitherM . runExceptT) $
-              cacheLookup remoteSchemas actionsInfo cacheKey cachedDirective,
-            Tracing.interpTraceT (liftEitherM . runExceptT)
-              . cacheStore cacheKey cachedDirective
+       in ( liftEitherM $ cacheLookup remoteSchemas actionsInfo cacheKey cachedDirective,
+            liftEitherM . cacheStore cacheKey cachedDirective
           )
 
     recordTimings :: DiffTime -> AnnotatedResponse -> m ()
@@ -731,6 +731,7 @@ runGQBatched ::
     MonadReader E.ExecutionCtx m,
     E.MonadGQLExecutionCheck m,
     MonadQueryLog m,
+    MonadExecutionLog m,
     MonadTrace m,
     MonadExecuteQuery m,
     MonadMetadataStorage m,

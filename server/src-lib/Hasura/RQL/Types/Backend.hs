@@ -27,7 +27,7 @@ import Hasura.EncJSON (EncJSON)
 import Hasura.Prelude
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.HealthCheckImplementation (HealthCheckImplementation)
-import Hasura.RQL.Types.ResizePool (ServerReplicas)
+import Hasura.RQL.Types.ResizePool (ServerReplicas, SourceResizePoolSummary)
 import Hasura.RQL.Types.SourceConfiguration
 import Hasura.SQL.Backend
 import Hasura.SQL.Tag
@@ -116,6 +116,7 @@ class
     ToJSON (BackendConfig b),
     ToJSON (Column b),
     ToJSON (ConstraintName b),
+    ToJSON (ExecutionStatistics b),
     ToJSON (FunctionArgument b),
     ToJSON (FunctionName b),
     ToJSON (ScalarType b),
@@ -311,6 +312,12 @@ class
   resolveConnectionTemplate :: SourceConfig b -> ConnectionTemplateRequestContext b -> Either QErr EncJSON
   resolveConnectionTemplate _ _ = Left (err400 (NotSupported) "connection template is not implemented")
 
+  -- | Information about the query execution that may be useful for debugging
+  -- or reporting.
+  type ExecutionStatistics b :: Type
+
+  type ExecutionStatistics b = ()
+
   -- functions on types
   isComparableType :: ScalarType b -> Bool
   isNumType :: ScalarType b -> Bool
@@ -347,8 +354,8 @@ class
   -- Global naming convention
   namingConventionSupport :: SupportedNamingCase
 
-  -- Resize source pools based on the count of server replicas
-  resizeSourcePools :: SourceConfig b -> ServerReplicas -> IO ()
+  -- Resize source pools based on the count of server replicas and execute IO hook post resize
+  resizeSourcePools :: SourceConfig b -> ServerReplicas -> IO SourceResizePoolSummary
 
   -- | Default behaviour of SQL triggers on logically replicated database.
   -- Setting this to @Nothing@ will disable event trigger configuration in the

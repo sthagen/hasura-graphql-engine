@@ -8,6 +8,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Time.Calendar.OrdinalDate
 import Data.Time.Clock
 import Database.PG.Query qualified as PG
+import Harness.Backend.Citus qualified as Citus
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql
@@ -35,6 +36,11 @@ spec =
           [ (Fixture.fixture $ Fixture.Backend Postgres.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
                   [ Postgres.setupTablesAction schema testEnvironment
+                  ]
+              },
+            (Fixture.fixture $ Fixture.Backend Citus.backendTypeMetadata)
+              { Fixture.setupTeardown = \(testEnvironment, _) ->
+                  [ Citus.setupTablesAction schema testEnvironment
                   ]
               }
           ]
@@ -86,35 +92,20 @@ tests opts = do
                 from article
               |]
 
-        shouldReturnYaml
-          opts
-          ( GraphqlEngine.postMetadata
-              testEnvironment
-              [yaml|
-                type: pg_track_logical_model
-                args:
-                  type: query
-                  source: *sourceName
-                  root_field_name: article_with_excerpt
-                  code: *spicyQuery
-                  arguments:
-                    length:
-                      type: integer 
-                  returns:
-                    columns:
-                      id:
-                        type: integer
-                      title:
-                        type: text
-                      excerpt:
-                        type: text
-                      date:
-                        type: date
-              |]
-          )
-          [yaml|
-            message: success
-          |]
+            articleWithExcerptLogicalModel :: Schema.LogicalModel
+            articleWithExcerptLogicalModel =
+              (Schema.logicalModel "article_with_excerpt" spicyQuery)
+                { Schema.logicalModelColumns =
+                    [ Schema.logicalModelColumn "id" "integer",
+                      Schema.logicalModelColumn "title" "text",
+                      Schema.logicalModelColumn "excerpt" "text",
+                      Schema.logicalModelColumn "date" "date"
+                    ],
+                  Schema.logicalModelArguments =
+                    [Schema.logicalModelColumn "length" "integer"]
+                }
+
+        Schema.trackLogicalModel sourceName articleWithExcerptLogicalModel testEnvironment
 
         query <-
           mkSubscription

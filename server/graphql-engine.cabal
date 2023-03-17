@@ -728,6 +728,8 @@ library
                      , Hasura.EncJSON
                      , Hasura.GraphQL.Execute.Query
                      , Hasura.GraphQL.Logging
+                     , Hasura.GraphQL.Logging.QueryLog
+                     , Hasura.GraphQL.Logging.ExecutionLog
                      , Hasura.RQL.DML.Select
                      , Hasura.RQL.Types.Run
                      , Hasura.Session
@@ -748,11 +750,20 @@ library
                      , Hasura.LogicalModel.Schema
                      , Hasura.LogicalModel.Types
 
+                     , Hasura.Tracing
+                     , Hasura.Tracing.Class
+                     , Hasura.Tracing.Context
+                     , Hasura.Tracing.Monad
+                     , Hasura.Tracing.Reporter
+                     , Hasura.Tracing.Sampling
+                     , Hasura.Tracing.TraceId
+                     , Hasura.Tracing.Utils
+
                      , Hasura.Server.Auth.WebHook
                      , Hasura.Server.Middleware
                      , Hasura.Server.Cors
                      , Hasura.Server.CheckUpdates
-                     , Hasura.Server.SchemaCacheRef
+                     , Hasura.Server.AppStateRef
                      , Hasura.Server.SchemaUpdate
                      , Hasura.Server.Migrate.LatestVersion
                      , Hasura.Server.Migrate.Version
@@ -988,8 +999,6 @@ library
                      , Hasura.SQL.Types
                      , Hasura.SQL.Value
                      , Hasura.SQL.WKT
-                     , Hasura.Tracing
-                     , Hasura.Tracing.TraceId
                      , Hasura.QueryTags
                      , Network.HTTP.Client.Transformable
                      , Network.HTTP.Client.DynamicTlsPermissions

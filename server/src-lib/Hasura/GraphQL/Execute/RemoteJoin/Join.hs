@@ -23,7 +23,7 @@ import Hasura.GraphQL.Execute.Instances ()
 import Hasura.GraphQL.Execute.RemoteJoin.RemoteSchema qualified as RS
 import Hasura.GraphQL.Execute.RemoteJoin.Source qualified as S
 import Hasura.GraphQL.Execute.RemoteJoin.Types
-import Hasura.GraphQL.Logging (MonadQueryLog)
+import Hasura.GraphQL.Logging (MonadExecutionLog, MonadQueryLog, statsToAnyBackend)
 import Hasura.GraphQL.RemoteServer (execRemoteGQ)
 import Hasura.GraphQL.Transport.Backend qualified as TB
 import Hasura.GraphQL.Transport.HTTP.Protocol (GQLReqOutgoing, GQLReqUnparsed, _grOperationName, _unOperationName)
@@ -58,6 +58,7 @@ processRemoteJoins ::
     MonadBaseControl IO m,
     EB.MonadQueryTags m,
     MonadQueryLog m,
+    MonadExecutionLog m,
     Tracing.MonadTrace m,
     ProvidesNetwork m
   ) =>
@@ -103,7 +104,7 @@ processRemoteJoins requestId logger env requestHeaders userInfo lhs maybeJoinTre
             userInfo
             logger
             _sjcSourceConfig
-            (EB.dbsiAction _sjcStepInfo)
+            (fmap (statsToAnyBackend @b) (EB.dbsiAction _sjcStepInfo))
             (EB.dbsiPreparedQuery _sjcStepInfo)
             (EB.dbsiResolvedConnectionTemplate _sjcStepInfo)
         pure $ encJToLBS $ snd response

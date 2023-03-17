@@ -23,9 +23,6 @@ export const ValueInputType = ({
   const { setValue } = useContext(rowPermissionsContext);
   const { table } = useContext(tableContext);
 
-  const inputType =
-    jsType === 'boolean' ? 'checkbox' : jsType === 'string' ? 'text' : 'number';
-
   switch (jsType) {
     case 'boolean':
       return (
@@ -34,17 +31,17 @@ export const ValueInputType = ({
             data-testid={componentLevelId}
             className="border border-gray-200 rounded-md"
             value={JSON.stringify(value)}
+            defaultValue={JSON.parse(value) ?? false}
             onChange={e => {
               setValue(path, JSON.parse(e.target.value) as Table);
             }}
           >
-            <option key="true" value="true">
-              True
-            </option>
             <option key="false" value="false">
               False
             </option>
-            );
+            <option key="true" value="true">
+              True
+            </option>
           </select>
         </div>
       );
@@ -55,7 +52,7 @@ export const ValueInputType = ({
           data-testid={componentLevelId}
           disabled={comparatorName === '_where' && isEmpty(table)}
           className="border border-gray-200 rounded-md p-2 !mr-4"
-          type={inputType}
+          type="text"
           value={value}
           onChange={e => {
             setValue(path, graphQLTypeToJsType(e.target.value, comparatorType));

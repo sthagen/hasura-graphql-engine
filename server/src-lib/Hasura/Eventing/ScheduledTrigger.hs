@@ -124,7 +124,6 @@ where
 import Control.Concurrent.Extended (Forever (..), sleep)
 import Control.Concurrent.STM
 import Control.Lens (view)
-import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Aeson qualified as J
 import Data.Environment qualified as Env
 import Data.Has
@@ -133,7 +132,9 @@ import Data.Int (Int64)
 import Data.List.NonEmpty qualified as NE
 import Data.SerializableBlob qualified as SB
 import Data.Set qualified as Set
-import Data.Text.Extended ((<<>))
+import Data.Text qualified as T
+import Data.Text.Extended (ToTxt (..), (<<>))
+import Data.These
 import Data.Time.Clock
 import Data.URL.Template (printURLTemplate)
 import Database.PG.Query qualified as PG
@@ -148,7 +149,7 @@ import Hasura.HTTP (getHTTPExceptionStatus)
 import Hasura.Logging qualified as L
 import Hasura.Metadata.Class
 import Hasura.Prelude
-import Hasura.RQL.DDL.EventTrigger (getHeaderInfosFromConf)
+import Hasura.RQL.DDL.EventTrigger (ResolveHeaderError, getHeaderInfosFromConfEither)
 import Hasura.RQL.DDL.Headers
 import Hasura.RQL.DDL.Webhook.Transform
 import Hasura.RQL.Types.Common
@@ -230,9 +231,8 @@ generateCronEventsFrom startTime CronTriggerInfo {..} =
 
 processCronEvents ::
   ( MonadIO m,
-    MonadBaseControl IO m,
-    Tracing.HasReporter m,
-    MonadMetadataStorage m
+    MonadMetadataStorage m,
+    Tracing.MonadTrace m
   ) =>
   L.Logger L.Hasura ->
   HTTP.Manager ->
@@ -284,8 +284,7 @@ processCronEvents logger httpMgr prometheusMetrics cronEvents getSC lockedCronEv
 
 processOneOffScheduledEvents ::
   ( MonadIO m,
-    MonadBaseControl IO m,
-    Tracing.HasReporter m,
+    Tracing.MonadTrace m,
     MonadMetadataStorage m
   ) =>
   Env.Environment ->
@@ -308,9 +307,6 @@ processOneOffScheduledEvents
     saveLockedEvents (map _ooseId oneOffEvents) lockedOneOffScheduledEvents
     for_ oneOffEvents $ \OneOffScheduledEvent {..} -> do
       (either logInternalError pure) =<< runExceptT do
-        webhookInfo <- resolveWebhook env _ooseWebhookConf
-        headerInfo <- getHeaderInfosFromConf env _ooseHeaderConf
-
         let payload =
               ScheduledEventWebhookPayload
                 _ooseId
@@ -322,18 +318,47 @@ processOneOffScheduledEvents
                 _ooseRequestTransform
                 _ooseResponseTransform
             retryCtx = RetryContext _ooseTries _ooseRetryConf
-            webhookEnvRecord = EnvRecord (getTemplateFromUrl _ooseWebhookConf) webhookInfo
-        flip runReaderT (logger, httpMgr) $
-          processScheduledEvent prometheusMetrics _ooseId headerInfo retryCtx payload webhookEnvRecord OneOff
-        removeEventFromLockedEvents _ooseId lockedOneOffScheduledEvents
+            resolvedWebhookInfoEither = resolveWebhookEither env _ooseWebhookConf
+            resolvedHeaderInfoEither = getHeaderInfosFromConfEither env _ooseHeaderConf
+            -- `webhookAndHeaderInfo` returns webhook and header info (and errors)
+            webhookAndHeaderInfo = case (resolvedWebhookInfoEither, resolvedHeaderInfoEither) of
+              (Right resolvedEventWebhookInfo, Right resolvedEventHeaderInfo) -> do
+                let resolvedWebhookEnvRecord = EnvRecord (getTemplateFromUrl _ooseWebhookConf) resolvedEventWebhookInfo
+                Right (resolvedWebhookEnvRecord, resolvedEventHeaderInfo)
+              (Left eventWebhookErrorVars, Right _) -> Left $ This eventWebhookErrorVars
+              (Right _, Left eventHeaderErrorVars) -> Left $ That eventHeaderErrorVars
+              (Left eventWebhookErrors, Left eventHeaderErrorVars) -> Left $ These eventWebhookErrors eventHeaderErrorVars
+        case webhookAndHeaderInfo of
+          Right (webhookEnvRecord, eventHeaderInfo) -> do
+            flip runReaderT (logger, httpMgr) $
+              processScheduledEvent prometheusMetrics _ooseId eventHeaderInfo retryCtx payload webhookEnvRecord OneOff
+            removeEventFromLockedEvents _ooseId lockedOneOffScheduledEvents
+          Left envVarError ->
+            processError
+              _ooseId
+              retryCtx
+              []
+              OneOff
+              (mkErrorObject $ mkInvalidEnvVarErrMsg envVarError)
+              (HOther $ T.unpack $ qeError (err400 NotFound (mkInvalidEnvVarErrMsg envVarError)))
     where
       logInternalError err = liftIO . L.unLogger logger $ ScheduledTriggerInternalErr err
       getTemplateFromUrl url = printURLTemplate $ unInputWebhook url
+      mkInvalidEnvVarErrMsg envVarErrorValues = "The value for environment variables not found: " <> (getInvalidEnvVarText envVarErrorValues)
+      mkErrorObject envVarNameText =
+        J.object
+          [ "error"
+              J..= ( "Error creating the request. " <> envVarNameText
+                   )
+          ]
+      getInvalidEnvVarText :: These ResolveWebhookError ResolveHeaderError -> Text
+      getInvalidEnvVarText (This a) = toTxt a
+      getInvalidEnvVarText (That b) = toTxt b
+      getInvalidEnvVarText (These a b) = toTxt a <> ", " <> toTxt b
 
 processScheduledTriggers ::
   ( MonadIO m,
-    MonadBaseControl IO m,
-    Tracing.HasReporter m,
+    Tracing.MonadTrace m,
     MonadMetadataStorage m
   ) =>
   Env.Environment ->
@@ -367,8 +392,7 @@ processScheduledEvent ::
     Has HTTP.Manager r,
     Has (L.Logger L.Hasura) r,
     MonadIO m,
-    MonadBaseControl IO m,
-    Tracing.HasReporter m,
+    Tracing.MonadTrace m,
     MonadMetadataStorage m,
     MonadError QErr m
   ) =>
@@ -381,7 +405,7 @@ processScheduledEvent ::
   ScheduledEventType ->
   m ()
 processScheduledEvent prometheusMetrics eventId eventHeaders retryCtx payload webhookUrl type' =
-  Tracing.runTraceT Tracing.sampleAlways traceNote do
+  Tracing.newTrace Tracing.sampleAlways traceNote do
     currentTime <- liftIO getCurrentTime
     let retryConf = _rctxConf retryCtx
         scheduledTime = sewpScheduledTime payload
@@ -1103,12 +1127,12 @@ getScheduledEventsInvocationsQuery eventTables (GetScheduledEventInvocations inv
 -- | Logger to accumulate stats of fetched scheduled events over a period of time and log once using @'L.Logger L.Hasura'.
 -- See @'createStatsLogger' for more details.
 createFetchedScheduledEventsStatsLogger :: (MonadIO m) => L.Logger L.Hasura -> m FetchedScheduledEventsStatsLogger
-createFetchedScheduledEventsStatsLogger = createStatsLogger
+createFetchedScheduledEventsStatsLogger = L.createStatsLogger
 
 -- | Close the fetched scheduled events stats logger.
 closeFetchedScheduledEventsStatsLogger ::
   (MonadIO m) => L.Logger L.Hasura -> FetchedScheduledEventsStatsLogger -> m ()
-closeFetchedScheduledEventsStatsLogger = closeStatsLogger L.scheduledTriggerProcessLogType
+closeFetchedScheduledEventsStatsLogger = L.closeStatsLogger L.scheduledTriggerProcessLogType
 
 -- | Log statistics of fetched scheduled events. See @'logStats' for more details.
 logFetchedScheduledEventsStats ::
@@ -1118,18 +1142,18 @@ logFetchedScheduledEventsStats ::
   OneOffScheduledEventsCount ->
   m ()
 logFetchedScheduledEventsStats logger cron oneOff =
-  logStats logger (FetchedScheduledEventsStats cron oneOff 1)
+  L.logStats logger (FetchedScheduledEventsStats cron oneOff 1)
 
 -- | Logger to accumulate stats of fetched cron triggers, for generating cron events, over a period of time and
 -- log once using @'L.Logger L.Hasura'.
 -- See @'createStatsLogger' for more details.
 createFetchedCronTriggerStatsLogger :: (MonadIO m) => L.Logger L.Hasura -> m FetchedCronTriggerStatsLogger
-createFetchedCronTriggerStatsLogger = createStatsLogger
+createFetchedCronTriggerStatsLogger = L.createStatsLogger
 
 -- | Close the fetched cron trigger stats logger.
 closeFetchedCronTriggersStatsLogger ::
   (MonadIO m) => L.Logger L.Hasura -> FetchedCronTriggerStatsLogger -> m ()
-closeFetchedCronTriggersStatsLogger = closeStatsLogger L.cronEventGeneratorProcessType
+closeFetchedCronTriggersStatsLogger = L.closeStatsLogger L.cronEventGeneratorProcessType
 
 -- | Log statistics of fetched cron triggers. See @'logStats' for more details.
 logFetchedCronTriggersStats ::
@@ -1138,4 +1162,4 @@ logFetchedCronTriggersStats ::
   [CronTriggerStats] ->
   m ()
 logFetchedCronTriggersStats logger cronTriggerStats =
-  logStats logger (FetchedCronTriggerStats cronTriggerStats 1)
+  L.logStats logger (FetchedCronTriggerStats cronTriggerStats 1)

@@ -538,13 +538,13 @@ metadataToDTO
         metaV3CustomTypes = customTypes,
         metaV3CronTriggers = cronTriggers,
         metaV3RestEndpoints = endpoints,
-        metaV3ApiLimits = placeholder . objectFromOrdJSON <$> apiLimitsToOrdJSON apiLimits,
+        metaV3ApiLimits = apiLimits,
         metaV3MetricsConfig = metricsConfig,
         metaV3InheritedRoles = inheritedRoles,
         metaV3GraphqlSchemaIntrospection = placeholder . objectFromOrdJSON <$> introspectionDisabledRolesToOrdJSON introspectionDisabledRoles,
         metaV3Network = placeholder . objectFromOrdJSON <$> networkConfigToOrdJSON networkConfig,
         metaV3BackendConfigs = placeholder . objectFromOrdJSON <$> backendConfigsToOrdJSON backendConfigs,
-        metaV3OpenTelemetryConfig = placeholder . objectFromOrdJSON <$> openTelemetryConfigToOrdJSON openTelemetryConfig
+        metaV3OpenTelemetryConfig = openTelemetryConfig
       }
     where
       -- This is a /partial/ function to unwrap a JSON object

@@ -319,7 +319,8 @@ data ServeOptionsRaw impl = ServeOptionsRaw
     -- | stores global default naming convention
     rsoDefaultNamingConvention :: Maybe NamingCase,
     rsoExtensionsSchema :: Maybe MonadTx.ExtensionsSchema,
-    rsoMetadataDefaults :: Maybe MetadataDefaults
+    rsoMetadataDefaults :: Maybe MetadataDefaults,
+    rsoApolloFederationStatus :: Maybe Server.Types.ApolloFederationStatus
   }
 
 -- | Whether or not to serve Console assets.
@@ -498,7 +499,8 @@ instance Hashable API
 
 data AuthHookRaw = AuthHookRaw
   { ahrUrl :: Maybe Text,
-    ahrType :: Maybe Auth.AuthHookType
+    ahrType :: Maybe Auth.AuthHookType,
+    ahrSendRequestBody :: Maybe Bool
   }
 
 -- | Sleep time interval for recurring activities such as (@'asyncActionsProcessor')
@@ -615,7 +617,8 @@ data ServeOptions impl = ServeOptions
     soEnableMetadataQueryLogging :: Server.Logging.MetadataQueryLoggingMode,
     soDefaultNamingConvention :: NamingCase,
     soExtensionsSchema :: MonadTx.ExtensionsSchema,
-    soMetadataDefaults :: MetadataDefaults
+    soMetadataDefaults :: MetadataDefaults,
+    soApolloFederationStatus :: Server.Types.ApolloFederationStatus
   }
 
 -- | 'ResponseInternalErrorsConfig' represents the encoding of the

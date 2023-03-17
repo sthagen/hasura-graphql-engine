@@ -15,11 +15,12 @@ import Data.Time.Clock (getCurrentTime)
 import Data.URL.Template
 import Database.PG.Query qualified as PG
 import Hasura.App
-  ( PGMetadataStorageAppT (..),
+  ( PGMetadataStorageAppT,
     initGlobalCtx,
     initialiseContext,
     mkMSSQLSourceResolver,
     mkPgSourceResolver,
+    runPGMetadataStorageAppT,
   )
 import Hasura.Backends.Postgres.Connection.Settings
 import Hasura.Backends.Postgres.Execute.Types
@@ -115,9 +116,10 @@ main = do
                 (_default defaultNamingConventionOption)
                 emptyMetadataDefaults
                 (FF.checkFeatureFlag mempty)
+                ApolloFederationDisabled
             cacheBuildParams = CacheBuildParams httpManager (mkPgSourceResolver print) mkMSSQLSourceResolver serverConfigCtx
 
-        (appCtx, appEnv) <- runManagedT
+        (_appStateRef, appEnv) <- runManagedT
           ( initialiseContext
               envMap
               globalCtx
@@ -127,12 +129,12 @@ main = do
               prometheusMetrics
               sampleAlways
           )
-          $ \(appCtx, appEnv) -> return (appCtx, appEnv)
+          $ \(appStateRef, appEnv) -> return (appStateRef, appEnv)
 
         let run :: ExceptT QErr (PGMetadataStorageAppT CacheBuild) a -> IO a
             run =
               runExceptT
-                >>> flip runPGMetadataStorageAppT (appCtx, appEnv)
+                >>> runPGMetadataStorageAppT appEnv
                 >>> runCacheBuild cacheBuildParams
                 >>> runExceptT
                 >=> flip onLeft printErrJExit
