@@ -59,7 +59,6 @@ import {
   useVPCBannerVisibility,
 } from './utils';
 import { NeonDashboardLink } from '../DataSources/CreateDataSource/Neon/components/NeonDashboardLink';
-import { ListConnectedDatabases } from '../../../../features/ConnectDBRedesign';
 
 const KNOW_MORE_PROJECT_REGION_UPDATE =
   'https://hasura.io/docs/latest/projects/regions/#changing-region-of-an-existing-project';
@@ -411,7 +410,7 @@ const ManageDatabase: React.FC<ManageDatabaseProps> = ({
       <Helmet title="Manage - Data | Hasura" />
       <Analytics name="ActionEditor" {...REDACT_EVERYTHING}>
         <div
-          className={`container-fluid ${styles.manage_dbs_page}`}
+          className={`container-fluid ${styles.manage_dbs_page} bootstrap-jail`}
           data-test="manage-database-section"
         >
           <BreadCrumb breadCrumbs={crumbs} />

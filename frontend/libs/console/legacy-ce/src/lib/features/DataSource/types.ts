@@ -13,7 +13,6 @@ import {
 } from '../hasura-metadata-types';
 
 import type { NetworkArgs } from './api';
-import { SchemaTable } from './utils';
 
 export type { BigQueryTable } from './bigquery';
 export type { NetworkArgs };
@@ -67,7 +66,7 @@ export type TableColumn = {
   /**
    * console data type: the dataType property is group into one of these types and console uses this internally
    */
-  consoleDataType: 'string' | 'text' | 'json' | 'number' | 'boolean';
+  consoleDataType: 'string' | 'text' | 'json' | 'number' | 'boolean' | 'float';
   nullable?: boolean;
   isPrimaryKey?: boolean;
   graphQLProperties?: {

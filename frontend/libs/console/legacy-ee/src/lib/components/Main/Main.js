@@ -80,8 +80,8 @@ import { appcuesIdentify } from '../../utils/appCues';
 import styles from './Main.module.scss';
 import logo from './images/white-logo.svg';
 import logoutIcon from './images/log-out.svg';
-import projectImg from './images/project.svg';
 import EELogo from './images/hasura-ee-mono-light.svg';
+import { ConsoleDevTools } from '@hasura/console-legacy-ce';
 
 const { Plan, Project_Entitlement_Types_Enum } = ControlPlane;
 class Main extends React.Component {
@@ -553,7 +553,7 @@ class Main extends React.Component {
                 <Link
                   to={accessState.hasGraphQLAccess ? '/' : '/access-denied'}
                 >
-                  <img className="w-24" src={getLogoSrc()} />
+                  <img className="w-24" src={getLogoSrc()} alt="" />
                 </Link>
                 <Link
                   to={accessState.hasGraphQLAccess ? '/' : '/access-denied'}
@@ -633,41 +633,43 @@ class Main extends React.Component {
                 {renderMetricsTab()}
               </ul>
             </div>
-            <div
-              id="dropdown_wrapper"
-              className={clsx(
-                'flex gap-2 justify-end items-stretch relative mr-4',
-                this.state.isDropdownOpen ? 'open' : ''
-              )}
-            >
-              {getAdminSecretSection()}
-              {renderProjectInfo()}
-              {renderMetadataIcon()}
-              <div className={itemContainerStyle}>
-                <a
-                  id="help"
-                  className={clsx(linkStyle)}
-                  href={'https://hasura.io/help'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <span className="text-sm self-baseline">
-                    <FaQuestionCircle />
-                  </span>
-                  <span className="uppercase text-left">HELP</span>
-                </a>
+            <div className="bootstrap-jail">
+              <div
+                id="dropdown_wrapper"
+                className={clsx(
+                  'flex gap-2 justify-end items-stretch relative mr-4 h-full',
+                  this.state.isDropdownOpen ? 'open' : ''
+                )}
+              >
+                {getAdminSecretSection()}
+                {renderProjectInfo()}
+                {renderMetadataIcon()}
+                <div className={itemContainerStyle}>
+                  <a
+                    id="help"
+                    className={clsx(linkStyle)}
+                    href={'https://hasura.io/help'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <span className="text-sm self-baseline">
+                      <FaQuestionCircle />
+                    </span>
+                    <span className="uppercase text-left">HELP</span>
+                  </a>
+                </div>
+                {serverVersion &&
+                accessState &&
+                'hasDataAccess' in accessState &&
+                accessState.hasDataAccess ? (
+                  <NotificationSection
+                    isDropDownOpen={this.state.isDropdownOpen}
+                    closeDropDown={this.closeDropDown}
+                    toggleDropDown={this.toggleDropDown}
+                  />
+                ) : null}
+                {renderLogout()}
               </div>
-              {serverVersion &&
-              accessState &&
-              'hasDataAccess' in accessState &&
-              accessState.hasDataAccess ? (
-                <NotificationSection
-                  isDropDownOpen={this.state.isDropdownOpen}
-                  closeDropDown={this.closeDropDown}
-                  toggleDropDown={this.toggleDropDown}
-                />
-              ) : null}
-              {renderLogout()}
             </div>
           </div>
 
@@ -686,6 +688,7 @@ class Main extends React.Component {
           </div>
           <CloudOnboarding />
         </div>
+        <ConsoleDevTools />
       </div>
     );
   }

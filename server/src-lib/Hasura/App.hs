@@ -294,6 +294,9 @@ newtype PGMetadataStorageAppT m a = PGMetadataStorageAppT (ReaderT AppEnv (Trace
       MonadBaseControl b
     )
 
+instance Monad m => HasAppEnv (PGMetadataStorageAppT m) where
+  askAppEnv = ask
+
 instance (MonadIO m, MonadBaseControl IO m) => MonadTrace (PGMetadataStorageAppT m) where
   newTraceWith c p n (PGMetadataStorageAppT a) = PGMetadataStorageAppT $ newTraceWith c p n a
   newSpanWith i n (PGMetadataStorageAppT a) = PGMetadataStorageAppT $ newSpanWith i n a
@@ -305,9 +308,6 @@ instance MonadTrans PGMetadataStorageAppT where
 
 instance Monad m => ProvidesNetwork (PGMetadataStorageAppT m) where
   askHTTPManager = asks appEnvManager
-
-instance HasServerConfigCtx m => HasServerConfigCtx (PGMetadataStorageAppT m) where
-  askServerConfigCtx = lift askServerConfigCtx
 
 runPGMetadataStorageAppT :: AppEnv -> PGMetadataStorageAppT m a -> m a
 runPGMetadataStorageAppT c (PGMetadataStorageAppT a) = ignoreTraceT $ runReaderT a c
@@ -595,6 +595,7 @@ runHGEServer ::
     LA.Forall (LA.Pure m),
     UserAuthentication m,
     HttpLog m,
+    HasAppEnv m,
     ConsoleRenderer m,
     MonadVersionAPIWithExtraData m,
     MonadMetadataApiAuthorization m,
@@ -613,18 +614,17 @@ runHGEServer ::
     MonadTrace m,
     MonadGetApiTimeLimit m
   ) =>
-  (AppStateRef impl -> AppEnv -> Spock.SpockT m ()) ->
+  (AppStateRef impl -> Spock.SpockT m ()) ->
   AppStateRef impl ->
-  AppEnv ->
   -- | start time
   UTCTime ->
   -- | A hook which can be called to indicate when the server is started succesfully
   Maybe (IO ()) ->
   EKG.Store EKG.EmptyMetrics ->
   ManagedT m ()
-runHGEServer setupHook appStateRef appEnv@AppEnv {..} initTime startupStatusHook ekgStore = do
-  waiApplication <-
-    mkHGEServer setupHook appStateRef appEnv ekgStore
+runHGEServer setupHook appStateRef initTime startupStatusHook ekgStore = do
+  AppEnv {..} <- lift askAppEnv
+  waiApplication <- mkHGEServer setupHook appStateRef ekgStore
 
   let logger = _lsLogger appEnvLoggers
   -- `startupStatusHook`: add `Service started successfully` message to config_status
@@ -687,6 +687,7 @@ mkHGEServer ::
     LA.Forall (LA.Pure m),
     UserAuthentication m,
     HttpLog m,
+    HasAppEnv m,
     ConsoleRenderer m,
     MonadVersionAPIWithExtraData m,
     MonadMetadataApiAuthorization m,
@@ -705,12 +706,11 @@ mkHGEServer ::
     MonadTrace m,
     MonadGetApiTimeLimit m
   ) =>
-  (AppStateRef impl -> AppEnv -> Spock.SpockT m ()) ->
+  (AppStateRef impl -> Spock.SpockT m ()) ->
   AppStateRef impl ->
-  AppEnv ->
   EKG.Store EKG.EmptyMetrics ->
   ManagedT m Application
-mkHGEServer setupHook appStateRef appEnv@AppEnv {..} ekgStore = do
+mkHGEServer setupHook appStateRef ekgStore = do
   -- Comment this to enable expensive assertions from "GHC.AssertNF". These
   -- will log lines to STDOUT containing "not in normal form". In the future we
   -- could try to integrate this into our tests. For now this is a development
@@ -718,6 +718,7 @@ mkHGEServer setupHook appStateRef appEnv@AppEnv {..} ekgStore = do
   --
   -- NOTE: be sure to compile WITHOUT code coverage, for this to work properly.
   liftIO disableAssertNF
+  AppEnv {..} <- lift askAppEnv
   let Loggers loggerCtx logger _ = appEnvLoggers
 
   wsServerEnv <-
@@ -738,7 +739,6 @@ mkHGEServer setupHook appStateRef appEnv@AppEnv {..} ekgStore = do
         mkWaiApp
           setupHook
           appStateRef
-          appEnv
           ekgStore
           wsServerEnv
 
@@ -757,18 +757,7 @@ mkHGEServer setupHook appStateRef appEnv@AppEnv {..} ekgStore = do
   newLogTVar <- liftIO $ STM.newTVarIO False
 
   -- Start a background thread for processing schema sync event present in the '_sscSyncEventRef'
-  _ <-
-    startSchemaSyncProcessorThread
-      logger
-      appEnvManager
-      appEnvMetaVersionRef
-      appStateRef
-      appEnvInstanceId
-      appEnvEnableMaintenanceMode
-      appEnvEventingMode
-      appEnvEnableReadOnlyMode
-      newLogTVar
-      appEnvCheckFeatureFlag
+  _ <- startSchemaSyncProcessorThread appStateRef newLogTVar
 
   case appEnvEventingMode of
     EventingEnabled -> do
@@ -936,6 +925,7 @@ mkHGEServer setupHook appStateRef appEnv@AppEnv {..} ekgStore = do
               waitForProcessingAction l actionType processingEventsCountAction' shutdownAction (maxTimeout - (Seconds 5))
 
     startEventTriggerPollerThread logger lockedEventsCtx = do
+      AppEnv {..} <- lift askAppEnv
       schemaCache <- liftIO $ getSchemaCache appStateRef
       let allSources = HM.elems $ scSources schemaCache
       activeEventProcessingThreads <- liftIO $ newTVarIO 0
@@ -974,6 +964,7 @@ mkHGEServer setupHook appStateRef appEnv@AppEnv {..} ekgStore = do
           appEnvEnableMaintenanceMode
 
     startAsyncActionsPollerThread logger lockedEventsCtx actionSubState = do
+      AppEnv {..} <- lift askAppEnv
       AppContext {..} <- liftIO $ getAppContext appStateRef
       -- start a background thread to handle async actions
       case acAsyncActionsFetchInterval of
@@ -1012,6 +1003,7 @@ mkHGEServer setupHook appStateRef appEnv@AppEnv {..} ekgStore = do
           asyncActionSubscriptionsProcessor actionSubState
 
     startScheduledEventsPollerThread logger lockedEventsCtx = do
+      AppEnv {..} <- lift askAppEnv
       AppContext {..} <- liftIO $ getAppContext appStateRef
       -- prepare scheduled triggers
       lift $ prepareScheduledEvents logger
@@ -1294,7 +1286,7 @@ mkPgSourceResolver pgLogger env _ config = runExceptT do
           }
   pgPool <- liftIO $ Q.initPGPool connInfo connParams pgLogger
   let pgExecCtx = mkPGExecCtx isoLevel pgPool NeverResizePool
-  pure $ PGSourceConfig pgExecCtx connInfo Nothing mempty (_pccExtensionsSchema config) mempty Nothing
+  pure $ PGSourceConfig pgExecCtx connInfo Nothing mempty (_pccExtensionsSchema config) mempty ConnTemplate_NotApplicable
 
 mkMSSQLSourceResolver :: SourceResolver ('MSSQL)
 mkMSSQLSourceResolver env _name (MSSQLConnConfiguration connInfo _) = runExceptT do

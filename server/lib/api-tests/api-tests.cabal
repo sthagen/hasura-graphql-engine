@@ -95,6 +95,7 @@ library
     Test.API.Metadata.ComputedFieldsSpec
     Test.API.Metadata.InconsistentSpec
     Test.API.Metadata.LogicalModelsSpec
+    Test.API.Metadata.LogicalModels.ValidationSpec
     Test.API.Metadata.SuggestRelationshipsSpec
     Test.API.Metadata.TestConnectionTemplateSpec
     Test.API.Metadata.TransparentDefaultsSpec
@@ -119,6 +120,7 @@ library
     Test.DataConnector.MockAgent.OrderBySpec
     Test.DataConnector.MockAgent.QueryRelationshipsSpec
     Test.DataConnector.MockAgent.RemoteRelationshipsSpec
+    Test.DataConnector.MockAgent.TestHelpers
     Test.DataConnector.MockAgent.TransformedConfigurationSpec
     Test.DataConnector.MockAgent.UpdateMutationsSpec
     Test.DataConnector.QuerySpec
@@ -148,6 +150,7 @@ library
     Test.EventTriggers.PG.EventTriggersClearMetadataSpec
     Test.EventTriggers.PG.EventTriggersRunSQLSpec
     Test.EventTriggers.PG.EventTriggersUniqueNameSpec
+    Test.EventTriggers.PG.EventTriggersCreatedAtUTCSpec
     Test.EventTriggers.PG.EventTriggersUntrackTableCleanupSpec
     Test.Harness.Quoter.YamlSpec
     Test.HealthCheckSpec

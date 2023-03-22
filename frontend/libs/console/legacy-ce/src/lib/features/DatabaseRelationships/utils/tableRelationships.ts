@@ -5,7 +5,7 @@ import {
   isRemoteSchemaRelationship,
   TableFkRelationships,
 } from '../../DataSource';
-import { MetadataTable, Table } from '../../hasura-metadata-types';
+import { MetadataTable } from '../../hasura-metadata-types';
 import {
   LocalRelationship,
   Relationship,
@@ -24,10 +24,10 @@ import {
 
 export function tableRelationships(
   metadataTable: MetadataTable | undefined,
-  table: Table,
   dataSourceName: string,
   fkConstraints: TableFkRelationships[] | undefined
 ): Relationship[] {
+  const table = metadataTable?.table;
   // adapt local array relationships
   const localArrayRelationships = (
     metadataTable?.array_relationships ?? []

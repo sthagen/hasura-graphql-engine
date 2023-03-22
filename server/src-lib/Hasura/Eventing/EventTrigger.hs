@@ -66,7 +66,6 @@ import Data.Text qualified as T
 import Data.Text.Extended
 import Data.Text.NonEmpty
 import Data.Time.Clock
-import Data.Time.Clock qualified as Time
 import Hasura.Backends.Postgres.SQL.Types hiding (TableName)
 import Hasura.Base.Error
 import Hasura.Eventing.Common
@@ -163,7 +162,7 @@ data EventPayload (b :: BackendType) = EventPayload
     epTrigger :: TriggerMetadata,
     epEvent :: J.Value,
     epDeliveryInfo :: DeliveryInfo,
-    epCreatedAt :: Time.UTCTime
+    epCreatedAt :: UTCTime
   }
   deriving (Generic)
 
@@ -538,7 +537,7 @@ processEventQueue logger statsLogger httpMgr getSchemaCache getEventEngineCtx ac
                     pure (request, resp)
               case eitherReqRes of
                 Right (req, resp) -> do
-                  let reqBody = fromMaybe J.Null $ view HTTP.body req >>= J.decode @J.Value
+                  let reqBody = fromMaybe J.Null $ preview (HTTP.body . HTTP._RequestBodyLBS) req >>= J.decode @J.Value
                   processSuccess sourceConfig e logHeaders reqBody maintenanceModeVersion resp >>= flip onLeft logQErr
                   eventExecutionFinishTime <- liftIO getCurrentTime
                   let eventWebhookProcessingTime' = realToFrac $ diffUTCTime eventExecutionFinishTime eventExecutionStartTime
@@ -614,7 +613,7 @@ processError sourceConfig e retryConf reqHeaders ep maintenanceModeVersion err =
   let invocation = case err of
         HClient httpException ->
           let statusMaybe = getHTTPExceptionStatus httpException
-           in mkInvocation (eId e) ep statusMaybe reqHeaders (SB.fromLBS (J.encode httpException)) []
+           in mkInvocation (eId e) ep statusMaybe reqHeaders (SB.fromLBS (httpExceptionErrorEncoding httpException)) []
         HStatus errResp -> do
           let respPayload = hrsBody errResp
               respHeaders = hrsHeaders errResp
