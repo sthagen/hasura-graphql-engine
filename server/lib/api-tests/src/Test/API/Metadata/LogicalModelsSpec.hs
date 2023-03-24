@@ -7,6 +7,7 @@ import Data.List.NonEmpty qualified as NE
 import Harness.Backend.BigQuery qualified as BigQuery
 import Harness.Backend.Citus qualified as Citus
 import Harness.Backend.Postgres qualified as Postgres
+import Harness.Backend.Sqlserver qualified as Sqlserver
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
 import Harness.Quoter.Yaml.InterpolateYaml
@@ -43,6 +44,11 @@ spec = do
             (Fixture.fixture $ Fixture.Backend Citus.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnv, _) ->
                   [ Citus.setupTablesAction schema testEnv
+                  ]
+              },
+            (Fixture.fixture $ Fixture.Backend Sqlserver.backendTypeMetadata)
+              { Fixture.setupTeardown = \(testEnv, _) ->
+                  [ Sqlserver.setupTablesAction schema testEnv
                   ]
               }
           ]
@@ -263,10 +269,10 @@ testImplementation opts = do
                 nullable: false
             returns:
               columns:
-                    divided:
-                      type: #{scalarTypeToText testEnvironment Schema.TInt}
-                      nullable: false
-                      description: "a divided thing"
+                  - name: divided
+                    type: #{scalarTypeToText testEnvironment Schema.TInt}
+                    nullable: false
+                    description: "a divided thing"
         |]
 
     it "Drops a logical model of a function and returns a 200" $ \testEnvironment -> do
@@ -408,7 +414,7 @@ testPermissions opts = do
                   filter: {}
             returns:
               columns:
-                divided:
+                - name: divided
                   description: a divided thing
                   nullable: false
                   type: #{scalarTypeToText testEnvironment Schema.TInt}
@@ -474,7 +480,7 @@ testPermissions opts = do
                 nullable: false
             returns:
               columns:
-                divided:
+                - name: divided
                   description: a divided thing
                   nullable: false
                   type: #{scalarTypeToText testEnvironment Schema.TInt}

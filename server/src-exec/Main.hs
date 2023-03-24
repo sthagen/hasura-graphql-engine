@@ -30,7 +30,7 @@ import Hasura.Server.Migrate (downgradeCatalog)
 import Hasura.Server.Prometheus (makeDummyPrometheusMetrics)
 import Hasura.Server.Version
 import Hasura.ShutdownLatch
-import Hasura.Tracing (ignoreTraceT, sampleAlways)
+import Hasura.Tracing (sampleAlways)
 import System.Environment (getEnvironment, lookupEnv, unsetEnv)
 import System.Exit qualified as Sys
 import System.Metrics qualified as EKG
@@ -55,12 +55,28 @@ main = maybeWithGhcDebug $ do
     clearEnvironment = getEnvironment >>= traverse_ \(v, _) -> unsetEnv v
 
 runApp :: Env.Environment -> HGEOptions (ServeOptions Hasura) -> IO ()
-runApp env (HGEOptions rci metadataDbUrl hgeCmd) = ignoreTraceT do
+runApp env (HGEOptions rci metadataDbUrl hgeCmd) = do
   initTime <- liftIO getCurrentTime
 
   case hgeCmd of
-    HCServe serveOptions -> do
-      globalCtx@GlobalCtx {} <- initGlobalCtx env metadataDbUrl rci
+    HCServe serveOptions@ServeOptions {..} -> do
+      let poolSettings =
+            PostgresPoolSettings
+              { _ppsMaxConnections = Just $ PG.cpConns soConnParams,
+                _ppsTotalMaxConnections = Nothing,
+                _ppsIdleTimeout = Just $ PG.cpIdleTime soConnParams,
+                _ppsRetries = _pciRetries rci <|> Just 1,
+                _ppsPoolTimeout = PG.cpTimeout soConnParams,
+                _ppsConnectionLifetime = PG.cpMbLifetime soConnParams
+              }
+      basicConnectionInfo <-
+        initBasicConnectionInfo
+          env
+          metadataDbUrl
+          rci
+          (Just poolSettings)
+          (PG.cpAllowPrepare soConnParams)
+          soTxIso
       (ekgStore, serverMetrics) <- liftIO $ do
         store <- EKG.newStore @AppMetricsSpec
         void $ EKG.register (EKG.subset GcSubset store) EKG.registerGcMetrics
@@ -74,12 +90,12 @@ runApp env (HGEOptions rci metadataDbUrl hgeCmd) = ignoreTraceT do
 
         pure (EKG.subset EKG.emptyOf store, serverMetrics)
 
-      prometheusMetrics <- lift makeDummyPrometheusMetrics
+      prometheusMetrics <- makeDummyPrometheusMetrics
 
       -- It'd be nice if we didn't have to call runManagedT twice here, but
       -- there is a data dependency problem since the call to runPGMetadataStorageApp
       -- below depends on appCtx.
-      runManagedT (initialiseContext env globalCtx serveOptions Nothing serverMetrics prometheusMetrics sampleAlways) $ \(appStateRef, appEnv) -> do
+      runManagedT (initialiseContext env basicConnectionInfo serveOptions Nothing serverMetrics prometheusMetrics sampleAlways) $ \(appStateRef, appEnv) -> do
         -- Catches the SIGTERM signal and initiates a graceful shutdown.
         -- Graceful shutdown for regular HTTP requests is already implemented in
         -- Warp, and is triggered by invoking the 'closeSocket' callback.
@@ -93,36 +109,25 @@ runApp env (HGEOptions rci metadataDbUrl hgeCmd) = ignoreTraceT do
         let Loggers _ logger _ = appEnvLoggers appEnv
 
         _idleGCThread <-
-          lift $
-            C.forkImmortal "ourIdleGC" logger $
-              GC.ourIdleGC logger (seconds 0.3) (seconds 10) (seconds 60)
+          C.forkImmortal "ourIdleGC" logger $
+            GC.ourIdleGC logger (seconds 0.3) (seconds 10) (seconds 60)
 
-        runPGMetadataStorageAppT appEnv $
+        runAppM appEnv $
           lowerManagedT $
             runHGEServer (const $ pure ()) appStateRef initTime Nothing ekgStore
     HCExport -> do
-      GlobalCtx {..} <- initGlobalCtx env metadataDbUrl rci
-      res <- runTxWithMinimalPool _gcMetadataDbConnInfo fetchMetadataFromCatalog
+      metadataConnection <- initMetadataConnectionInfo env metadataDbUrl rci
+      res <- runTxWithMinimalPool metadataConnection fetchMetadataFromCatalog
       either (throwErrJExit MetadataExportError) printJSON res
     HCClean -> do
-      GlobalCtx {..} <- initGlobalCtx env metadataDbUrl rci
-      res <- runTxWithMinimalPool _gcMetadataDbConnInfo dropHdbCatalogSchema
+      metadataConnection <- initMetadataConnectionInfo env metadataDbUrl rci
+      res <- runTxWithMinimalPool metadataConnection dropHdbCatalogSchema
       let cleanSuccessMsg = "successfully cleaned graphql-engine related data"
       either (throwErrJExit MetadataCleanError) (const $ liftIO $ putStrLn cleanSuccessMsg) res
     HCDowngrade opts -> do
-      GlobalCtx {..} <- initGlobalCtx env metadataDbUrl rci
-      let (maybeDefaultPgConnInfo, maybeRetries) = _gcDefaultPostgresConnInfo
-      let defaultSourceConfig =
-            maybeDefaultPgConnInfo <&> \(dbUrlConf, _) ->
-              let pgSourceConnInfo =
-                    PostgresSourceConnInfo
-                      dbUrlConf
-                      (Just setPostgresPoolSettings {_ppsRetries = maybeRetries <|> Just 1})
-                      False
-                      PG.ReadCommitted
-                      Nothing
-               in PostgresConnConfiguration pgSourceConnInfo Nothing defaultPostgresExtensionsSchema Nothing mempty
-      res <- runTxWithMinimalPool _gcMetadataDbConnInfo $ downgradeCatalog defaultSourceConfig opts initTime
+      let poolSettings = setPostgresPoolSettings {_ppsRetries = _pciRetries rci <|> Just 1}
+      BasicConnectionInfo {..} <- initBasicConnectionInfo env metadataDbUrl rci (Just poolSettings) False PG.ReadCommitted
+      res <- runTxWithMinimalPool bciMetadataConnInfo $ downgradeCatalog bciDefaultPostgres opts initTime
       either (throwErrJExit DowngradeProcessError) (liftIO . print) res
     HCVersion -> liftIO $ putStrLn $ "Hasura GraphQL Engine: " ++ convertText currentVersion
   where

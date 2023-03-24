@@ -15,12 +15,13 @@ import Data.Time.Clock (getCurrentTime)
 import Data.URL.Template
 import Database.PG.Query qualified as PG
 import Hasura.App
-  ( PGMetadataStorageAppT,
-    initGlobalCtx,
+  ( AppM,
+    BasicConnectionInfo (..),
+    initMetadataConnectionInfo,
     initialiseContext,
     mkMSSQLSourceResolver,
     mkPgSourceResolver,
-    runPGMetadataStorageAppT,
+    runAppM,
   )
 import Hasura.Backends.Postgres.Connection.Settings
 import Hasura.Backends.Postgres.Execute.Types
@@ -88,7 +89,8 @@ main = do
 
       setupCacheRef = do
         httpManager <- HTTP.newManager HTTP.tlsManagerSettings
-        globalCtx <- initGlobalCtx envMap metadataDbUrl rci
+        metadataConnectionInfo <- initMetadataConnectionInfo envMap metadataDbUrl rci
+        let globalCtx = BasicConnectionInfo metadataConnectionInfo Nothing
         (_, serverMetrics) <-
           liftIO $ do
             store <- EKG.newStore @TestMetricsSpec
@@ -115,7 +117,7 @@ main = do
                 readOnlyMode
                 (_default defaultNamingConventionOption)
                 emptyMetadataDefaults
-                (FF.checkFeatureFlag mempty)
+                (CheckFeatureFlag $ FF.checkFeatureFlag mempty)
                 ApolloFederationDisabled
             cacheBuildParams = CacheBuildParams httpManager (mkPgSourceResolver print) mkMSSQLSourceResolver serverConfigCtx
 
@@ -131,12 +133,13 @@ main = do
           )
           $ \(appStateRef, appEnv) -> return (appStateRef, appEnv)
 
-        let run :: ExceptT QErr (PGMetadataStorageAppT IO) a -> IO a
+        let run :: ExceptT QErr AppM a -> IO a
             run =
               runExceptT
-                >>> runPGMetadataStorageAppT appEnv
+                >>> runAppM appEnv
                 >>> flip onLeftM printErrJExit
 
+        -- why are we building the schema cache here? it's already built in initialiseContext
         (metadata, schemaCache) <- run do
           metadata <-
             snd

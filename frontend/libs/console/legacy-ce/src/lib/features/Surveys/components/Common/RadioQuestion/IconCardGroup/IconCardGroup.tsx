@@ -1,7 +1,7 @@
-import { Analytics } from '../../../../Analytics';
-import clsx from 'clsx';
 import React from 'react';
 import { FaAngleRight } from 'react-icons/fa';
+import clsx from 'clsx';
+import { Analytics } from '../../../../../Analytics';
 
 export interface IconCardGroupItem<T> {
   value: T;
