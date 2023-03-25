@@ -1,12 +1,14 @@
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | Access to the SQL
-module Test.Queries.LogicalModels.LogicalModelsQueriesSpec (spec) where
+module Test.Databases.BigQuery.LogicalModelsSpec (spec) where
 
 import Data.Aeson (Value)
 import Data.List.NonEmpty qualified as NE
-import Harness.Backend.Citus qualified as Citus
-import Harness.Backend.Postgres qualified as Postgres
+import Data.String.Interpolate (i)
+import Data.Time.Calendar.OrdinalDate
+import Data.Time.Clock
+import Harness.Backend.BigQuery qualified as BigQuery
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml (interpolateYaml, yaml)
@@ -14,6 +16,7 @@ import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
 import Harness.Test.Schema (Table (..), table)
 import Harness.Test.Schema qualified as Schema
+import Harness.Test.SchemaName (unSchemaName)
 import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options), getBackendTypeConfig)
 import Harness.Yaml (shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
@@ -29,14 +32,9 @@ spec =
   Fixture.hgeWithEnv [(featureFlagForLogicalModels, "True")] $
     Fixture.runClean -- re-run fixture setup on every test
       ( NE.fromList
-          [ (Fixture.fixture $ Fixture.Backend Postgres.backendTypeMetadata)
+          [ (Fixture.fixture $ Fixture.Backend BigQuery.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
-                  [ Postgres.setupTablesAction schema testEnvironment
-                  ]
-              },
-            (Fixture.fixture $ Fixture.Backend Citus.backendTypeMetadata)
-              { Fixture.setupTeardown = \(testEnvironment, _) ->
-                  [ Citus.setupTablesAction schema testEnvironment
+                  [ BigQuery.setupTablesAction schema testEnvironment
                   ]
               }
           ]
@@ -49,7 +47,22 @@ spec =
 -- return type
 schema :: [Schema.Table]
 schema =
-  [ (table "stuff")
+  [ (table "article")
+      { tableColumns =
+          [ Schema.column "id" Schema.TInt,
+            Schema.column "title" Schema.TStr,
+            Schema.column "content" Schema.TStr,
+            Schema.column "date" Schema.TUTCTime
+          ],
+        tableData =
+          [ [ Schema.VInt 1,
+              Schema.VStr "Dogs",
+              Schema.VStr "I like to eat dog food I am a dogs I like to eat dog food I am a dogs I like to eat dog food I am a dogs",
+              Schema.VUTCTime (UTCTime (fromOrdinalDate 2000 1) 0)
+            ]
+          ]
+      },
+    (table "stuff")
       { tableColumns =
           [ Schema.column "thing" Schema.TInt,
             Schema.column "date" Schema.TUTCTime
@@ -60,7 +73,7 @@ schema =
 tests :: SpecWith TestEnvironment
 tests = do
   let query :: Text
-      query = "SELECT * FROM (VALUES ('hello', 'world'), ('welcome', 'friend')) as t(\"one\", \"two\")"
+      query = "SELECT * FROM UNNEST([STRUCT('hello' as one, 'world' as two), ('welcome', 'friend')])"
 
       helloWorldLogicalModel :: Schema.LogicalModel
       helloWorldLogicalModel =
@@ -223,7 +236,7 @@ tests = do
           source = BackendType.backendSourceName backendTypeMetadata
 
           queryWithDuplicates :: Text
-          queryWithDuplicates = "SELECT * FROM (VALUES ('hello', 'world'), ('hello', 'friend')) as t(\"one\", \"two\")"
+          queryWithDuplicates = "SELECT * FROM UNNEST([STRUCT('hello' as one, 'world' as two), ('hello', 'friend')])"
 
           helloWorldLogicalModelWithDuplicates :: Schema.LogicalModel
           helloWorldLogicalModelWithDuplicates =
@@ -333,7 +346,7 @@ tests = do
 
     it "Runs a simple query that takes no parameters but ends with a comment" $ \testEnvironment -> do
       let spicyQuery :: Text
-          spicyQuery = "SELECT * FROM (VALUES ('hello', 'world'), ('welcome', 'friend')) as t(\"one\", \"two\") -- my query"
+          spicyQuery = "SELECT * FROM UNNEST([STRUCT('hello' as one, 'world' as two), ('welcome', 'friend')]) -- my query"
 
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           source = BackendType.backendSourceName backendTypeMetadata
@@ -560,5 +573,227 @@ tests = do
                 }
               }
            |]
+
+      shouldReturnYaml (options testEnvironment) actual expected
+
+  let articleQuery :: Schema.SchemaName -> Text
+      articleQuery schemaName =
+        [i|
+          SELECT
+            id,
+            title,
+            ( substring(content, 1, {{length}}) || (
+                case when length(content) < {{length}}
+                  then ''
+                  else '...' end
+            )) as excerpt,
+            date
+            from #{unSchemaName schemaName}.article
+        |]
+
+  describe "Testing Logical Models" $ do
+    it "Runs a simple query that takes one parameter and uses it multiple times" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          source = BackendType.backendSourceName backendTypeMetadata
+
+          schemaName :: Schema.SchemaName
+          schemaName = Schema.getSchemaName testEnvironment
+
+          articleWithExcerptLogicalModel :: Schema.LogicalModel
+          articleWithExcerptLogicalModel =
+            (Schema.logicalModel "article_with_excerpt" (articleQuery schemaName))
+              { Schema.logicalModelColumns =
+                  [ Schema.logicalModelColumn "id" Schema.TInt,
+                    Schema.logicalModelColumn "title" Schema.TStr,
+                    Schema.logicalModelColumn "excerpt" Schema.TStr,
+                    Schema.logicalModelColumn "date" Schema.TUTCTime
+                  ],
+                Schema.logicalModelArguments =
+                  [ Schema.logicalModelColumn "length" Schema.TInt
+                  ]
+              }
+
+      Schema.trackLogicalModel source articleWithExcerptLogicalModel testEnvironment
+
+      let actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+              query {
+                article_with_excerpt(args: { length: 34 }) {
+                  id
+                  title
+                  date
+                  excerpt
+                }
+              }
+           |]
+
+          expected =
+            [yaml|
+                data:
+                  article_with_excerpt:
+                    - id: '1'
+                      title: "Dogs"
+                      date: "2000-01-01T00:00:00"
+                      excerpt: "I like to eat dog food I am a dogs..."
+              |]
+
+      shouldReturnYaml (options testEnvironment) actual expected
+
+    it "Uses two queries with the same argument names and ensure they don't mess with one another" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          source = BackendType.backendSourceName backendTypeMetadata
+
+          schemaName :: Schema.SchemaName
+          schemaName = Schema.getSchemaName testEnvironment
+
+          mkArticleWithExcerptLogicalModel :: Text -> Schema.LogicalModel
+          mkArticleWithExcerptLogicalModel name =
+            (Schema.logicalModel name (articleQuery schemaName))
+              { Schema.logicalModelColumns =
+                  [ Schema.logicalModelColumn "id" Schema.TInt,
+                    Schema.logicalModelColumn "title" Schema.TStr,
+                    Schema.logicalModelColumn "excerpt" Schema.TStr,
+                    Schema.logicalModelColumn "date" Schema.TUTCTime
+                  ],
+                Schema.logicalModelArguments =
+                  [ Schema.logicalModelColumn "length" Schema.TInt
+                  ]
+              }
+
+      Schema.trackLogicalModel
+        source
+        (mkArticleWithExcerptLogicalModel "article_with_excerpt_1")
+        testEnvironment
+
+      Schema.trackLogicalModel
+        source
+        (mkArticleWithExcerptLogicalModel "article_with_excerpt_2")
+        testEnvironment
+
+      let actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+              query {
+                article_with_excerpt_1(args: { length: 34 }) {
+                  excerpt
+                }
+                article_with_excerpt_2(args: { length: 13 }) {
+                  excerpt
+                }
+              }
+           |]
+
+          expected =
+            [yaml|
+                data:
+                  article_with_excerpt_1:
+                    - excerpt: "I like to eat dog food I am a dogs..."
+                  article_with_excerpt_2:
+                    - excerpt: "I like to eat..."
+              |]
+
+      shouldReturnYaml (options testEnvironment) actual expected
+
+    it "Uses a one parameter query and uses it multiple times" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          source = BackendType.backendSourceName backendTypeMetadata
+
+          schemaName :: Schema.SchemaName
+          schemaName = Schema.getSchemaName testEnvironment
+
+          articleWithExcerptLogicalModel :: Schema.LogicalModel
+          articleWithExcerptLogicalModel =
+            (Schema.logicalModel "article_with_excerpt" (articleQuery schemaName))
+              { Schema.logicalModelColumns =
+                  [ Schema.logicalModelColumn "id" Schema.TInt,
+                    Schema.logicalModelColumn "title" Schema.TStr,
+                    Schema.logicalModelColumn "excerpt" Schema.TStr,
+                    Schema.logicalModelColumn "date" Schema.TUTCTime
+                  ],
+                Schema.logicalModelArguments =
+                  [ Schema.logicalModelColumn "length" Schema.TInt
+                  ]
+              }
+
+      Schema.trackLogicalModel source articleWithExcerptLogicalModel testEnvironment
+
+      let actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+              query {
+                first: article_with_excerpt(args: { length: 34 }) {
+                  excerpt
+                }
+                second: article_with_excerpt(args: { length: 13 }) {
+                  excerpt
+                }
+              }
+           |]
+
+          expected =
+            [yaml|
+                data:
+                  first:
+                    - excerpt: "I like to eat dog food I am a dogs..."
+                  second:
+                    - excerpt: "I like to eat..."
+              |]
+
+      shouldReturnYaml (options testEnvironment) actual expected
+
+    it "Uses a one parameter query, passing it a GraphQL variable" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          source = BackendType.backendSourceName backendTypeMetadata
+
+          schemaName :: Schema.SchemaName
+          schemaName = Schema.getSchemaName testEnvironment
+
+          articleWithExcerptLogicalModel :: Schema.LogicalModel
+          articleWithExcerptLogicalModel =
+            (Schema.logicalModel "article_with_excerpt" (articleQuery schemaName))
+              { Schema.logicalModelColumns =
+                  [ Schema.logicalModelColumn "id" Schema.TInt,
+                    Schema.logicalModelColumn "title" Schema.TStr,
+                    Schema.logicalModelColumn "excerpt" Schema.TStr,
+                    Schema.logicalModelColumn "date" Schema.TUTCTime
+                  ],
+                Schema.logicalModelArguments =
+                  [ Schema.logicalModelColumn "length" Schema.TInt
+                  ]
+              }
+
+      Schema.trackLogicalModel source articleWithExcerptLogicalModel testEnvironment
+
+      let variables =
+            [yaml|
+              length: 34
+            |]
+
+          actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphqlWithVariables
+              testEnvironment
+              [graphql|
+                query MyQuery($length: Int!) {
+                  article_with_excerpt(args: { length: $length }) {
+                    excerpt
+                  }
+                }
+             |]
+              variables
+
+          expected =
+            [yaml|
+                data:
+                  article_with_excerpt:
+                    - excerpt: "I like to eat dog food I am a dogs..."
+              |]
 
       shouldReturnYaml (options testEnvironment) actual expected
