@@ -6,16 +6,18 @@ module Test.Queries.LogicalModels.LogicalModelsQueriesSpec (spec) where
 import Data.Aeson (Value)
 import Data.List.NonEmpty qualified as NE
 import Harness.Backend.Citus qualified as Citus
+import Harness.Backend.Cockroach qualified as Cockroach
 import Harness.Backend.Postgres qualified as Postgres
+import Harness.Backend.Sqlserver qualified as Sqlserver
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml (interpolateYaml, yaml)
+import Harness.Schema (Table (..), table)
+import Harness.Schema qualified as Schema
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (Table (..), table)
-import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options), getBackendTypeConfig)
-import Harness.Yaml (shouldBeYaml, shouldReturnYaml)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment, getBackendTypeConfig)
+import Harness.Yaml (shouldAtLeastBe, shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
 
@@ -34,9 +36,19 @@ spec =
                   [ Postgres.setupTablesAction schema testEnvironment
                   ]
               },
+            (Fixture.fixture $ Fixture.Backend Cockroach.backendTypeMetadata)
+              { Fixture.setupTeardown = \(testEnvironment, _) ->
+                  [ Cockroach.setupTablesAction schema testEnvironment
+                  ]
+              },
             (Fixture.fixture $ Fixture.Backend Citus.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
                   [ Citus.setupTablesAction schema testEnvironment
+                  ]
+              },
+            (Fixture.fixture $ Fixture.Backend Sqlserver.backendTypeMetadata)
+              { Fixture.setupTeardown = \(testEnvironment, _) ->
+                  [ Sqlserver.setupTablesAction schema testEnvironment
                   ]
               }
           ]
@@ -72,6 +84,34 @@ tests = do
           }
 
   describe "Testing Logical Models" $ do
+    it "Explain works" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          sourceName = BackendType.backendSourceName backendTypeMetadata
+
+      Schema.trackLogicalModel sourceName helloWorldLogicalModel testEnvironment
+
+      let explain :: Value
+          explain =
+            [graphql|
+              query {
+                hello_world_function (where: { two: { _eq: "world" } }){
+                  one
+                  two
+                }
+              }
+           |]
+
+          expected =
+            [interpolateYaml|
+              [{
+                  "field": "hello_world_function"
+                }]
+              |]
+
+      actual <- GraphqlEngine.postExplain testEnvironment explain
+
+      actual `shouldAtLeastBe` expected
+
     it "Descriptions and nullability appear in the schema" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           sourceName = BackendType.backendSourceName backendTypeMetadata
@@ -187,7 +227,7 @@ tests = do
               }
            |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Runs simple query with a basic where clause" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -216,51 +256,7 @@ tests = do
               }
            |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
-
-    it "Runs a simple query using distinct_on and order_by" $ \testEnvironment -> do
-      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
-          source = BackendType.backendSourceName backendTypeMetadata
-
-          queryWithDuplicates :: Text
-          queryWithDuplicates = "SELECT * FROM (VALUES ('hello', 'world'), ('hello', 'friend')) as t(\"one\", \"two\")"
-
-          helloWorldLogicalModelWithDuplicates :: Schema.LogicalModel
-          helloWorldLogicalModelWithDuplicates =
-            (Schema.logicalModel "hello_world_function" queryWithDuplicates)
-              { Schema.logicalModelColumns =
-                  [ Schema.logicalModelColumn "one" Schema.TStr,
-                    Schema.logicalModelColumn "two" Schema.TStr
-                  ]
-              }
-
-      Schema.trackLogicalModel source helloWorldLogicalModelWithDuplicates testEnvironment
-
-      let expected =
-            [yaml|
-                data:
-                  hello_world_function:
-                    - one: "hello"
-                      two: "world"
-              |]
-
-          actual :: IO Value
-          actual =
-            GraphqlEngine.postGraphql
-              testEnvironment
-              [graphql|
-              query {
-                hello_world_function (
-                  distinct_on: [one]
-                  order_by: [{one:asc}]
-                ){
-                  one
-                  two
-                }
-              }
-           |]
-
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Runs a simple query that takes no parameters" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -289,7 +285,7 @@ tests = do
               }
            |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Runs a simple query that takes one dummy parameter and order_by" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -329,7 +325,7 @@ tests = do
               }
            |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Runs a simple query that takes no parameters but ends with a comment" $ \testEnvironment -> do
       let spicyQuery :: Text
@@ -372,7 +368,7 @@ tests = do
               }
            |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Uses a column permission that we are allowed to access" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -392,7 +388,7 @@ tests = do
       Schema.trackLogicalModel source helloWorldPermLogicalModel testEnvironment
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -434,7 +430,7 @@ tests = do
               }
            |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Fails because we access a column we do not have permissions for" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -454,7 +450,7 @@ tests = do
       Schema.trackLogicalModel source helloWorldPermLogicalModel testEnvironment
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -497,7 +493,7 @@ tests = do
               }
            |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Using row permissions filters out some results" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -517,7 +513,7 @@ tests = do
       Schema.trackLogicalModel source helloWorldPermLogicalModel testEnvironment
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -561,4 +557,4 @@ tests = do
               }
            |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected

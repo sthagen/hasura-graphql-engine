@@ -10,9 +10,9 @@ import Harness.Backend.Postgres qualified as Postgres
 import Harness.GraphqlEngine (postGraphql)
 import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml (interpolateYaml, yaml)
+import Harness.Schema qualified as Schema
 import Harness.Subscriptions
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (..))
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
@@ -144,7 +144,7 @@ multiplexedQueryComputedFieldsSpec = do
 
     -- check result from valid subscription
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       (getNextResponse subValid)
       [interpolateYaml|
         data:
@@ -162,7 +162,7 @@ multiplexedQueryComputedFieldsSpec = do
 
     -- check result from invalid subscription
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       (getNextResponse subInvalid)
       [yaml|
         errors:
@@ -188,7 +188,7 @@ multiplexedQueryComputedFieldsSpec = do
             |]
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       insertRow
       [interpolateYaml|
         data:
@@ -197,7 +197,7 @@ multiplexedQueryComputedFieldsSpec = do
       |]
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       (getNextResponse subValid)
       [interpolateYaml|
         data:
@@ -239,7 +239,7 @@ multiplexedQueryCustomFunctionsSpec = do
 
     -- check result from valid subscription
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       (getNextResponse subValid)
       [interpolateYaml|
         data:
@@ -254,7 +254,7 @@ multiplexedQueryCustomFunctionsSpec = do
 
     -- check result from invalid subscription
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       (getNextResponse subInvalid)
       [yaml|
         errors:
@@ -280,7 +280,7 @@ multiplexedQueryCustomFunctionsSpec = do
             |]
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       insertRow
       [interpolateYaml|
         data:
@@ -289,7 +289,7 @@ multiplexedQueryCustomFunctionsSpec = do
       |]
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       (getNextResponse subValid)
       [interpolateYaml|
         data:

@@ -13,11 +13,11 @@ import Harness.Backend.Sqlserver qualified as SQLServer
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Permissions (Permission (..), SelectPermissionDetails (..), selectPermission)
 import Harness.Quoter.Yaml (interpolateYaml)
+import Harness.Schema (Table (..), table)
+import Harness.Schema qualified as Schema
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (Table (..), table)
-import Harness.Test.Schema qualified as Schema
 import Harness.Test.SetupAction (setupPermissionsAction)
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options), getBackendTypeConfig)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment, getBackendTypeConfig)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
 import Test.Auth.Authorization.DisableRootFields.Common
@@ -120,7 +120,7 @@ tests = describe "DefaultRootFieldSpec" $ do
 
   it "'list' root field is enabled and accessible" $ \testEnvironment -> do
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphqlWithHeaders testEnvironment userHeaders (listQuery testEnvironment))
       (listRFEnabledExpectedResponse testEnvironment)
 
@@ -128,13 +128,13 @@ tests = describe "DefaultRootFieldSpec" $ do
     -- BigQuery doesn't have primary keys.
     unless (backendType testEnvironment == Just Fixture.BigQuery) do
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         (GraphqlEngine.postGraphqlWithHeaders testEnvironment userHeaders (pkQuery testEnvironment))
         (pkRFEnabledExpectedResponse testEnvironment)
 
   it "'aggregate' root field is enabled and accessible" $ \testEnvironment -> do
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphqlWithHeaders testEnvironment userHeaders (aggregateQuery testEnvironment))
       (aggRFEnabledExpectedResponse testEnvironment)
 
@@ -165,6 +165,6 @@ tests = describe "DefaultRootFieldSpec" $ do
             |]
 
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphqlWithHeaders testEnvironment userHeaders queryTypesIntrospection)
       expectedResponse

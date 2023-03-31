@@ -57,6 +57,7 @@ library
     , aeson-pretty
     , base
     , bytestring
+    , containers
     , data-has
     , dc-api
     , directory
@@ -94,6 +95,7 @@ library
     Test.API.ExplainSpec
     Test.API.GraphQL.ContentLengthSpec
     Test.API.Metadata.ComputedFieldsSpec
+    Test.API.Metadata.CustomTypeSpec
     Test.API.Metadata.InconsistentSpec
     Test.API.Metadata.LogicalModelsSpec
     Test.API.Metadata.LogicalModels.ValidationSpec
@@ -138,6 +140,7 @@ library
     Test.Databases.Postgres.UniqueConstraintsSpec
     Test.Databases.SQLServer.DefaultValues.OnConflictSpec
     Test.Databases.SQLServer.InsertVarcharColumnSpec
+    Test.Databases.SQLServer.LogicalModelsSpec
     Test.Databases.SQLServer.VarcharLiteralsSpec
     Test.EventTriggers.EventTriggersSpecialCharactersSpec
     Test.EventTriggers.MSSQL.EventTriggerDropSourceCleanupSpec
@@ -153,7 +156,6 @@ library
     Test.EventTriggers.PG.EventTriggersClearMetadataSpec
     Test.EventTriggers.PG.EventTriggersRunSQLSpec
     Test.EventTriggers.PG.EventTriggersUniqueNameSpec
-    Test.EventTriggers.PG.EventTriggersCreatedAtUTCSpec
     Test.EventTriggers.PG.EventTriggersUntrackTableCleanupSpec
     Test.Harness.Quoter.YamlSpec
     Test.HealthCheckSpec

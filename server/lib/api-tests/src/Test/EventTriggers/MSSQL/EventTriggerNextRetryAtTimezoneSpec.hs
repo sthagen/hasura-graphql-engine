@@ -10,11 +10,11 @@ import Data.List.NonEmpty qualified as NE
 import Harness.Backend.Sqlserver qualified as Sqlserver
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml
+import Harness.Schema (Table (..), table)
+import Harness.Schema qualified as Schema
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (Table (..), table)
-import Harness.Test.Schema qualified as Schema
 import Harness.Test.SetupAction (permitTeardownFail)
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options))
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment)
 import Harness.Webhook qualified as Webhook
 import Harness.Yaml (shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
@@ -123,7 +123,7 @@ tests =
 
         -- Insert a row into the table with event trigger
         shouldReturnYaml
-          (options testEnvironment)
+          testEnvironment
           (GraphqlEngine.postV2Query 200 testEnvironment insertQuery)
           expectedResponse
 
@@ -141,7 +141,7 @@ tests =
         -- Check the retries column of hdb_catalog.event_log table to see that the event has been retried once (that is
         -- the event has tried to deliver 2 times in total)
         shouldReturnYaml
-          (options testEnvironment)
+          testEnvironment
           (GraphqlEngine.postV2Query 200 testEnvironment selectQuery)
           expectedTotalTries
 

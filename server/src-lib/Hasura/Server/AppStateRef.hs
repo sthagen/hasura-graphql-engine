@@ -5,7 +5,7 @@ module Hasura.Server.AppStateRef
     initialiseAppStateRef,
     withSchemaCacheUpdate,
     readAppContextRef,
-    readSchemaCacheRef,
+    getRebuildableSchemaCacheWithVersion,
 
     -- * TLS AllowList reference
     TLSAllowListRef,
@@ -140,8 +140,8 @@ readAppContextRef :: AppStateRef impl -> IO (RebuildableAppContext impl)
 readAppContextRef scRef = asAppCtx <$> readIORef (_scrCache scRef)
 
 -- | Read the contents of the 'AppStateRef' to get the latest 'RebuildableSchemaCache' and 'SchemaCacheVer'
-readSchemaCacheRef :: AppStateRef impl -> IO (RebuildableSchemaCache, SchemaCacheVer)
-readSchemaCacheRef scRef = asSchemaCache <$> readIORef (_scrCache scRef)
+getRebuildableSchemaCacheWithVersion :: AppStateRef impl -> IO (RebuildableSchemaCache, SchemaCacheVer)
+getRebuildableSchemaCacheWithVersion scRef = asSchemaCache <$> readIORef (_scrCache scRef)
 
 --------------------------------------------------------------------------------
 -- TLS Allow List
@@ -179,11 +179,11 @@ readTLSAllowList (TLSAllowListRef ref) =
 
 -- | Read the latest 'SchemaCache' from the 'AppStateRef'.
 getSchemaCache :: AppStateRef impl -> IO SchemaCache
-getSchemaCache asRef = lastBuiltSchemaCache . fst <$> readSchemaCacheRef asRef
+getSchemaCache asRef = lastBuiltSchemaCache . fst <$> getRebuildableSchemaCacheWithVersion asRef
 
 -- | Read the latest 'SchemaCache' and its version from the 'AppStateRef'.
 getSchemaCacheWithVersion :: AppStateRef impl -> IO (SchemaCache, SchemaCacheVer)
-getSchemaCacheWithVersion scRef = first lastBuiltSchemaCache <$> readSchemaCacheRef scRef
+getSchemaCacheWithVersion scRef = fmap (\(sc, ver) -> (lastBuiltSchemaCache sc, ver)) $ getRebuildableSchemaCacheWithVersion scRef
 
 -- | Read the latest 'AppContext' from the 'AppStateRef'.
 getAppContext :: AppStateRef impl -> IO AppContext
@@ -203,4 +203,4 @@ logInconsistentMetadata logger objs =
 updateMetadataVersionGauge :: MonadIO m => Gauge -> RebuildableSchemaCache -> m ()
 updateMetadataVersionGauge metadataVersionGauge schemaCache = do
   let metadataVersion = scMetadataResourceVersion . lastBuiltSchemaCache $ schemaCache
-  liftIO $ traverse_ (Gauge.set metadataVersionGauge . getMetadataResourceVersion) metadataVersion
+  liftIO $ Gauge.set metadataVersionGauge $ getMetadataResourceVersion metadataVersion

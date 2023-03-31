@@ -3,19 +3,27 @@
 -- | Tests of the Logical Models feature.
 module Test.API.Metadata.LogicalModelsSpec (spec) where
 
+import Control.Lens
+import Data.Aeson qualified as A
+import Data.Aeson.Lens
 import Data.List.NonEmpty qualified as NE
 import Harness.Backend.BigQuery qualified as BigQuery
 import Harness.Backend.Citus qualified as Citus
+import Harness.Backend.Cockroach qualified as Cockroach
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.Backend.Sqlserver qualified as Sqlserver
 import Harness.GraphqlEngine qualified as GraphqlEngine
+import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml (yaml)
 import Harness.Quoter.Yaml.InterpolateYaml
+import Harness.Schema qualified as Schema
+import Harness.Services.GraphqlEngine
+import Harness.Services.Metadata
+import Harness.Services.PostgresSource
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options), getBackendTypeConfig, scalarTypeToText)
-import Harness.Yaml (shouldReturnYaml)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment, getBackendTypeConfig, scalarTypeToText)
+import Harness.Yaml (shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
 
@@ -46,6 +54,11 @@ spec = do
                   [ Citus.setupTablesAction schema testEnv
                   ]
               },
+            (Fixture.fixture $ Fixture.Backend Cockroach.backendTypeMetadata)
+              { Fixture.setupTeardown = \(testEnv, _) ->
+                  [ Cockroach.setupTablesAction schema testEnv
+                  ]
+              },
             (Fixture.fixture $ Fixture.Backend Sqlserver.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnv, _) ->
                   [ Sqlserver.setupTablesAction schema testEnv
@@ -62,6 +75,8 @@ spec = do
     traverse_
       (Fixture.runClean fixtures)
       [testImplementation, testPermissions]
+
+  metadataHandlingWhenDisabledSpec
 
 -- ** Setup and teardown
 
@@ -101,7 +116,7 @@ testAdminAccess = do
             sourceName = BackendType.backendSourceName backendTypeMetadata
 
         shouldReturnYaml
-          (options testEnvironment)
+          testEnvironment
           ( GraphqlEngine.postMetadataWithStatusAndHeaders
               400
               testEnvironment
@@ -121,7 +136,7 @@ testAdminAccess = do
             sourceName = BackendType.backendSourceName backendTypeMetadata
 
         shouldReturnYaml
-          (options testEnvironment)
+          testEnvironment
           ( GraphqlEngine.postMetadataWithStatusAndHeaders
               400
               testEnvironment
@@ -143,7 +158,7 @@ testAdminAccess = do
             getRequestType = backendType <> "_get_logical_model"
 
         shouldReturnYaml
-          (options testEnvironment)
+          testEnvironment
           ( GraphqlEngine.postMetadataWithStatusAndHeaders
               400
               testEnvironment
@@ -210,7 +225,7 @@ testImplementation = do
               }
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadataWithStatus
             400
             testEnvironment
@@ -248,7 +263,7 @@ testImplementation = do
       Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -322,7 +337,7 @@ testImplementation = do
       Schema.untrackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -368,7 +383,7 @@ testPermissions = do
       Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -390,7 +405,7 @@ testPermissions = do
         |]
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -434,7 +449,7 @@ testPermissions = do
       Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -462,7 +477,7 @@ testPermissions = do
         |]
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
@@ -495,7 +510,7 @@ testPermissionFailures = do
           createPermRequestType = backendType <> "_create_logical_model_select_permission"
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadataWithStatus
             400
             testEnvironment
@@ -528,7 +543,7 @@ testPermissionFailures = do
           expectedError = "Logical model \"made_up_logical_model\" not found in source \"" <> sourceName <> "\"."
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadataWithStatus
             400
             testEnvironment
@@ -558,7 +573,7 @@ testPermissionFailures = do
           dropPermRequestType = backendType <> "_drop_logical_model_select_permission"
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadataWithStatus
             400
             testEnvironment
@@ -588,7 +603,7 @@ testPermissionFailures = do
           expectedError = "Logical model \"made_up_logical_model\" not found in source \"" <> sourceName <> "\"."
 
       shouldReturnYaml
-        (options testEnvironment)
+        testEnvironment
         ( GraphqlEngine.postMetadataWithStatus
             400
             testEnvironment
@@ -604,4 +619,110 @@ testPermissionFailures = do
           code: "not-found"
           error: *expectedError 
           path: "$.args"
+        |]
+
+metadataHandlingWhenDisabledSpec :: SpecWith GlobalTestEnvironment
+metadataHandlingWhenDisabledSpec = do
+  describe "When logical models are enabled" do
+    withHge
+      ( emptyHgeConfig
+          { hgeConfigEnvironmentVars =
+              [ (featureFlagForLogicalModels, "True")
+              ]
+          }
+      )
+      $ withPostgresSource "default"
+      $ do
+        it "`replace_metadata` does not report any inconsistent objects" $ \env -> do
+          currentMetadata <- export_metadata env
+          actual <- replace_metadata env (metadataWithLogicalModel currentMetadata)
+
+          actual
+            `shouldBeYaml` [yaml|
+              inconsistent_objects: []
+              is_consistent: true
+              |]
+
+        it "They do appear in the schema" $ \env -> do
+          currentMetadata <- export_metadata env
+          _res <- replace_metadata env (metadataWithLogicalModel currentMetadata)
+
+          let expected =
+                [yaml|
+                data:
+                  __type:
+                    name: divided_stuff
+                |]
+
+          actual <- hgePostGraphql env queryTypesIntrospection
+          actual `shouldBeYaml` expected
+
+  describe "When logical models are disabled" do
+    withHge emptyHgeConfig $ do
+      withPostgresSource "default" $ do
+        it "`replace_metadata` preserves logical models" $ \env -> do
+          currentMetadata <- export_metadata env
+          _ <- replace_metadata env (metadataWithLogicalModel currentMetadata)
+          actual <- export_metadata env
+          actual `shouldBeYaml` (metadataWithLogicalModel currentMetadata)
+
+        it "`replace_metadata` reports inconsistent objects" $ \env -> do
+          currentMetadata <- export_metadata env
+          actual <- replace_metadata env (metadataWithLogicalModel currentMetadata)
+
+          actual
+            `shouldBeYaml` [yaml|
+              inconsistent_objects:
+                - definition: *logicalModelsMetadata
+                  name: logical_model divided_stuff in source default
+                  reason: 'Inconsistent object: The Logical Models feature is disabled'
+                  type: logical_model
+              is_consistent: false
+            |]
+
+        it "They do not appear in the schema" $ \env -> do
+          currentMetadata <- export_metadata env
+          _res <- replace_metadata env (metadataWithLogicalModel currentMetadata)
+
+          let expected =
+                [yaml|
+                data:
+                  __type: null
+                |]
+
+          actual <- hgePostGraphql env queryTypesIntrospection
+          actual `shouldBeYaml` expected
+  where
+    logicalModelsMetadata =
+      [yaml|
+          arguments:
+            divided:
+              nullable: false
+              type: int
+          code: SELECT {{divided}} as divided
+          returns:
+            columns:
+              - name: divided
+                description: a divided thing
+                nullable: false
+                type: integer
+          root_field_name: divided_stuff
+      |]
+
+    metadataWithLogicalModel :: A.Value -> A.Value
+    metadataWithLogicalModel currentMetadata =
+      currentMetadata
+        & key "sources"
+          . nth 0
+          . atKey "logical_models"
+          .~ Just [yaml| - *logicalModelsMetadata |]
+
+    queryTypesIntrospection :: A.Value
+    queryTypesIntrospection =
+      [graphql|
+          query {
+            __type(name: "divided_stuff") {
+              name
+            }
+          }
         |]

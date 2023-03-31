@@ -9,16 +9,17 @@ import Data.Time.Calendar.OrdinalDate
 import Data.Time.Clock
 import Database.PG.Query qualified as PG
 import Harness.Backend.Citus qualified as Citus
+import Harness.Backend.Cockroach qualified as Cockroach
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml (interpolateYaml, yaml)
+import Harness.Schema (Table (..), table)
+import Harness.Schema qualified as Schema
 import Harness.Subscriptions
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (Table (..), table)
-import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options), getBackendTypeConfig)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment, getBackendTypeConfig)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it, shouldContain)
@@ -36,6 +37,11 @@ spec =
           [ (Fixture.fixture $ Fixture.Backend Postgres.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
                   [ Postgres.setupTablesAction schema testEnvironment
+                  ]
+              },
+            (Fixture.fixture $ Fixture.Backend Cockroach.backendTypeMetadata)
+              { Fixture.setupTeardown = \(testEnvironment, _) ->
+                  [ Cockroach.setupTablesAction schema testEnvironment
                   ]
               },
             (Fixture.fixture $ Fixture.Backend Citus.backendTypeMetadata)
@@ -132,7 +138,7 @@ tests = do
               actual :: IO Value
               actual = getNextResponse query
 
-          shouldReturnYaml (options testEnvironment) actual expected
+          shouldReturnYaml testEnvironment actual expected
 
         -- add a row
         do
@@ -173,7 +179,7 @@ tests = do
               actual :: IO Value
               actual = getNextResponse query
 
-          shouldReturnYaml (options testEnvironment) actual expected
+          shouldReturnYaml testEnvironment actual expected
 
         -- delete a row
         do
@@ -205,4 +211,4 @@ tests = do
               actual :: IO Value
               actual = getNextResponse query
 
-          shouldReturnYaml (options testEnvironment) actual expected
+          shouldReturnYaml testEnvironment actual expected

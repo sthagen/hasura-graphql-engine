@@ -30,15 +30,15 @@ import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Yaml (yaml)
 import Harness.Quoter.Yaml.InterpolateYaml (interpolateYaml)
 import Harness.RemoteServer qualified as RemoteServer
+import Harness.Schema (Table (..))
+import Harness.Schema qualified as Schema
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (Table (..))
-import Harness.Test.Schema qualified as Schema
 import Harness.Test.SetupAction as SetupAction
 import Harness.Test.TestResource (Managed)
 import Harness.TestEnvironment
   ( GlobalTestEnvironment,
     Server,
-    TestEnvironment (options, uniqueTestId),
+    TestEnvironment (uniqueTestId),
     focusFixtureLeft,
     focusFixtureRight,
     stopServer,
@@ -1103,7 +1103,7 @@ executionTests = describe "execution" $ do
                  title: album1_artist1
           |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphql testEnvironment query)
       expectedResponse
 
@@ -1129,7 +1129,7 @@ executionTests = describe "execution" $ do
                album: null
           |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphql testEnvironment query)
       expectedResponse
 
@@ -1166,7 +1166,7 @@ executionTests = describe "execution" $ do
                album: null
           |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphql testEnvironment query)
       expectedResponse
 
@@ -1219,7 +1219,7 @@ permissionTests = describe "permission" $ do
                album: null
           |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphqlWithHeaders testEnvironment userHeaders query)
       expectedResponse
 
@@ -1258,7 +1258,7 @@ permissionTests = describe "permission" $ do
                 __typename: #{rhsSchema}_album
           |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphqlWithHeaders testEnvironment userHeaders query)
       expectedResponse
 
@@ -1314,6 +1314,6 @@ schemaTests =
               - name: title
           |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       (GraphqlEngine.postGraphql testEnvironment query)
       expectedResponse

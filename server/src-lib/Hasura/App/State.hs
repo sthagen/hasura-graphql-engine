@@ -12,7 +12,11 @@ module Hasura.App.State
 
     -- * init functions
     buildRebuildableAppContext,
+    rebuildRebuildableAppContext,
     initSQLGenCtx,
+
+    -- * server config
+    buildServerConfigCtx,
   )
 where
 
@@ -119,7 +123,7 @@ data AppEnv = AppEnv
     appEnvWebSocketKeepAlive :: KeepAliveDelay,
     appEnvWebSocketConnectionInitTimeout :: WSConnectionInitTimeout,
     appEnvGracefulShutdownTimeout :: Refined NonNegative Seconds,
-    -- TODO: Move this to `ServerContext`. We are leaving this for now as this cannot be changed directly
+    -- TODO: Move this to `AppContext`. We are leaving this for now as this cannot be changed directly
     -- by the user on the cloud dashboard and will also require a refactor in HasuraPro/App.hs
     -- as this thread is initialised there before creating the `AppStateRef`. But eventually we need
     -- to do it for the Enterprise version.
@@ -200,6 +204,27 @@ buildRebuildableAppContext readerContext serveOptions env = do
   let !appContext = Inc.result result
   let !rebuildableAppContext = RebuildableAppContext appContext initInvalidationKeys (Inc.rebuildRule result)
   pure rebuildableAppContext
+
+-- | Function to rebuild the 'AppContext' from a given 'RebuildableAppContext'
+-- and a new 'ServeOptions'
+rebuildRebuildableAppContext ::
+  (MonadIO m, MonadError QErr m) =>
+  (L.Logger L.Hasura, HTTP.Manager) ->
+  RebuildableAppContext impl ->
+  ServeOptions impl ->
+  E.Environment ->
+  m (RebuildableAppContext impl)
+rebuildRebuildableAppContext readerCtx (RebuildableAppContext _ _ rule) serveOptions env = do
+  let newInvalidationKeys = InvalidationKeys
+  result <-
+    liftEitherM $
+      liftIO $
+        runExceptT $
+          flip runReaderT readerCtx $
+            Inc.build rule (serveOptions, env, newInvalidationKeys)
+  let appContext = Inc.result result
+      !newCtx = RebuildableAppContext appContext newInvalidationKeys (Inc.rebuildRule result)
+  pure newCtx
 
 buildAppContextRule ::
   forall arr m impl.
@@ -285,3 +310,27 @@ initSQLGenCtx experimentalFeatures stringifyNum dangerousBooleanCollapse =
         | EFBigQueryStringNumericInput `elem` experimentalFeatures = Options.EnableBigQueryStringNumericInput
         | otherwise = Options.DisableBigQueryStringNumericInput
    in SQLGenCtx stringifyNum dangerousBooleanCollapse optimizePermissionFilters bigqueryStringNumericInput
+
+--------------------------------------------------------------------------------
+-- server config
+
+-- | We are trying to slowly get rid of 'HasServerConfigCtx' (and consequently
+-- of 'ServercConfigtx') in favour of smaller / more specific ad-hoc
+-- types. However, in the meantime, it is often required to builda
+-- 'ServerConfigCtx' at the boundary between parts of the code that use it and
+-- part of the code that use the new 'AppEnv' and 'AppContext'.
+buildServerConfigCtx :: AppEnv -> AppContext -> ServerConfigCtx
+buildServerConfigCtx AppEnv {..} AppContext {..} =
+  ServerConfigCtx
+    { _sccFunctionPermsCtx = acFunctionPermsCtx,
+      _sccRemoteSchemaPermsCtx = acRemoteSchemaPermsCtx,
+      _sccSQLGenCtx = acSQLGenCtx,
+      _sccMaintenanceMode = appEnvEnableMaintenanceMode,
+      _sccExperimentalFeatures = acExperimentalFeatures,
+      _sccEventingMode = appEnvEventingMode,
+      _sccReadOnlyMode = appEnvEnableReadOnlyMode,
+      _sccDefaultNamingConvention = acDefaultNamingConvention,
+      _sccMetadataDefaults = acMetadataDefaults,
+      _sccCheckFeatureFlag = appEnvCheckFeatureFlag,
+      _sccApolloFederationStatus = acApolloFederationStatus
+    }

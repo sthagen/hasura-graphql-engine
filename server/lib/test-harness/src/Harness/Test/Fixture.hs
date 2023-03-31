@@ -132,6 +132,7 @@ hgeWithEnv env = do
             (getter globalTestEnvironment)
             (getter globalTestEnvironment)
             hgeConfig
+            (getter globalTestEnvironment)
         liftIO $ useHgeInTestEnvironment globalTestEnvironment hgeServerInstance >>= specs
     )
 
@@ -283,7 +284,7 @@ setupTestEnvironment name globalTestEnvironment options = do
             uniqueTestId = uniqueTestId,
             globalEnvironment = globalTestEnvironment,
             permissions = Admin,
-            options = options
+            _options = options
           }
 
   -- create source databases

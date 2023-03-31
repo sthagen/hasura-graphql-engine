@@ -11,10 +11,10 @@ import Harness.GraphqlEngine (postV2Query_)
 import Harness.GraphqlEngine qualified as GraphQLEngine
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml
+import Harness.Schema (Table (..), table)
+import Harness.Schema qualified as Schema
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (Table (..), table)
-import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options))
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment)
 import Harness.Webhook qualified as Webhook
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
@@ -189,7 +189,7 @@ tests = do
         schemaName = Schema.getSchemaName testEnvironment
         webhookEndpoint = GraphqlEngine.serverUrl webhookServer ++ "/hello"
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       ( GraphQLEngine.postMetadata
           testEnvironment
           [interpolateYaml|
@@ -282,7 +282,7 @@ args:
   sql: TRUNCATE #{schemaName}.ddl_history RESTART IDENTITY;
 |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       ( GraphQLEngine.postMetadata
           testEnvironment
           [yaml|
@@ -295,7 +295,7 @@ args:
          message: success
       |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       ( GraphQLEngine.postV2Query
           200
           testEnvironment
@@ -325,7 +325,7 @@ args:
   sql: TRUNCATE #{schemaName}.ddl_history RESTART IDENTITY;
 |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       ( GraphQLEngine.postMetadata
           testEnvironment
           [yaml|
@@ -340,7 +340,7 @@ args:
          message: success
       |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       ( GraphQLEngine.postV2Query
           200
           testEnvironment
@@ -374,7 +374,7 @@ args:
     ALTER TABLE #{schemaName}.users ADD COLUMN last_name TEXT;
 |]
     shouldReturnYaml
-      (options testEnvironment)
+      testEnvironment
       ( GraphQLEngine.postV2Query
           200
           testEnvironment

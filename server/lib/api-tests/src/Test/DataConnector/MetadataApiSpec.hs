@@ -97,8 +97,8 @@ schemaInspectionTests = describe "Schema and Source Inspection" $ do
               playlistTrack = _nfFormatTableName ["PlaylistTrack"]
               track = _nfFormatTableName ["Track"]
           shouldReturnYamlF
+            testEnvironment
             sortYamlArray
-            (options testEnvironment)
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -148,8 +148,8 @@ schemaInspectionTests = describe "Schema and Source Inspection" $ do
               title = _nfFormatColumnName "Title"
               artistForeignKeys = _nfFormatForeignKeyName "Artist"
           shouldReturnYamlF
+            testEnvironment
             (pure . removeDescriptions)
-            (options testEnvironment)
             ( ( GraphqlEngine.postMetadata
                   testEnvironment
                   [yaml|
@@ -207,7 +207,7 @@ schemaInspectionTests = describe "Schema and Source Inspection" $ do
         (_, Nothing) -> pendingWith "Backend Type not found in testEnvironment"
         (Just backendCapabilities, Just backendString) -> do
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( ( GraphqlEngine.postMetadata
                   testEnvironment
                   [yaml|
@@ -243,7 +243,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
         (_, Nothing) -> pendingWith "Backend Type not found in testEnvironment"
         (Just serverString, Just backendString) -> do
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -279,47 +279,54 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
                     display_name: *backendDisplayName
                     available: true
                   |]
+          let sortSources =
+                Lens.over
+                  (key "sources" . _Array)
+                  (Vector.fromList . sortOn (Lens.^.. key "kind") . Vector.toList)
           shouldReturnYaml
-            (options testEnvironment)
-            ( GraphqlEngine.postMetadata
-                testEnvironment
-                [yaml|
-                type: list_source_kinds
-                args: {}
-              |]
+            testEnvironment
+            ( sortSources
+                <$> GraphqlEngine.postMetadata
+                  testEnvironment
+                  [yaml|
+                  type: list_source_kinds
+                  args: {}
+                |]
             )
-            [yaml|
-              sources:
-              - builtin: true
-                kind: pg
-                display_name: pg
-                available: true
-              - builtin: true
-                kind: citus
-                display_name: citus
-                available: true
-              - builtin: true
-                kind: cockroach
-                display_name: cockroach
-                available: true
-              - builtin: true
-                kind: mssql
-                display_name: mssql
-                available: true
-              - builtin: true
-                kind: bigquery
-                display_name: bigquery
-                available: true
-              - builtin: true
-                kind: mysql
-                display_name: mysql
-                available: true
-              - *dataConnectorSource
-              - builtin: false
-                display_name: "FOOBARDB"
-                kind: foobar
-                available: true
-            |]
+            ( sortSources
+                [yaml|
+                  sources:
+                  - builtin: true
+                    kind: pg
+                    display_name: pg
+                    available: true
+                  - builtin: true
+                    kind: citus
+                    display_name: citus
+                    available: true
+                  - builtin: true
+                    kind: cockroach
+                    display_name: cockroach
+                    available: true
+                  - builtin: true
+                    kind: mssql
+                    display_name: mssql
+                    available: true
+                  - builtin: true
+                    kind: bigquery
+                    display_name: bigquery
+                    available: true
+                  - builtin: true
+                    kind: mysql
+                    display_name: mysql
+                    available: true
+                  - builtin: false
+                    display_name: "FOOBARDB"
+                    kind: foobar
+                    available: true
+                  - *dataConnectorSource
+                |]
+            )
 
   describe "<kind>_add_source" $ do
     it "success" $ \(testEnvironment, Chinook.ChinookTestEnv {..}) -> do
@@ -329,7 +336,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
         Just (backendTypeString, sourceName) -> do
           let actionType = backendTypeString <> "_add_source"
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -351,7 +358,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
           let actionType = backendType <> "_track_table"
               album = _nfFormatTableName ["Album"]
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -390,7 +397,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
 
           let createObjectRelationAction = backendType <> "_create_object_relationship"
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -422,7 +429,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
               artistTable = _nfFormatTableName ["Artist"]
               artistId = _nfFormatColumnName "ArtistId"
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -452,7 +459,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
               artistTable = _nfFormatTableName ["Artist"]
               artistId = _nfFormatColumnName "ArtistId"
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -514,7 +521,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
           let actionType = backendType <> "_drop_relationship"
               artistTable = _nfFormatTableName ["Artist"]
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -541,7 +548,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
           let actionType = backendType <> "_untrack_table"
               artistTable = _nfFormatTableName ["Artist"]
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -563,7 +570,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
         Just (backendType, sourceName) -> do
           let actionType = backendType <> "_drop_source"
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|
@@ -583,7 +590,7 @@ schemaCrudTests = describe "A series of actions to setup and teardown a source w
         Nothing -> pendingWith "Backend Type not found in testEnvironment"
         Just backendString -> do
           shouldReturnYaml
-            (options testEnvironment)
+            testEnvironment
             ( GraphqlEngine.postMetadata
                 testEnvironment
                 [yaml|

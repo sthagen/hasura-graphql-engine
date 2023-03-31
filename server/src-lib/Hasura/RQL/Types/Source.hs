@@ -14,6 +14,7 @@ module Hasura.RQL.Types.Source
     unsafeSourceTables,
     siConfiguration,
     siLogicalModels,
+    siCustomReturnTypes,
     siFunctions,
     siName,
     siQueryTagsConfig,
@@ -47,15 +48,16 @@ import Data.Environment
 import Data.HashMap.Strict qualified as Map
 import Database.PG.Query qualified as PG
 import Hasura.Base.Error
+import Hasura.CustomReturnType.Cache (CustomReturnTypeCache)
 import Hasura.Logging qualified as L
 import Hasura.LogicalModel.Cache (LogicalModelCache)
 import Hasura.Prelude
+import Hasura.QueryTags.Types
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.HealthCheck
 import Hasura.RQL.Types.Instances ()
-import Hasura.RQL.Types.QueryTags
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
 import Hasura.SQL.AnyBackend qualified as AB
@@ -72,6 +74,7 @@ data SourceInfo b = SourceInfo
     _siTables :: TableCache b,
     _siFunctions :: FunctionCache b,
     _siLogicalModels :: LogicalModelCache b,
+    _siCustomReturnTypes :: CustomReturnTypeCache b,
     _siConfiguration :: ~(SourceConfig b),
     _siQueryTagsConfig :: Maybe QueryTagsConfig,
     _siCustomization :: ResolvedSourceCustomization
@@ -116,7 +119,7 @@ unsafeSourceInfo = AB.unpackAnyBackend
 unsafeSourceName :: BackendSourceInfo -> SourceName
 unsafeSourceName bsi = AB.dispatchAnyBackend @Backend bsi go
   where
-    go (SourceInfo name _ _ _ _ _ _) = name
+    go (SourceInfo name _ _ _ _ _ _ _) = name
 
 unsafeSourceTables :: forall b. HasTag b => BackendSourceInfo -> Maybe (TableCache b)
 unsafeSourceTables = fmap _siTables . unsafeSourceInfo @b
@@ -183,6 +186,10 @@ instance (MonadResolveSource m) => MonadResolveSource (ExceptT e m) where
   getMSSQLSourceResolver = lift getMSSQLSourceResolver
 
 instance (MonadResolveSource m) => MonadResolveSource (ReaderT r m) where
+  getPGSourceResolver = lift getPGSourceResolver
+  getMSSQLSourceResolver = lift getMSSQLSourceResolver
+
+instance (MonadResolveSource m) => MonadResolveSource (StateT s m) where
   getPGSourceResolver = lift getPGSourceResolver
   getMSSQLSourceResolver = lift getMSSQLSourceResolver
 

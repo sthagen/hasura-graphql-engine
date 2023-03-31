@@ -9,10 +9,10 @@ import Harness.Backend.Postgres qualified as Postgres
 import Harness.GraphqlEngine (postGraphql)
 import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml
+import Harness.Schema (Table (..), table)
+import Harness.Schema qualified as Schema
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (Table (..), table)
-import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options))
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, it)
@@ -85,7 +85,7 @@ tests = do
                 }
               |]
 
-    shouldReturnYaml (options testEnvironment) actual expected
+    shouldReturnYaml testEnvironment actual expected
 
   it "Query is not a, empty, comma, or quote" \testEnvironment -> do
     let expected :: Value
@@ -116,4 +116,4 @@ tests = do
                 }
               |]
 
-    shouldReturnYaml (options testEnvironment) actual expected
+    shouldReturnYaml testEnvironment actual expected

@@ -9,10 +9,10 @@ import Harness.Constants qualified as Constants
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Permissions qualified as Permissions
 import Harness.Quoter.Yaml (yaml)
+import Harness.Schema hiding (runSQL)
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema hiding (runSQL)
 import Harness.Test.SetupAction (setupPermissionsAction)
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options))
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, it)
@@ -95,7 +95,7 @@ tests = do
             result_type: CommandOk
           |]
 
-    shouldReturnYaml (options testEnvironment) actual expected
+    shouldReturnYaml testEnvironment actual expected
 
   it "Drop column which is referred in update permission" \testEnvironment -> do
     let runSQL = "alter table " <> Constants.postgresDb <> "." <> authorTableName <> " drop column age;"
@@ -119,4 +119,4 @@ tests = do
             path: "$"
           |]
 
-    shouldReturnYaml (options testEnvironment) actual expected
+    shouldReturnYaml testEnvironment actual expected

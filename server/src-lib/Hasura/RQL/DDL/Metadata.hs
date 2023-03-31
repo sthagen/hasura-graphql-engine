@@ -28,16 +28,18 @@ import Data.ByteString.Lazy qualified as BL
 import Data.CaseInsensitive qualified as CI
 import Data.Environment qualified as Env
 import Data.Has (Has, getter)
-import Data.HashMap.Strict qualified as Map
+import Data.HashMap.Strict qualified as HM
 import Data.HashMap.Strict.InsOrd.Extended qualified as OMap
 import Data.HashSet qualified as HS
 import Data.List qualified as L
 import Data.List.Extended qualified as L
+import Data.Map.Strict qualified as Map
 import Data.SerializableBlob qualified as SB
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.Extended (dquote, dquoteList, (<<>))
 import Hasura.Base.Error
+import Hasura.CustomReturnType.API
 import Hasura.EncJSON
 import Hasura.Logging qualified as HL
 import Hasura.LogicalModel.API
@@ -101,7 +103,7 @@ postDropSourceHookHelper oldSchemaCache sourceName sourceMetadataBackend = do
   logger :: (HL.Logger HL.Hasura) <- asks getter
 
   AB.dispatchAnyBackend @BackendMetadata sourceMetadataBackend \(_ :: SourceMetadata b) -> do
-    let sourceInfoMaybe = unsafeSourceInfo @b =<< Map.lookup sourceName (scSources oldSchemaCache)
+    let sourceInfoMaybe = unsafeSourceInfo @b =<< HM.lookup sourceName (scSources oldSchemaCache)
     case sourceInfoMaybe of
       Nothing -> do
         let message =
@@ -151,6 +153,7 @@ runClearMetadata _ = do
                         @b
                         defaultSource
                         (_smKind @b s)
+                        mempty
                         mempty
                         mempty
                         mempty
@@ -404,23 +407,23 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
             case _rmv2Metadata of
               RMWithoutSources m -> _mnsCronTriggers m
               RMWithSources m -> _metaCronTriggers m
-          -- this function is intended to use with `Map.differenceWith`, it's used when two
+          -- this function is intended to use with `HM.differenceWith`, it's used when two
           -- equal keys are encountered, then the values are compared to calculate the diff.
           -- see https://hackage.haskell.org/package/unordered-containers-0.2.14.0/docs/Data-HashMap-Internal.html#v:differenceWith
           leftIfDifferent l r
             | l == r = Nothing
             | otherwise = Just l
           cronTriggersToBeAdded =
-            Map.differenceWith
+            HM.differenceWith
               leftIfDifferent
               (OMap.toHashMap allNewCronTriggers)
               (OMap.toHashMap oldCronTriggersIncludedInMetadata)
           cronTriggersToBeDropped =
-            Map.differenceWith
+            HM.differenceWith
               leftIfDifferent
               (OMap.toHashMap oldCronTriggersIncludedInMetadata)
               (OMap.toHashMap allNewCronTriggers)
-      liftEitherM $ dropFutureCronEvents $ MetadataCronTriggers $ Map.keys cronTriggersToBeDropped
+      liftEitherM $ dropFutureCronEvents $ MetadataCronTriggers $ HM.keys cronTriggersToBeDropped
       cronTriggers <- do
         -- traverse over the new cron triggers and check if any of them
         -- already exists as a cron trigger with "included_in_metadata: false"
@@ -575,7 +578,7 @@ runReloadMetadata (ReloadMetadata reloadRemoteSchemas reloadSources reloadRecrea
   let allSources = HS.fromList $ OMap.keys $ _metaSources metadata
       allRemoteSchemas = HS.fromList $ OMap.keys $ _metaRemoteSchemas metadata
       allDataConnectors =
-        maybe mempty (HS.fromList . OMap.keys . unBackendConfigWrapper) $
+        maybe mempty (HS.fromList . Map.keys . unBackendConfigWrapper) $
           BackendMap.lookup @'DataConnector $
             _metaBackendConfigs metadata
       checkRemoteSchema name =
@@ -687,7 +690,7 @@ purgeMetadataObj = \case
   MODataConnectorAgent agentName ->
     MetadataModifier $
       metaBackendConfigs
-        %~ BackendMap.modify @'DataConnector (BackendConfigWrapper . OMap.delete agentName . unBackendConfigWrapper)
+        %~ BackendMap.modify @'DataConnector (BackendConfigWrapper . Map.delete agentName . unBackendConfigWrapper)
   MOOpenTelemetry subobject ->
     case subobject of
       OtelSubobjectAll ->
@@ -702,6 +705,7 @@ purgeMetadataObj = \case
       SMOTable qt -> dropTableInMetadata @b source qt
       SMOFunction qf -> dropFunctionInMetadata @b source qf
       SMOFunctionPermission qf rn -> dropFunctionPermissionInMetadata @b source qf rn
+      SMOCustomReturnType crt -> dropCustomReturnTypeInMetadata @b source crt
       SMOLogicalModel lm -> dropLogicalModelInMetadata @b source lm
       SMOLogicalModelObj logicalModelName logicalModelMetadataObjId ->
         MetadataModifier $

@@ -10,8 +10,8 @@ import Harness.Backend.BigQuery qualified as BigQuery
 import Harness.GraphqlEngine (postGraphql)
 import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Yaml (interpolateYaml)
+import Harness.Schema qualified as Schema
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (..))
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
@@ -102,7 +102,7 @@ tests = do
                 }
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Fetch geospatial data filtered on _st_equals" \testEnvironment -> do
       let schemaName = Schema.getSchemaName testEnvironment
@@ -133,7 +133,7 @@ tests = do
                 }
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Fetch geospatial data filtered on _st_contains" \testEnvironment -> do
       let schemaName = Schema.getSchemaName testEnvironment
@@ -164,7 +164,7 @@ tests = do
                 }
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Fetch geospatial data filtered on _st_intersects" \testEnvironment -> do
       let schemaName = Schema.getSchemaName testEnvironment
@@ -194,7 +194,7 @@ tests = do
                 }
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Fetch geospatial data filtered on _st_within" \testEnvironment -> do
       let schemaName = Schema.getSchemaName testEnvironment
@@ -224,7 +224,7 @@ tests = do
                 }
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Fetch geospatial data filtered on _st_d_within" \testEnvironment -> do
       let schemaName = Schema.getSchemaName testEnvironment
@@ -254,7 +254,7 @@ tests = do
                 }
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Fetch geospatial data filtered on _st_touches" \testEnvironment -> do
       let schemaName = Schema.getSchemaName testEnvironment
@@ -284,4 +284,4 @@ tests = do
                 }
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected

@@ -9,15 +9,16 @@ import Data.Time.Calendar.OrdinalDate
 import Data.Time.Clock
 import Database.PG.Query qualified as PG
 import Harness.Backend.Citus qualified as Citus
+import Harness.Backend.Cockroach qualified as Cockroach
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml (yaml)
+import Harness.Schema (Table (..), table)
+import Harness.Schema qualified as Schema
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (Table (..), table)
-import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options), getBackendTypeConfig)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment, getBackendTypeConfig)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
@@ -35,6 +36,11 @@ spec =
           [ (Fixture.fixture $ Fixture.Backend Postgres.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
                   [ Postgres.setupTablesAction schema testEnvironment
+                  ]
+              },
+            (Fixture.fixture $ Fixture.Backend Cockroach.backendTypeMetadata)
+              { Fixture.setupTeardown = \(testEnvironment, _) ->
+                  [ Cockroach.setupTablesAction schema testEnvironment
                   ]
               },
             (Fixture.fixture $ Fixture.Backend Citus.backendTypeMetadata)
@@ -127,7 +133,7 @@ tests = do
                       excerpt: "I like to eat dog food I am a dogs..."
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Uses two queries with the same argument names and ensure they don't mess with one another" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -181,7 +187,7 @@ tests = do
                     - excerpt: "I like to eat..."
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Uses a one parameter query and uses it multiple times" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -227,7 +233,7 @@ tests = do
                     - excerpt: "I like to eat..."
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
 
     it "Uses a one parameter query, passing it a GraphQL variable" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
@@ -274,4 +280,48 @@ tests = do
                     - excerpt: "I like to eat dog food I am a dogs..."
               |]
 
-      shouldReturnYaml (options testEnvironment) actual expected
+      shouldReturnYaml testEnvironment actual expected
+
+    it "Runs a simple query using distinct_on and order_by" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          source = BackendType.backendSourceName backendTypeMetadata
+
+          queryWithDuplicates :: Text
+          queryWithDuplicates = "SELECT * FROM (VALUES ('hello', 'world'), ('hello', 'friend')) as t(\"one\", \"two\")"
+
+          helloWorldLogicalModelWithDuplicates :: Schema.LogicalModel
+          helloWorldLogicalModelWithDuplicates =
+            (Schema.logicalModel "hello_world_function" queryWithDuplicates)
+              { Schema.logicalModelColumns =
+                  [ Schema.logicalModelColumn "one" Schema.TStr,
+                    Schema.logicalModelColumn "two" Schema.TStr
+                  ]
+              }
+
+      Schema.trackLogicalModel source helloWorldLogicalModelWithDuplicates testEnvironment
+
+      let expected =
+            [yaml|
+                    data:
+                      hello_world_function:
+                        - one: "hello"
+                          two: "world"
+                  |]
+
+          actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+                      query {
+                        hello_world_function (
+                          distinct_on: [one]
+                          order_by: [{one:asc}]
+                        ){
+                          one
+                          two
+                        }
+                      }
+                   |]
+
+      shouldReturnYaml testEnvironment actual expected

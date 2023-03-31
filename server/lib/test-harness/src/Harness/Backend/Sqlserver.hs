@@ -35,9 +35,9 @@ import Harness.Exceptions
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Logging
 import Harness.Quoter.Yaml (yaml)
+import Harness.Schema (BackendScalarType (..), BackendScalarValue (..), ScalarValue (..))
+import Harness.Schema qualified as Schema
 import Harness.Test.BackendType (BackendType (SQLServer), BackendTypeConfig (..))
-import Harness.Test.Schema (BackendScalarType (..), BackendScalarValue (..), ScalarValue (..))
-import Harness.Test.Schema qualified as Schema
 import Harness.Test.SetupAction (SetupAction (..))
 import Harness.TestEnvironment (TestEnvironment (..))
 import Hasura.Prelude
@@ -156,9 +156,9 @@ createTable testEnvironment Schema.Table {tableName, tableColumns, tablePrimaryK
 
 scalarType :: HasCallStack => Schema.ScalarType -> Text
 scalarType = \case
-  Schema.TInt -> "integer"
+  Schema.TInt -> "int"
   Schema.TStr -> "nvarchar(127)"
-  Schema.TUTCTime -> "timestamp"
+  Schema.TUTCTime -> "time"
   Schema.TBool -> "bit"
   Schema.TGeography -> "geography"
   Schema.TCustomType txt -> Schema.getBackendScalarType txt bstMssql

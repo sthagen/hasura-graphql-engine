@@ -20,6 +20,7 @@ import Data.Text.Extended qualified as T
 import GHC.Generics.Extended (constrName)
 import Hasura.App.State
 import Hasura.Base.Error
+import Hasura.CustomReturnType.API qualified as CustomReturnType
 import Hasura.EncJSON
 import Hasura.Logging qualified as L
 import Hasura.LogicalModel.API qualified as LogicalModels
@@ -138,6 +139,10 @@ data RQLMetadataV1
   | RMUntrackLogicalModel !(AnyBackend LogicalModels.UntrackLogicalModel)
   | RMCreateSelectLogicalModelPermission !(AnyBackend (LogicalModels.CreateLogicalModelPermission SelPerm))
   | RMDropSelectLogicalModelPermission !(AnyBackend LogicalModels.DropLogicalModelPermission)
+  | -- Custom types
+    RMGetCustomReturnType !(AnyBackend CustomReturnType.GetCustomReturnType)
+  | RMTrackCustomReturnType !(AnyBackend CustomReturnType.TrackCustomReturnType)
+  | RMUntrackCustomReturnType !(AnyBackend CustomReturnType.UntrackCustomReturnType)
   | -- Tables event triggers
     RMCreateEventTrigger !(AnyBackend (Unvalidated1 CreateEventTriggerQuery))
   | RMDeleteEventTrigger !(AnyBackend DeleteEventTriggerQuery)
@@ -388,17 +393,16 @@ runMetadataQuery ::
     MonadEventLogCleanup m,
     ProvidesHasuraServices m,
     MonadGetApiTimeLimit m,
-    UserInfoM m,
-    HasServerConfigCtx m
+    UserInfoM m
   ) =>
   AppContext ->
   RebuildableSchemaCache ->
   RQLMetadata ->
   m (EncJSON, RebuildableSchemaCache)
 runMetadataQuery appContext schemaCache RQLMetadata {..} = do
-  AppEnv {..} <- askAppEnv
+  appEnv@AppEnv {..} <- askAppEnv
   let logger = _lsLogger appEnvLoggers
-  (metadata, currentResourceVersion) <- Tracing.newSpan "fetchMetadata" $ liftEitherM fetchMetadata
+  MetadataWithResourceVersion metadata currentResourceVersion <- Tracing.newSpan "fetchMetadata" $ liftEitherM fetchMetadata
   let exportsMetadata = \case
         RMV1 (RMExportMetadata _) -> True
         RMV2 (RMV2ExportMetadata _) -> True
@@ -422,12 +426,13 @@ runMetadataQuery appContext schemaCache RQLMetadata {..} = do
         if (exportsMetadata _rqlMetadata || queryModifiesMetadata _rqlMetadata)
           then emptyMetadataDefaults
           else acMetadataDefaults appContext
+      serverConfigCtx = buildServerConfigCtx appEnv appContext
   ((r, modMetadata), modSchemaCache, cacheInvalidations) <-
     runMetadataQueryM (acEnvironment appContext) currentResourceVersion _rqlMetadata
       -- TODO: remove this straight runReaderT that provides no actual new info
       & flip runReaderT logger
       & runMetadataT metadata metadataDefaults
-      & runCacheRWT schemaCache
+      & runCacheRWT serverConfigCtx schemaCache
   -- set modified metadata in storage
   if queryModifiesMetadata _rqlMetadata
     then case (appEnvEnableMaintenanceMode, appEnvEnableReadOnlyMode) of
@@ -458,7 +463,7 @@ runMetadataQuery appContext schemaCache RQLMetadata {..} = do
         (_, modSchemaCache', _) <-
           Tracing.newSpan "setMetadataResourceVersionInSchemaCache" $
             setMetadataResourceVersionInSchemaCache newResourceVersion
-              & runCacheRWT modSchemaCache
+              & runCacheRWT serverConfigCtx modSchemaCache
 
         pure (r, modSchemaCache')
       (MaintenanceModeEnabled (), ReadOnlyModeDisabled) ->
@@ -496,6 +501,9 @@ queryModifiesMetadata = \case
       RMGetLogicalModel _ -> False
       RMTrackLogicalModel _ -> True
       RMUntrackLogicalModel _ -> True
+      RMGetCustomReturnType _ -> False
+      RMTrackCustomReturnType _ -> True
+      RMUntrackCustomReturnType _ -> True
       RMCreateSelectLogicalModelPermission _ -> True
       RMDropSelectLogicalModelPermission _ -> True
       RMBulk qs -> any queryModifiesMetadata qs
@@ -687,6 +695,9 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMUntrackLogicalModel q -> dispatchMetadata LogicalModels.runUntrackLogicalModel q
   RMCreateSelectLogicalModelPermission q -> dispatchMetadata LogicalModels.runCreateSelectLogicalModelPermission q
   RMDropSelectLogicalModelPermission q -> dispatchMetadata LogicalModels.runDropSelectLogicalModelPermission q
+  RMGetCustomReturnType q -> dispatchMetadata CustomReturnType.runGetCustomReturnType q
+  RMTrackCustomReturnType q -> dispatchMetadata CustomReturnType.runTrackCustomReturnType q
+  RMUntrackCustomReturnType q -> dispatchMetadata CustomReturnType.runUntrackCustomReturnType q
   RMCreateEventTrigger q ->
     dispatchMetadataAndEventTrigger
       ( validateTransforms

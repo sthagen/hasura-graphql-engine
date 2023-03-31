@@ -11,9 +11,9 @@ import Harness.Backend.Postgres qualified as Postgres
 import Harness.Backend.Sqlserver qualified as Sqlserver
 import Harness.GraphqlEngine
 import Harness.Quoter.Yaml
+import Harness.Schema qualified as Schema
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (..), getBackendTypeConfig)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
@@ -74,7 +74,7 @@ tests query =
       let actual = query testEnv "concurrent_bulk"
       expected <- query testEnv "bulk"
       show expected `shouldContain` "TuplesOk"
-      shouldReturnYaml (options testEnv) actual expected
+      shouldReturnYaml testEnv actual expected
 
     it "fails when a query is not read-only" \testEnv -> do
       let expected =
@@ -83,7 +83,7 @@ tests query =
               error: Only read-only queries are allowed in a concurrent_bulk
               path: $
             |]
-      shouldReturnYaml (options testEnv) (runSqlDrop testEnv) expected
+      shouldReturnYaml testEnv (runSqlDrop testEnv) expected
 
 postgresRunSqlQuery :: TestEnvironment -> String -> IO Value
 postgresRunSqlQuery testEnvironment bulkType = do

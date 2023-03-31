@@ -16,10 +16,10 @@ import Harness.Permissions (Permission (SelectPermission), SelectPermissionDetai
 import Harness.Permissions qualified as Permission
 import Harness.Quoter.Graphql (graphql)
 import Harness.Quoter.Yaml (interpolateYaml, yaml)
+import Harness.Schema (SchemaName (..), Table (..), table)
+import Harness.Schema qualified as Schema
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema (SchemaName (..), Table (..), table)
-import Harness.Test.Schema qualified as Schema
 import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (..), getBackendTypeConfig)
 import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
@@ -276,7 +276,7 @@ tests = do
     let schemaName = Schema.getSchemaName testEnv
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       ( GraphqlEngine.postGraphql
           testEnv
           [graphql|
@@ -311,7 +311,7 @@ tests = do
     let schemaName = Schema.getSchemaName testEnv
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       ( GraphqlEngine.postGraphqlWithHeaders
           testEnv
           [("X-Hasura-Role", "user_1")]
@@ -347,7 +347,7 @@ tests = do
     let schemaName = Schema.getSchemaName testEnv
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       ( GraphqlEngine.postGraphqlWithHeaders
           testEnv
           [("X-Hasura-Role", "user_2")]
@@ -378,7 +378,7 @@ tests = do
     let schemaName = Schema.getSchemaName testEnv
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       ( GraphqlEngine.postGraphqlWithHeaders
           testEnv
           [("X-Hasura-Role", "user_2")]
@@ -410,7 +410,7 @@ tests = do
     let schemaName = Schema.getSchemaName testEnv
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       ( GraphqlEngine.postGraphql
           testEnv
           [graphql|
@@ -440,7 +440,7 @@ tests = do
     let schemaName = Schema.getSchemaName testEnv
 
     shouldReturnYaml
-      (options testEnv)
+      testEnv
       ( GraphqlEngine.postGraphql
           testEnv
           [graphql|

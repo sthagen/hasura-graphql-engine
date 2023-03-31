@@ -2,13 +2,14 @@ module Test.API.Metadata.LogicalModels.ValidationSpec where
 
 import Data.List.NonEmpty qualified as NE
 import Harness.Backend.Citus qualified as Citus
+import Harness.Backend.Cockroach qualified as Cockroach
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
+import Harness.Schema qualified as Schema
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
-import Harness.Test.Schema qualified as Schema
-import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment (options), getBackendTypeConfig)
+import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment, getBackendTypeConfig)
 import Harness.Yaml (shouldAtLeastBe, shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
@@ -29,6 +30,11 @@ spec = do
             (Fixture.fixture $ Fixture.Backend Citus.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnv, _) ->
                   [ Citus.setupTablesAction schema testEnv
+                  ]
+              },
+            (Fixture.fixture $ Fixture.Backend Cockroach.backendTypeMetadata)
+              { Fixture.setupTeardown = \(testEnv, _) ->
+                  [ Cockroach.setupTablesAction schema testEnv
                   ]
               }
           ]
@@ -66,7 +72,7 @@ tests = do
             expectedError = "Logical model \"some_logical_model\" not found in source \"" <> sourceName <> "\"."
 
         shouldReturnYaml
-          (options testEnvironment)
+          testEnvironment
           ( GraphqlEngine.postMetadataWithStatus
               400
               testEnvironment
@@ -181,7 +187,7 @@ tests = do
             expectedError = "Encountered conflicting definitions in the selection set for 'subscription_root' for field 'hasura_stuff' defined in [table hasura.stuff in source " <> sourceName <> ", logical_model hasura_stuff in source " <> sourceName <> "]. Fields must not be defined more than once across all sources."
 
         shouldReturnYaml
-          (options testEnv)
+          testEnv
           ( GraphqlEngine.postMetadataWithStatus
               500
               testEnv
@@ -216,7 +222,7 @@ tests = do
                 }
 
         shouldReturnYaml
-          (options testEnv)
+          testEnv
           ( GraphqlEngine.postMetadata
               testEnv
               (Schema.trackLogicalModelCommand source backendTypeMetadata conflictingLogicalModel)
@@ -226,7 +232,7 @@ tests = do
           |]
 
         shouldReturnYaml
-          (options testEnv)
+          testEnv
           ( GraphqlEngine.postMetadataWithStatus
               400
               testEnv
@@ -323,7 +329,7 @@ tests = do
                 }
 
         shouldReturnYaml
-          (options testEnvironment)
+          testEnvironment
           ( GraphqlEngine.postMetadataWithStatus
               400
               testEnvironment

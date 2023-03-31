@@ -25,9 +25,9 @@ import Hasura.Backends.MySQL.SQL qualified as MySQL
 import Hasura.Backends.Postgres.DDL.RunSQL qualified as Postgres
 import Hasura.Base.Error
 import Hasura.EncJSON
-import Hasura.GraphQL.Execute.Backend
 import Hasura.Metadata.Class
 import Hasura.Prelude
+import Hasura.QueryTags
 import Hasura.RQL.DDL.Schema
 import Hasura.RQL.DML.Count
 import Hasura.RQL.DML.Delete
@@ -42,6 +42,7 @@ import Hasura.RQL.DML.Types
   )
 import Hasura.RQL.DML.Update
 import Hasura.RQL.Types.Metadata
+import Hasura.RQL.Types.SchemaCache (MetadataWithResourceVersion (MetadataWithResourceVersion))
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.Source
 import Hasura.SQL.Backend
@@ -111,24 +112,24 @@ runQuery ::
     MonadResolveSource m,
     MonadQueryTags m,
     ProvidesHasuraServices m,
-    UserInfoM m,
-    HasServerConfigCtx m
+    UserInfoM m
   ) =>
   AppContext ->
   RebuildableSchemaCache ->
   RQLQuery ->
   m (EncJSON, RebuildableSchemaCache)
 runQuery appContext schemaCache rqlQuery = do
-  AppEnv {..} <- askAppEnv
+  appEnv@AppEnv {..} <- askAppEnv
   when ((appEnvEnableReadOnlyMode == ReadOnlyModeEnabled) && queryModifiesUserDB rqlQuery) $
     throw400 NotSupported "Cannot run write queries when read-only mode is enabled"
 
-  (metadata, currentResourceVersion) <- Tracing.newSpan "fetchMetadata" $ liftEitherM fetchMetadata
+  let serverConfigCtx = buildServerConfigCtx appEnv appContext
+  MetadataWithResourceVersion metadata currentResourceVersion <- Tracing.newSpan "fetchMetadata" $ liftEitherM fetchMetadata
   ((result, updatedMetadata), updatedCache, invalidations) <-
     runQueryM (acEnvironment appContext) rqlQuery
       -- We can use defaults here unconditionally, since there is no MD export function in V2Query
       & runMetadataT metadata (acMetadataDefaults appContext)
-      & runCacheRWT schemaCache
+      & runCacheRWT serverConfigCtx schemaCache
   when (queryModifiesSchema rqlQuery) $ do
     case appEnvEnableMaintenanceMode of
       MaintenanceModeDisabled -> do
