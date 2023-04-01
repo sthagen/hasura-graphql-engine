@@ -9,34 +9,42 @@ module Hasura.CustomReturnType.API
     runTrackCustomReturnType,
     runUntrackCustomReturnType,
     dropCustomReturnTypeInMetadata,
+    CreateCustomReturnTypePermission (..),
+    DropCustomReturnTypePermission (..),
+    runCreateSelectCustomReturnTypePermission,
+    runDropSelectCustomReturnTypePermission,
+    getCustomTypes,
     module Hasura.CustomReturnType.Types,
   )
 where
 
 import Autodocodec (HasCodec)
 import Autodocodec qualified as AC
-import Control.Lens (Traversal', has, preview, (^?))
+import Control.Lens (Traversal', has, preview, traversed, (^..), (^?))
 import Data.Aeson
 import Data.HashMap.Strict.InsOrd qualified as InsOrd
 import Data.HashMap.Strict.InsOrd.Extended qualified as OMap
 import Data.Text.Extended (toTxt, (<<>))
 import Hasura.Base.Error
-import Hasura.CustomReturnType.Metadata (CustomReturnTypeMetadata (..))
+import Hasura.CustomReturnType.Metadata (CustomReturnTypeMetadata (..), crtmSelectPermissions)
 import Hasura.CustomReturnType.Types (CustomReturnTypeName)
 import Hasura.EncJSON
+import Hasura.LogicalModel.Metadata (LogicalModelMetadata (..))
 import Hasura.LogicalModel.Types (NullableScalarType, nullableScalarTypeMapCodec)
 import Hasura.Metadata.DTO.Utils (codecNamePrefix)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (Backend (..))
-import Hasura.RQL.Types.Common (SourceName, sourceNameToText, successMsg)
+import Hasura.RQL.Types.Common (SourceName, defaultSource, sourceNameToText, successMsg)
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Metadata.Object
+import Hasura.RQL.Types.Permission (PermDef (_pdRole), SelPerm)
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.Backend
 import Hasura.Server.Init.FeatureFlag as FF
 import Hasura.Server.Types (HasServerConfigCtx (..), ServerConfigCtx (..))
+import Hasura.Session (RoleName)
 
 -- | Default implementation of the 'track_custom_return_type' request payload.
 data TrackCustomReturnType (b :: BackendType) = TrackCustomReturnType
@@ -54,7 +62,7 @@ instance (Backend b) => HasCodec (TrackCustomReturnType b) where
       $ TrackCustomReturnType
         <$> AC.requiredField "source" sourceDoc
           AC..= tctSource
-        <*> AC.requiredField "name" rootFieldDoc
+        <*> AC.requiredField "name" nameDoc
           AC..= tctName
         <*> AC.optionalField "description" descriptionDoc
           AC..= tctDescription
@@ -62,7 +70,7 @@ instance (Backend b) => HasCodec (TrackCustomReturnType b) where
           AC..= tctFields
     where
       sourceDoc = "The source in which this custom return type should be tracked"
-      rootFieldDoc = "Root field name for the custom return type"
+      nameDoc = "Root field name for the custom return type"
       fieldsDoc = "Return type of the expression"
       descriptionDoc = "A description of the query which appears in the graphql schema"
 
@@ -83,15 +91,15 @@ customTypeTrackToMetadata ::
   CustomReturnTypeMetadata b
 customTypeTrackToMetadata TrackCustomReturnType {..} =
   CustomReturnTypeMetadata
-    { _ctmName = tctName,
-      _ctmFields = tctFields,
-      _ctmSelectPermissions = mempty,
-      _ctmDescription = tctDescription
+    { _crtmName = tctName,
+      _crtmFields = tctFields,
+      _crtmSelectPermissions = mempty,
+      _crtmDescription = tctDescription
     }
 
 -- | API payload for the 'get_custom_return_type' endpoint.
 data GetCustomReturnType (b :: BackendType) = GetCustomReturnType
-  { glmSource :: SourceName
+  { gcrtSource :: SourceName
   }
 
 deriving instance Backend b => Show (GetCustomReturnType b)
@@ -100,13 +108,13 @@ deriving instance Backend b => Eq (GetCustomReturnType b)
 
 instance Backend b => FromJSON (GetCustomReturnType b) where
   parseJSON = withObject "GetCustomReturnType" $ \o -> do
-    glmSource <- o .: "source"
+    gcrtSource <- o .: "source"
     pure GetCustomReturnType {..}
 
 instance Backend b => ToJSON (GetCustomReturnType b) where
   toJSON GetCustomReturnType {..} =
     object
-      [ "source" .= glmSource
+      [ "source" .= gcrtSource
       ]
 
 -- | Handler for the 'get_custom_return_type' endpoint.
@@ -126,9 +134,13 @@ runGetCustomReturnType q = do
   metadata <- getMetadata
 
   let customTypes :: Maybe (CustomReturnTypes b)
-      customTypes = metadata ^? metaSources . ix (glmSource q) . toSourceMetadata . smCustomReturnTypes @b
+      customTypes = metadata ^? getCustomTypes (gcrtSource q)
 
   pure (encJFromJValue (OMap.elems <$> customTypes))
+
+getCustomTypes :: forall b. (Backend b) => SourceName -> Traversal' Metadata (CustomReturnTypes b)
+getCustomTypes sourceName =
+  metaSources . ix sourceName . toSourceMetadata . smCustomReturnTypes @b
 
 -- | Handler for the 'track_custom_return_type' endpoint. The type 'TrackCustomReturnType b'
 -- (appearing here in wrapped as 'BackendTrackCustomReturnType b' for 'AnyBackend'
@@ -154,7 +166,7 @@ runTrackCustomReturnType trackCustomReturnTypeRequest = do
 
   let (metadata :: CustomReturnTypeMetadata b) = customTypeTrackToMetadata trackCustomReturnTypeRequest
 
-  let fieldName = _ctmName metadata
+  let fieldName = _crtmName metadata
       metadataObj =
         MOSourceObjId source $
           AB.mkAnyBackend $
@@ -162,7 +174,7 @@ runTrackCustomReturnType trackCustomReturnTypeRequest = do
       existingCustomReturnTypes = OMap.keys (_smCustomReturnTypes sourceMetadata)
 
   when (fieldName `elem` existingCustomReturnTypes) do
-    throw400 AlreadyTracked $ "Logical model '" <> toTxt fieldName <> "' is already tracked."
+    throw400 AlreadyTracked $ "Custom return type '" <> toTxt fieldName <> "' is already tracked."
 
   buildSchemaCacheFor metadataObj $
     MetadataModifier $
@@ -216,6 +228,20 @@ runUntrackCustomReturnType q = do
           AB.mkAnyBackend $
             SMOCustomReturnType @b fieldName
 
+  metadata <- getMetadata
+
+  let logicalModels :: [LogicalModelMetadata b]
+      logicalModels = metadata ^.. metaSources . ix source . toSourceMetadata @b . smLogicalModels . traversed
+
+  case find ((== fieldName) . _lmmReturns) logicalModels of
+    Just LogicalModelMetadata {_lmmRootFieldName} ->
+      throw400 ConstraintViolation $
+        "Custom type "
+          <> fieldName
+            <<> " still being used by logical model "
+          <> _lmmRootFieldName <<> "."
+    Nothing -> pure ()
+
   buildSchemaCacheFor metadataObj $
     dropCustomReturnTypeInMetadata @b source fieldName
 
@@ -224,11 +250,94 @@ runUntrackCustomReturnType q = do
     source = utctSource q
     fieldName = utctName q
 
+-- | A permission for logical models is tied to a specific root field name and
+-- source. This wrapper adds both of those things to the JSON object that
+-- describes the permission.
+data CreateCustomReturnTypePermission a (b :: BackendType) = CreateCustomReturnTypePermission
+  { ccrtpSource :: SourceName,
+    ccrtpName :: CustomReturnTypeName,
+    ccrtpInfo :: PermDef b a
+  }
+  deriving stock (Generic)
+
+instance
+  FromJSON (PermDef b a) =>
+  FromJSON (CreateCustomReturnTypePermission a b)
+  where
+  parseJSON = withObject "CreateCustomReturnTypePermission" \obj -> do
+    ccrtpSource <- obj .:? "source" .!= defaultSource
+    ccrtpName <- obj .: "name"
+    ccrtpInfo <- parseJSON (Object obj)
+
+    pure CreateCustomReturnTypePermission {..}
+
+runCreateSelectCustomReturnTypePermission ::
+  forall b m.
+  (Backend b, CacheRWM m, MetadataM m, MonadError QErr m, MonadIO m, HasServerConfigCtx m) =>
+  CreateCustomReturnTypePermission SelPerm b ->
+  m EncJSON
+runCreateSelectCustomReturnTypePermission CreateCustomReturnTypePermission {..} = do
+  throwIfFeatureDisabled
+  assertCustomReturnTypeExists @b ccrtpSource ccrtpName
+
+  let metadataObj :: MetadataObjId
+      metadataObj =
+        MOSourceObjId ccrtpSource $
+          AB.mkAnyBackend $
+            SMOCustomReturnType @b ccrtpName
+
+  buildSchemaCacheFor metadataObj $
+    MetadataModifier $
+      customReturnTypeMetadataSetter @b ccrtpSource ccrtpName . crtmSelectPermissions
+        %~ OMap.insert (_pdRole ccrtpInfo) ccrtpInfo
+
+  pure successMsg
+
+-- | To drop a permission, we need to know the source and root field name of
+-- the logical model, as well as the role whose permission we want to drop.
+data DropCustomReturnTypePermission (b :: BackendType) = DropCustomReturnTypePermission
+  { dcrtpSource :: SourceName,
+    dcrtpName :: CustomReturnTypeName,
+    dcrtpRole :: RoleName
+  }
+  deriving stock (Generic)
+
+instance FromJSON (DropCustomReturnTypePermission b) where
+  parseJSON = withObject "DropCustomReturnTypePermission" \obj -> do
+    dcrtpSource <- obj .:? "source" .!= defaultSource
+    dcrtpName <- obj .: "name"
+    dcrtpRole <- obj .: "role"
+
+    pure DropCustomReturnTypePermission {..}
+
+runDropSelectCustomReturnTypePermission ::
+  forall b m.
+  (Backend b, CacheRWM m, MetadataM m, MonadError QErr m, MonadIO m, HasServerConfigCtx m) =>
+  DropCustomReturnTypePermission b ->
+  m EncJSON
+runDropSelectCustomReturnTypePermission DropCustomReturnTypePermission {..} = do
+  throwIfFeatureDisabled
+  assertCustomReturnTypeExists @b dcrtpSource dcrtpName
+
+  let metadataObj :: MetadataObjId
+      metadataObj =
+        MOSourceObjId dcrtpSource $
+          AB.mkAnyBackend $
+            SMOCustomReturnType @b dcrtpName
+
+  buildSchemaCacheFor metadataObj $
+    MetadataModifier $
+      customReturnTypeMetadataSetter @b dcrtpSource dcrtpName . crtmSelectPermissions
+        %~ OMap.delete dcrtpRole
+
+  pure successMsg
+
+-- | TODO: should this cascade and also delete associated permissions?
 dropCustomReturnTypeInMetadata :: forall b. BackendMetadata b => SourceName -> CustomReturnTypeName -> MetadataModifier
-dropCustomReturnTypeInMetadata source rootFieldName = do
+dropCustomReturnTypeInMetadata source name = do
   MetadataModifier $
     metaSources . ix source . toSourceMetadata @b . smCustomReturnTypes
-      %~ OMap.delete rootFieldName
+      %~ OMap.delete name
 
 -- | check feature flag is enabled before carrying out any actions
 throwIfFeatureDisabled :: (HasServerConfigCtx m, MonadIO m, MonadError QErr m) => m ()
@@ -243,7 +352,7 @@ throwIfFeatureDisabled = do
 -- | Check whether a custom return type with the given root field name exists for
 -- the given source.
 assertCustomReturnTypeExists :: forall b m. (Backend b, MetadataM m, MonadError QErr m) => SourceName -> CustomReturnTypeName -> m ()
-assertCustomReturnTypeExists sourceName rootFieldName = do
+assertCustomReturnTypeExists sourceName name = do
   metadata <- getMetadata
 
   let sourceMetadataTraversal :: Traversal' Metadata (SourceMetadata b)
@@ -254,7 +363,7 @@ assertCustomReturnTypeExists sourceName rootFieldName = do
       `onNothing` throw400 NotFound ("Source " <> sourceName <<> " not found.")
 
   let desiredCustomReturnType :: Traversal' (SourceMetadata b) (CustomReturnTypeMetadata b)
-      desiredCustomReturnType = smCustomReturnTypes . ix rootFieldName
+      desiredCustomReturnType = smCustomReturnTypes . ix name
 
   unless (has desiredCustomReturnType sourceMetadata) do
-    throw400 NotFound ("Logical model " <> rootFieldName <<> " not found in source " <> sourceName <<> ".")
+    throw400 NotFound ("Custom return type " <> name <<> " not found in source " <> sourceName <<> ".")
