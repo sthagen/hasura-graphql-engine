@@ -19,6 +19,7 @@ import Hasura.Backends.BigQuery.Types qualified as BigQuery
 import Hasura.Base.Error
 import Hasura.Base.Error qualified as E
 import Hasura.EncJSON
+import Hasura.Function.Cache
 import Hasura.GraphQL.Execute.Backend
 import Hasura.GraphQL.Namespace (RootFieldAlias)
 import Hasura.GraphQL.Schema.Options qualified as Options
@@ -31,7 +32,6 @@ import Hasura.RQL.IR.Select qualified as IR
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
-import Hasura.RQL.Types.Function
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.Backend
 import Hasura.Session
@@ -113,6 +113,7 @@ recordSetToEncJSON cardinality DataLoader.RecordSet {rows} =
         DataLoader.GeographyOutputValue i -> encJFromJValue i
         DataLoader.BoolOutputValue i -> encJFromJValue i
         DataLoader.IntegerOutputValue i -> encJFromJValue i
+        DataLoader.JsonOutputValue i -> encJFromJValue i
         DataLoader.ArrayOutputValue vector ->
           encJFromList (toList (fmap encJFromOutputValue vector))
         -- Really, the case below shouldn't be happening. But if it

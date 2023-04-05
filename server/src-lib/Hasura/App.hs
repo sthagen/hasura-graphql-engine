@@ -122,10 +122,12 @@ import Hasura.RQL.DDL.ApiLimit (MonadGetApiTimeLimit (..))
 import Hasura.RQL.DDL.EventTrigger (MonadEventLogCleanup (..))
 import Hasura.RQL.DDL.Schema.Cache
 import Hasura.RQL.DDL.Schema.Cache.Common
+import Hasura.RQL.DDL.Schema.Cache.Config
 import Hasura.RQL.DDL.Schema.Catalog
 import Hasura.RQL.Types.Allowlist
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.EECredentials
 import Hasura.RQL.Types.Eventing.Backend
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.Network
@@ -485,7 +487,8 @@ initialiseAppEnv env BasicConnectionInfo {..} serveOptions@ServeOptions {..} liv
           appEnvWebSocketConnectionInitTimeout = soWebSocketConnectionInitTimeout,
           appEnvGracefulShutdownTimeout = soGracefulShutdownTimeout,
           appEnvCheckFeatureFlag = CheckFeatureFlag $ checkFeatureFlag env,
-          appEnvSchemaPollInterval = soSchemaPollInterval
+          appEnvSchemaPollInterval = soSchemaPollInterval,
+          appEnvLicenseKeyCache = Nothing
         }
     )
 
@@ -500,32 +503,33 @@ initialiseAppContext ::
   AppInit ->
   m (AppStateRef Hasura)
 initialiseAppContext env serveOptions@ServeOptions {..} AppInit {..} = do
-  AppEnv {..} <- askAppEnv
+  appEnv@AppEnv {..} <- askAppEnv
+  let CheckFeatureFlag runCheckFlag = appEnvCheckFeatureFlag
+  logicalModelsEnabled <- liftIO $ runCheckFlag logicalModelInterface
   let Loggers _ logger pgLogger = appEnvLoggers
       sqlGenCtx = initSQLGenCtx soExperimentalFeatures soStringifyNum soDangerousBooleanCollapse
-      serverConfigCtx =
-        ServerConfigCtx
+      cacheStaticConfig = buildCacheStaticConfig appEnv
+      cacheDynamicConfig =
+        CacheDynamicConfig
           soInferFunctionPermissions
           soEnableRemoteSchemaPermissions
           sqlGenCtx
-          soEnableMaintenanceMode
           soExperimentalFeatures
-          soEventingMode
-          soReadOnlyMode
           soDefaultNamingConvention
           soMetadataDefaults
-          (CheckFeatureFlag $ checkFeatureFlag env)
           soApolloFederationStatus
+          logicalModelsEnabled
 
   -- Create the schema cache
   rebuildableSchemaCache <-
     buildFirstSchemaCache
       env
       logger
-      serverConfigCtx
       (mkPgSourceResolver pgLogger)
       mkMSSQLSourceResolver
       aiMetadataWithResourceVersion
+      cacheStaticConfig
+      cacheDynamicConfig
       appEnvManager
 
   -- Build the RebuildableAppContext.
@@ -589,26 +593,28 @@ buildFirstSchemaCache ::
   (MonadIO m) =>
   Env.Environment ->
   Logger Hasura ->
-  ServerConfigCtx ->
   SourceResolver ('Postgres 'Vanilla) ->
   SourceResolver ('MSSQL) ->
   MetadataWithResourceVersion ->
+  CacheStaticConfig ->
+  CacheDynamicConfig ->
   HTTP.Manager ->
   m RebuildableSchemaCache
 buildFirstSchemaCache
   env
   logger
-  serverConfigCtx
   pgSourceResolver
   mssqlSourceResolver
   metadataWithVersion
+  cacheStaticConfig
+  cacheDynamicConfig
   httpManager = do
-    let cacheBuildParams = CacheBuildParams httpManager pgSourceResolver mssqlSourceResolver
+    let cacheBuildParams = CacheBuildParams httpManager pgSourceResolver mssqlSourceResolver cacheStaticConfig
         buildReason = CatalogSync
     result <-
       runExceptT $
         runCacheBuild cacheBuildParams $
-          buildRebuildableSchemaCacheWithReason buildReason logger env metadataWithVersion serverConfigCtx
+          buildRebuildableSchemaCacheWithReason buildReason logger env metadataWithVersion cacheDynamicConfig
     result `onLeft` \err -> do
       -- TODO: we used to bundle the first schema cache build with the catalog
       -- migration, using the same error handler for both, meaning that an
@@ -664,6 +670,14 @@ runAppM c (AppM a) = ignoreTraceT $ runReaderT a c
 
 instance HasAppEnv AppM where
   askAppEnv = ask
+
+instance HasFeatureFlagChecker AppM where
+  checkFlag f = AppM do
+    CheckFeatureFlag runCheckFeatureFlag <- asks appEnvCheckFeatureFlag
+    liftIO $ runCheckFeatureFlag f
+
+instance HasCacheStaticConfig AppM where
+  askCacheStaticConfig = buildCacheStaticConfig <$> askAppEnv
 
 instance MonadTrace AppM where
   newTraceWith c p n (AppM a) = AppM $ newTraceWith c p n a
@@ -725,8 +739,9 @@ instance MonadMetadataApiAuthorization AppM where
         throw400 AccessDenied accessDeniedErrMsg
 
 instance ConsoleRenderer AppM where
-  renderConsole path authMode enableTelemetry consoleAssetsDir consoleSentryDsn =
-    return $ mkConsoleHTML path authMode enableTelemetry consoleAssetsDir consoleSentryDsn
+  type ConsoleType AppM = CEConsoleType
+  renderConsole path authMode enableTelemetry consoleAssetsDir consoleSentryDsn consoleType =
+    return $ mkConsoleHTML path authMode enableTelemetry consoleAssetsDir consoleSentryDsn consoleType
 
 instance MonadVersionAPIWithExtraData AppM where
   -- we always default to CE as the `server_type` in this codebase
@@ -804,7 +819,9 @@ instance MonadMetadataStorage AppM where
   clearActionData = runInSeparateTx . clearActionDataTx
   setProcessingActionLogsToPending = runInSeparateTx . setProcessingActionLogsToPendingTx
 
-instance MonadMetadataStorageQueryAPI AppM
+instance MonadEECredentialsStorage AppM where
+  getEEClientCredentials = runInSeparateTx getEEClientCredentialsTx
+  setEEClientCredentials a = runInSeparateTx $ setEEClientCredentialsTx a
 
 --------------------------------------------------------------------------------
 -- misc
@@ -881,6 +898,8 @@ runHGEServer ::
     UserAuthentication m,
     HttpLog m,
     HasAppEnv m,
+    HasCacheStaticConfig m,
+    HasFeatureFlagChecker m,
     ConsoleRenderer m,
     MonadVersionAPIWithExtraData m,
     MonadMetadataApiAuthorization m,
@@ -891,7 +910,7 @@ runHGEServer ::
     WS.MonadWSLog m,
     MonadExecuteQuery m,
     HasResourceLimits m,
-    MonadMetadataStorageQueryAPI m,
+    MonadMetadataStorage m,
     MonadResolveSource m,
     MonadQueryTags m,
     MonadEventLogCleanup m,
@@ -905,11 +924,12 @@ runHGEServer ::
   UTCTime ->
   -- | A hook which can be called to indicate when the server is started succesfully
   Maybe (IO ()) ->
+  ConsoleType m ->
   EKG.Store EKG.EmptyMetrics ->
   ManagedT m ()
-runHGEServer setupHook appStateRef initTime startupStatusHook ekgStore = do
+runHGEServer setupHook appStateRef initTime startupStatusHook consoleType ekgStore = do
   AppEnv {..} <- lift askAppEnv
-  waiApplication <- mkHGEServer setupHook appStateRef ekgStore
+  waiApplication <- mkHGEServer setupHook appStateRef consoleType ekgStore
 
   let logger = _lsLogger appEnvLoggers
   -- `startupStatusHook`: add `Service started successfully` message to config_status
@@ -973,6 +993,8 @@ mkHGEServer ::
     UserAuthentication m,
     HttpLog m,
     HasAppEnv m,
+    HasCacheStaticConfig m,
+    HasFeatureFlagChecker m,
     ConsoleRenderer m,
     MonadVersionAPIWithExtraData m,
     MonadMetadataApiAuthorization m,
@@ -983,7 +1005,7 @@ mkHGEServer ::
     WS.MonadWSLog m,
     MonadExecuteQuery m,
     HasResourceLimits m,
-    MonadMetadataStorageQueryAPI m,
+    MonadMetadataStorage m,
     MonadResolveSource m,
     MonadQueryTags m,
     MonadEventLogCleanup m,
@@ -993,9 +1015,10 @@ mkHGEServer ::
   ) =>
   (AppStateRef impl -> Spock.SpockT m ()) ->
   AppStateRef impl ->
+  ConsoleType m ->
   EKG.Store EKG.EmptyMetrics ->
   ManagedT m Application
-mkHGEServer setupHook appStateRef ekgStore = do
+mkHGEServer setupHook appStateRef consoleType ekgStore = do
   -- Comment this to enable expensive assertions from "GHC.AssertNF". These
   -- will log lines to STDOUT containing "not in normal form". In the future we
   -- could try to integrate this into our tests. For now this is a development
@@ -1014,6 +1037,7 @@ mkHGEServer setupHook appStateRef ekgStore = do
         mkWaiApp
           setupHook
           appStateRef
+          consoleType
           ekgStore
           wsServerEnv
 
@@ -1378,8 +1402,15 @@ setCatalogStateTx stateTy stateValue =
 
 --- helper functions ---
 
-mkConsoleHTML :: Text -> AuthMode -> TelemetryStatus -> Maybe Text -> Maybe Text -> Either String Text
-mkConsoleHTML path authMode enableTelemetry consoleAssetsDir consoleSentryDsn =
+mkConsoleHTML ::
+  Text ->
+  AuthMode ->
+  TelemetryStatus ->
+  Maybe Text ->
+  Maybe Text ->
+  CEConsoleType ->
+  Either String Text
+mkConsoleHTML path authMode enableTelemetry consoleAssetsDir consoleSentryDsn ceConsoleType =
   renderHtmlTemplate consoleTmplt $
     -- variables required to render the template
     A.object
@@ -1390,6 +1421,7 @@ mkConsoleHTML path authMode enableTelemetry consoleAssetsDir consoleSentryDsn =
         "consoleSentryDsn" A..= fromMaybe "" consoleSentryDsn,
         "assetsVersion" A..= consoleAssetsVersion,
         "serverVersion" A..= currentVersion,
+        "consoleType" A..= ceConsoleTypeIdentifier ceConsoleType, -- TODO(awjchen): This is a kludge that will be removed when the entitlement service is fully implemented.
         "consoleSentryDsn" A..= ("" :: Text)
       ]
   where
@@ -1435,4 +1467,5 @@ mkMSSQLSourceResolver env _name (MSSQLConnConfiguration connInfo _) = runExceptT
           }
   (connString, mssqlPool) <- createMSSQLPool iConnString connOptions env
   let mssqlExecCtx = mkMSSQLExecCtx mssqlPool NeverResizePool
-  pure $ MSSQLSourceConfig connString mssqlExecCtx
+      numReadReplicas = 0
+  pure $ MSSQLSourceConfig connString mssqlExecCtx numReadReplicas

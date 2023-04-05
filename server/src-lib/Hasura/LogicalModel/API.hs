@@ -5,13 +5,9 @@ module Hasura.LogicalModel.API
   ( GetLogicalModel (..),
     TrackLogicalModel (..),
     UntrackLogicalModel (..),
-    CreateLogicalModelPermission (..),
-    DropLogicalModelPermission (..),
     runGetLogicalModel,
     runTrackLogicalModel,
     runUntrackLogicalModel,
-    runCreateSelectLogicalModelPermission,
-    runDropSelectLogicalModelPermission,
     dropLogicalModelInMetadata,
     module Hasura.LogicalModel.Types,
   )
@@ -28,22 +24,21 @@ import Hasura.Base.Error
 import Hasura.CustomReturnType.API (getCustomTypes)
 import Hasura.CustomReturnType.Metadata (CustomReturnTypeName)
 import Hasura.EncJSON
-import Hasura.LogicalModel.Metadata (LogicalModelArgumentName, LogicalModelMetadata (..), lmmSelectPermissions, parseInterpolatedQuery)
+import Hasura.LogicalModel.Metadata (LogicalModelArgumentName, LogicalModelMetadata (..), parseInterpolatedQuery)
 import Hasura.LogicalModel.Types (LogicalModelName, NullableScalarType)
 import Hasura.Metadata.DTO.Utils (codecNamePrefix)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (Backend, SourceConnConfiguration)
-import Hasura.RQL.Types.Common (SourceName, defaultSource, sourceNameToText, successMsg)
+import Hasura.RQL.Types.Common (SourceName, sourceNameToText, successMsg)
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Metadata.Object
-import Hasura.RQL.Types.Permission (PermDef (_pdRole), SelPerm)
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.Backend
-import Hasura.Server.Init.FeatureFlag as FF
-import Hasura.Server.Types (HasServerConfigCtx (..), ServerConfigCtx (..))
-import Hasura.Session (RoleName)
+import Hasura.SQL.Tag
+import Hasura.Server.Init.FeatureFlag (HasFeatureFlagChecker (..))
+import Hasura.Server.Init.FeatureFlag qualified as FF
 
 -- | Default implementation of the 'track_logical_model' request payload.
 data TrackLogicalModel (b :: BackendType) = TrackLogicalModel
@@ -95,9 +90,9 @@ deriving via
 logicalModelTrackToMetadata ::
   forall b m.
   ( BackendMetadata b,
-    MetadataM m,
+    MonadError QErr m,
     MonadIO m,
-    MonadError QErr m
+    MetadataM m
   ) =>
   Env.Environment ->
   SourceConnConfiguration b ->
@@ -112,7 +107,6 @@ logicalModelTrackToMetadata env sourceConnConfig TrackLogicalModel {..} = do
             _lmmCode = code,
             _lmmReturns = tlmReturns,
             _lmmArguments = tlmArguments,
-            _lmmSelectPermissions = mempty,
             _lmmDescription = tlmDescription
           }
 
@@ -151,8 +145,7 @@ runGetLogicalModel ::
   forall b m.
   ( BackendMetadata b,
     MetadataM m,
-    HasServerConfigCtx m,
-    MonadIO m,
+    HasFeatureFlagChecker m,
     MonadError QErr m
   ) =>
   GetLogicalModel b ->
@@ -173,11 +166,11 @@ runGetLogicalModel q = do
 runTrackLogicalModel ::
   forall b m.
   ( BackendMetadata b,
+    MonadError QErr m,
+    MonadIO m,
     CacheRWM m,
     MetadataM m,
-    MonadError QErr m,
-    HasServerConfigCtx m,
-    MonadIO m
+    HasFeatureFlagChecker m
   ) =>
   Env.Environment ->
   TrackLogicalModel b ->
@@ -186,7 +179,15 @@ runTrackLogicalModel env trackLogicalModelRequest = do
   throwIfFeatureDisabled
 
   sourceMetadata <-
-    maybe (throw400 NotFound $ "Source " <> sourceNameToText source <> " not found.") pure
+    maybe
+      ( throw400 NotFound $
+          "Source '"
+            <> sourceNameToText source
+            <> "' of kind "
+            <> toTxt (reify (backendTag @b))
+            <> " not found."
+      )
+      pure
       . preview (metaSources . ix source . toSourceMetadata @b)
       =<< getMetadata
   let sourceConnConfig = _smConfiguration sourceMetadata
@@ -271,96 +272,10 @@ dropLogicalModelInMetadata source rootFieldName = do
       %~ OMap.delete rootFieldName
 
 -- | check feature flag is enabled before carrying out any actions
-throwIfFeatureDisabled :: (HasServerConfigCtx m, MonadIO m, MonadError QErr m) => m ()
+throwIfFeatureDisabled :: (HasFeatureFlagChecker m, MonadError QErr m) => m ()
 throwIfFeatureDisabled = do
-  configCtx <- askServerConfigCtx
-  let CheckFeatureFlag runCheckFeatureFlag = _sccCheckFeatureFlag configCtx
-
-  enableLogicalModels <- liftIO (runCheckFeatureFlag FF.logicalModelInterface)
-
+  enableLogicalModels <- checkFlag FF.logicalModelInterface
   unless enableLogicalModels (throw500 "LogicalModels is disabled!")
-
--- | A permission for logical models is tied to a specific root field name and
--- source. This wrapper adds both of those things to the JSON object that
--- describes the permission.
-data CreateLogicalModelPermission a (b :: BackendType) = CreateLogicalModelPermission
-  { clmpSource :: SourceName,
-    clmpRootFieldName :: LogicalModelName,
-    clmpInfo :: PermDef b a
-  }
-  deriving stock (Generic)
-
-instance
-  FromJSON (PermDef b a) =>
-  FromJSON (CreateLogicalModelPermission a b)
-  where
-  parseJSON = withObject "CreateLogicalModelPermission" \obj -> do
-    clmpSource <- obj .:? "source" .!= defaultSource
-    clmpRootFieldName <- obj .: "root_field_name"
-    clmpInfo <- parseJSON (Object obj)
-
-    pure CreateLogicalModelPermission {..}
-
-runCreateSelectLogicalModelPermission ::
-  forall b m.
-  (Backend b, CacheRWM m, MetadataM m, MonadError QErr m, MonadIO m, HasServerConfigCtx m) =>
-  CreateLogicalModelPermission SelPerm b ->
-  m EncJSON
-runCreateSelectLogicalModelPermission CreateLogicalModelPermission {..} = do
-  throwIfFeatureDisabled
-  assertLogicalModelExists @b clmpSource clmpRootFieldName
-
-  let metadataObj :: MetadataObjId
-      metadataObj =
-        MOSourceObjId clmpSource $
-          AB.mkAnyBackend $
-            SMOLogicalModel @b clmpRootFieldName
-
-  buildSchemaCacheFor metadataObj $
-    MetadataModifier $
-      logicalModelMetadataSetter @b clmpSource clmpRootFieldName . lmmSelectPermissions
-        %~ OMap.insert (_pdRole clmpInfo) clmpInfo
-
-  pure successMsg
-
--- | To drop a permission, we need to know the source and root field name of
--- the logical model, as well as the role whose permission we want to drop.
-data DropLogicalModelPermission (b :: BackendType) = DropLogicalModelPermission
-  { dlmpSource :: SourceName,
-    dlmpRootFieldName :: LogicalModelName,
-    dlmpRole :: RoleName
-  }
-  deriving stock (Generic)
-
-instance FromJSON (DropLogicalModelPermission b) where
-  parseJSON = withObject "DropLogicalModelPermission" \obj -> do
-    dlmpSource <- obj .:? "source" .!= defaultSource
-    dlmpRootFieldName <- obj .: "root_field_name"
-    dlmpRole <- obj .: "role"
-
-    pure DropLogicalModelPermission {..}
-
-runDropSelectLogicalModelPermission ::
-  forall b m.
-  (Backend b, CacheRWM m, MetadataM m, MonadError QErr m, MonadIO m, HasServerConfigCtx m) =>
-  DropLogicalModelPermission b ->
-  m EncJSON
-runDropSelectLogicalModelPermission DropLogicalModelPermission {..} = do
-  throwIfFeatureDisabled
-  assertLogicalModelExists @b dlmpSource dlmpRootFieldName
-
-  let metadataObj :: MetadataObjId
-      metadataObj =
-        MOSourceObjId dlmpSource $
-          AB.mkAnyBackend $
-            SMOLogicalModel @b dlmpRootFieldName
-
-  buildSchemaCacheFor metadataObj $
-    MetadataModifier $
-      logicalModelMetadataSetter @b dlmpSource dlmpRootFieldName . lmmSelectPermissions
-        %~ OMap.delete dlmpRole
-
-  pure successMsg
 
 -- | Check whether a logical model with the given root field name exists for
 -- the given source.

@@ -26,7 +26,7 @@ module Hasura.GraphQL.Schema.Backend
   ( -- * Main Types
     BackendSchema (..),
     BackendTableSelectSchema (..),
-    BackendCustomTypeSelectSchema (..),
+    BackendCustomReturnTypeSelectSchema (..),
     BackendUpdateOperatorsSchema (..),
     MonadBuildSchema,
 
@@ -41,6 +41,7 @@ where
 import Data.Kind (Type)
 import Data.Text.Casing (GQLNameIdentifier)
 import Hasura.CustomReturnType.Cache (CustomReturnTypeInfo)
+import Hasura.Function.Cache
 import Hasura.GraphQL.ApolloFederation (ApolloFederationParserFunction)
 import Hasura.GraphQL.Schema.Common
 import Hasura.GraphQL.Schema.NamingCase
@@ -54,7 +55,6 @@ import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column hiding (EnumValueInfo)
 import Hasura.RQL.Types.Column qualified as Column
 import Hasura.RQL.Types.ComputedField
-import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.Source
@@ -302,17 +302,17 @@ class Backend b => BackendTableSelectSchema (b :: BackendType) where
 
 type ComparisonExp b = OpExpG b (UnpreparedValue b)
 
-class Backend b => BackendCustomTypeSelectSchema (b :: BackendType) where
-  logicalModelArguments ::
+class Backend b => BackendCustomReturnTypeSelectSchema (b :: BackendType) where
+  customReturnTypeArguments ::
     MonadBuildSourceSchema b r m n =>
     G.Name ->
     CustomReturnTypeInfo b ->
     SchemaT r m (InputFieldsParser n (IR.SelectArgsG b (UnpreparedValue b)))
 
-  logicalModelSelectionSet ::
+  customReturnTypeSelectionSet ::
     MonadBuildSourceSchema b r m n =>
     G.Name ->
-    LogicalModelInfo b ->
+    CustomReturnTypeInfo b ->
     SchemaT r m (Maybe (Parser 'Output n (AnnotatedFields b)))
 
 class Backend b => BackendUpdateOperatorsSchema (b :: BackendType) where

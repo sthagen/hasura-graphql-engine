@@ -12,7 +12,7 @@ import { mssql } from './mssql';
 import { postgres } from './postgres';
 import { alloy, AlloyDbTable } from './alloydb';
 import type {
-  DriverInfoResponse,
+  DriverInfo,
   GetDefaultQueryRootProps,
   GetFKRelationshipProps,
   GetSupportedOperatorsProps,
@@ -20,6 +20,7 @@ import type {
   GetTableRowsProps,
   GetTablesListAsTreeProps,
   GetTrackableTablesProps,
+  GetVersionProps,
   // Property,
   IntrospectedTable,
   Operator,
@@ -27,6 +28,7 @@ import type {
   TableColumn,
   TableFkRelationships,
   TableRow,
+  Version,
   WhereClause,
 } from './types';
 
@@ -73,7 +75,10 @@ export const getDriver = (dataSource: Source) => {
 
 export type Database = {
   introspection?: {
-    getDriverInfo: () => Promise<DriverInfoResponse | Feature.NotImplemented>;
+    getVersion?: (
+      props: GetVersionProps
+    ) => Promise<Version | Feature.NotImplemented>;
+    getDriverInfo: () => Promise<DriverInfo | Feature.NotImplemented>;
     getDatabaseConfiguration: (
       httpClient: AxiosInstance,
       driver?: string
@@ -164,12 +169,19 @@ const getDriverMethods = (driver: SupportedDrivers) => {
 
 export const DataSource = (httpClient: AxiosInstance) => ({
   driver: {
-    getAllSourceKinds: async () => {
+    getAllSourceKinds: async (): Promise<DriverInfo[]> => {
       const serverSupportedDrivers = await getAllSourceKinds({ httpClient });
-
+      const knownEnterpriseDrivers = ['athena', 'snowflake', 'mysqlgdc'];
       const allSupportedDrivers = serverSupportedDrivers
         // NOTE: AlloyDB is added here and not returned by the server because it's not a new data source (it's Postgres)
-        .concat([{ builtin: true, kind: 'alloy', display_name: 'AlloyDB' }])
+        .concat([
+          {
+            builtin: true,
+            kind: 'alloy',
+            display_name: 'AlloyDB',
+            available: true,
+          },
+        ])
         .sort((a, b) => (a.kind > b.kind ? 1 : -1));
 
       const allDrivers = allSupportedDrivers.map(async driver => {
@@ -183,13 +195,17 @@ export const DataSource = (httpClient: AxiosInstance) => ({
             displayName: driverInfo.displayName,
             release: driverInfo.release,
             native: driver.builtin,
+            available: true,
+            enterprise: false,
           };
 
         return {
           name: driver.kind,
           displayName: driver.display_name,
-          release: driver.release_name ?? 'GA',
+          release: (driver.release_name as ReleaseType) ?? 'GA',
           native: driver.builtin,
+          available: driver.available,
+          enterprise: knownEnterpriseDrivers.includes(driver.kind),
         };
       });
       return Promise.all(allDrivers);
@@ -197,6 +213,15 @@ export const DataSource = (httpClient: AxiosInstance) => ({
   },
   getNativeDrivers: async () => {
     return nativeDrivers;
+  },
+  getDatabaseVersion: async (
+    dataSourceName: string
+  ): Promise<string | Feature.NotImplemented> => {
+    const database = await getDatabaseMethods({ dataSourceName, httpClient });
+    return (
+      database.introspection?.getVersion?.({ dataSourceName, httpClient }) ??
+      Feature.NotImplemented
+    );
   },
   connectDB: {
     getConfigSchema: async (driver: string) => {

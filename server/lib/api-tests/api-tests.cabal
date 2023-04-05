@@ -87,6 +87,7 @@ library
     , uuid
     , vector
     , time
+    , QuickCheck
 
   exposed-modules:
     Spec
@@ -98,8 +99,10 @@ library
     Test.API.Metadata.CustomTypeSpec
     Test.API.Metadata.InconsistentSpec
     Test.API.Metadata.LogicalModelsSpec
+    Test.API.Metadata.LogicalModels.TypeCheckingSpec
     Test.API.Metadata.LogicalModels.ValidationSpec
     Test.API.Metadata.SuggestRelationshipsSpec
+    Test.API.Metadata.TablesSpec
     Test.API.Metadata.TestConnectionTemplateSpec
     Test.API.Metadata.TransparentDefaultsSpec
     Test.API.Metadata.WarningsSpec
@@ -186,6 +189,7 @@ library
     Test.Queries.NestedObjectSpec
     Test.Queries.Paginate.LimitSpec
     Test.Queries.Paginate.OffsetSpec
+    Test.Queries.Simple.JSONSpec
     Test.Queries.Simple.ObjectQueriesSpec
     Test.Queries.Simple.OperationNameSpec
     Test.Queries.Simple.PrimaryKeySpec
@@ -251,7 +255,7 @@ executable api-tests
     , lens-aeson
     , api-tests
     , base
-    , hspec
+    , hspec-core
 
   -- Turning off optimizations is intentional; tests aren't
   -- performance sensitive and waiting for compilation is a problem.

@@ -12,7 +12,7 @@ module Hasura.RQL.Types.Metadata
     dropEventTriggerInMetadata,
     dropFunctionInMetadata,
     dropPermissionInMetadata,
-    dropLogicalModelPermissionInMetadata,
+    dropCustomReturnTypePermissionInMetadata,
     dropRelationshipInMetadata,
     dropRemoteRelationshipInMetadata,
     dropTableInMetadata,
@@ -55,9 +55,11 @@ import Data.Aeson.TH
 import Data.Aeson.Types
 import Data.HashMap.Strict.InsOrd.Extended qualified as OM
 import Data.Monoid (Dual (..), Endo (..))
-import Hasura.CustomReturnType.Metadata (CustomReturnTypeMetadata, CustomReturnTypeName)
+import Hasura.CustomReturnType.Metadata (CustomReturnTypeMetadata, CustomReturnTypeName, crtmSelectPermissions)
+import Hasura.Function.Cache
+import Hasura.Function.Metadata (FunctionMetadata (..))
 import Hasura.Incremental qualified as Inc
-import Hasura.LogicalModel.Metadata (LogicalModelMetadata, LogicalModelName, lmmSelectPermissions)
+import Hasura.LogicalModel.Metadata (LogicalModelMetadata, LogicalModelName)
 import Hasura.Metadata.DTO.MetadataV3 (MetadataV3 (..))
 import Hasura.Prelude
 import Hasura.RQL.Types.Allowlist
@@ -68,7 +70,6 @@ import Hasura.RQL.Types.ComputedField
 import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.Endpoint
 import Hasura.RQL.Types.EventTrigger
-import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.GraphqlSchemaIntrospection
 import Hasura.RQL.Types.Metadata.Common
 import Hasura.RQL.Types.Metadata.Serialization
@@ -395,10 +396,10 @@ dropPermissionInMetadata rn = \case
   PTDelete -> tmDeletePermissions %~ OM.delete rn
   PTUpdate -> tmUpdatePermissions %~ OM.delete rn
 
-dropLogicalModelPermissionInMetadata ::
-  RoleName -> PermType -> LogicalModelMetadata b -> LogicalModelMetadata b
-dropLogicalModelPermissionInMetadata rn = \case
-  PTSelect -> lmmSelectPermissions %~ OM.delete rn
+dropCustomReturnTypePermissionInMetadata ::
+  RoleName -> PermType -> CustomReturnTypeMetadata b -> CustomReturnTypeMetadata b
+dropCustomReturnTypePermissionInMetadata rn = \case
+  PTSelect -> crtmSelectPermissions %~ OM.delete rn
   PTInsert -> error "Not implemented yet"
   PTDelete -> error "Not implemented yet"
   PTUpdate -> error "Not implemented yet"

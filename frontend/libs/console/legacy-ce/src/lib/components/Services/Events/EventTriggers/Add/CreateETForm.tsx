@@ -1,7 +1,6 @@
 /* eslint-disable no-underscore-dangle */
 import React from 'react';
 import { Collapsible } from '../../../../../new-components/Collapsible';
-import { isProConsole } from '../../../../../utils/proConsole';
 import { useSchemas } from '../../../Data/TableInsertItem/hooks/useSchemas';
 import { LocalEventTriggerState } from '../state';
 import Headers, { Header } from '../../../../Common/Headers/Headers';
@@ -22,6 +21,7 @@ import FormLabel from './FormLabel';
 import { inputStyles, heading } from '../../constants';
 import { AutoCleanupForm } from '../Common/AutoCleanupForm';
 import { FaShieldAlt } from 'react-icons/fa';
+import { EELiteAccessStatus } from '../../../../../features/EETrial';
 
 type CreateETFormProps = {
   state: LocalEventTriggerState;
@@ -40,6 +40,7 @@ type CreateETFormProps = {
   handleHeadersChange: (h: Header[]) => void;
   handleToggleAllColumn: () => void;
   handleAutoCleanupChange: (config: EventTriggerAutoCleanup) => void;
+  autoCleanupSupport: EELiteAccessStatus;
 };
 
 const CreateETForm: React.FC<CreateETFormProps> = props => {
@@ -70,6 +71,7 @@ const CreateETForm: React.FC<CreateETFormProps> = props => {
     handleHeadersChange,
     handleToggleAllColumn,
     handleAutoCleanupChange,
+    autoCleanupSupport,
   } = props;
 
   const supportedDrivers = getSupportedDrivers('events.triggers.add');
@@ -94,7 +96,6 @@ const CreateETForm: React.FC<CreateETFormProps> = props => {
       />
       <input
         type="text"
-        data-test="trigger-name"
         placeholder="trigger_name"
         required
         pattern="^[A-Za-z]+[A-Za-z0-9_\\-]*$"
@@ -108,8 +109,8 @@ const CreateETForm: React.FC<CreateETFormProps> = props => {
       <select
         className={`${inputStyles} pl-md w-72`}
         onChange={handleDatabaseChange}
-        data-test="select-source"
         value={source}
+        name="source"
       >
         <option value="">Select database</option>
         {dataSourcesList
@@ -125,9 +126,9 @@ const CreateETForm: React.FC<CreateETFormProps> = props => {
       <div className="flex">
         <select
           onChange={handleSchemaChange}
-          data-test="select-schema"
           className={`${inputStyles} w-72`}
           value={table.schema}
+          name="schema"
         >
           <option value="">Select schema</option>
           {Object.keys(databaseInfo)
@@ -140,10 +141,10 @@ const CreateETForm: React.FC<CreateETFormProps> = props => {
         </select>
         <select
           onChange={handleTableChange}
-          data-test="select-table"
           required
           className={`${inputStyles} w-72 ml-md`}
           value={table.name}
+          name="tableName"
         >
           <option value="">Select table</option>
           {filterSchemas &&
@@ -223,7 +224,7 @@ const CreateETForm: React.FC<CreateETFormProps> = props => {
         <br />
       </div>
       <hr className="my-md" />
-      {isProConsole(window.__env) && (
+      {autoCleanupSupport !== 'forbidden' && (
         <>
           <div className="mb-md">
             <div className="mb-md cursor-pointer">

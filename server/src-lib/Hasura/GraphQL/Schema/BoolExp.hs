@@ -4,7 +4,7 @@
 module Hasura.GraphQL.Schema.BoolExp
   ( AggregationPredicatesSchema (..),
     tableBoolExp,
-    customTypeBoolExp,
+    customReturnTypeBoolExp,
     mkBoolOperator,
     equalityOperators,
     comparisonOperators,
@@ -18,6 +18,7 @@ import Data.Text.Extended
 import Hasura.Base.Error (throw500)
 import Hasura.CustomReturnType.Cache (CustomReturnTypeInfo (..))
 import Hasura.CustomReturnType.Common
+import Hasura.Function.Cache
 import Hasura.GraphQL.Parser.Class
 import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.Common
@@ -38,7 +39,6 @@ import Hasura.RQL.IR.Value
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.ComputedField
-import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
 import Hasura.RQL.Types.Source
@@ -171,7 +171,7 @@ boolExpInternal gqlName fieldInfos description memoizeKey mkAggPredParser = do
 -- >   ...
 -- > }
 -- | Boolean expression for custom return types
-customTypeBoolExp ::
+customReturnTypeBoolExp ::
   forall b r m n.
   ( MonadBuildSchema b r m n,
     AggregationPredicatesSchema b
@@ -179,9 +179,9 @@ customTypeBoolExp ::
   G.Name ->
   CustomReturnTypeInfo b ->
   SchemaT r m (Parser 'Input n (AnnBoolExp b (UnpreparedValue b)))
-customTypeBoolExp name customReturnType =
-  case toFieldInfo customReturnType of
-    Nothing -> throw500 $ "Error creating fields for custom type " <> tshow (_ctiName customReturnType)
+customReturnTypeBoolExp name customReturnType =
+  case toFieldInfo (_crtiFields customReturnType) of
+    Nothing -> throw500 $ "Error creating fields for custom type " <> tshow (_crtiName customReturnType)
     Just fieldInfo -> do
       let gqlName = mkTableBoolExpTypeName (C.fromCustomName name)
 

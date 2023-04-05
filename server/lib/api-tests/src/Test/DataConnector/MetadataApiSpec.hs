@@ -28,6 +28,7 @@ import Harness.Backend.DataConnector.Chinook.Reference qualified as Reference
 import Harness.Backend.DataConnector.Chinook.Sqlite qualified as Sqlite
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (yaml)
+import Harness.Quoter.Yaml.InterpolateYaml (interpolateYaml)
 import Harness.Test.BackendType (BackendTypeConfig (..))
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture (Fixture (..))
@@ -82,6 +83,9 @@ schemaInspectionTests = describe "Schema and Source Inspection" $ do
           sortYamlArray (J.Array a) = pure $ J.Array (Vector.fromList (sort (Vector.toList a)))
           sortYamlArray _ = fail "Should return Array"
 
+          backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          backendType = BackendType.backendTypeString backendTypeMetadata
+
       case BackendType.backendSourceName <$> getBackendTypeConfig testEnvironment of
         Nothing -> pendingWith "Backend not found for testEnvironment"
         Just sourceString -> do
@@ -101,10 +105,10 @@ schemaInspectionTests = describe "Schema and Source Inspection" $ do
             sortYamlArray
             ( GraphqlEngine.postMetadata
                 testEnvironment
-                [yaml|
-                type: get_source_tables
+                [interpolateYaml|
+                type: #{backendType}_get_source_tables
                 args:
-                  source: *sourceString
+                  source: #{sourceString}
               |]
             )
             [yaml|
@@ -170,6 +174,8 @@ schemaInspectionTests = describe "Schema and Source Inspection" $ do
                 type: *_stIntegerType
                 insertable: *supportsInserts
                 updatable: false
+                value_generated:
+                  type: auto_increment
               - name: *artistId
                 nullable: false
                 type: *_stIntegerType
@@ -194,6 +200,7 @@ schemaInspectionTests = describe "Schema and Source Inspection" $ do
                     *artistId: *artistId
             |]
                 & applyWhen (columnNullability == API.OnlyNullableColumns) (Lens.set (key "columns" . _Array . Lens.each . key "nullable") (J.Bool True))
+                & applyWhen (isNothing mutationsCapabilities) (Lens.set (key "columns" . _Array . Lens.each . _Object . Lens.at "value_generated") Nothing)
                 & Lens.over (atKey "primary_key") (maybe Nothing (\value -> bool Nothing (Just value) supportsPrimaryKeys))
                 & Lens.over (atKey "foreign_keys") (maybe Nothing (\value -> bool Nothing (Just value) supportsForeignKeys))
             )
@@ -219,6 +226,7 @@ schemaInspectionTests = describe "Schema and Source Inspection" $ do
                 <&> Lens.set (key "config_schema_response" . key "other_schemas") J.Null
                 <&> Lens.set (key "config_schema_response" . key "config_schema") J.Null
                 <&> Lens.set (key "capabilities" . _Object . Lens.at "datasets") Nothing
+                <&> Lens.set (key "capabilities" . _Object . Lens.at "licensing") Nothing
                 <&> Lens.set (key "options" . key "uri") J.Null
                 <&> Lens.set (_Object . Lens.at "display_name") Nothing
                 <&> Lens.set (_Object . Lens.at "release_name") Nothing

@@ -13,10 +13,11 @@ module Hasura.App.State
     -- * init functions
     buildRebuildableAppContext,
     rebuildRebuildableAppContext,
-    initSQLGenCtx,
 
-    -- * server config
-    buildServerConfigCtx,
+    -- * subsets
+    initSQLGenCtx,
+    buildCacheStaticConfig,
+    buildCacheDynamicConfig,
   )
 where
 
@@ -26,7 +27,9 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Environment qualified as E
 import Data.HashSet qualified as Set
 import Database.PG.Query qualified as PG
+import Hasura.Backends.DataConnector.Agent.Client (AgentLicenseKey)
 import Hasura.Base.Error
+import Hasura.CredentialCache
 import Hasura.Eventing.Common (LockedEventsCtx)
 import Hasura.Eventing.EventTrigger
 import Hasura.GraphQL.Execute.Subscription.Options
@@ -36,6 +39,7 @@ import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Incremental qualified as Inc
 import Hasura.Logging qualified as L
 import Hasura.Prelude
+import Hasura.RQL.DDL.Schema.Cache.Config
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.SchemaCache (MetadataResourceVersion)
@@ -128,7 +132,8 @@ data AppEnv = AppEnv
     -- as this thread is initialised there before creating the `AppStateRef`. But eventually we need
     -- to do it for the Enterprise version.
     appEnvSchemaPollInterval :: OptionalInterval,
-    appEnvCheckFeatureFlag :: CheckFeatureFlag
+    appEnvCheckFeatureFlag :: CheckFeatureFlag,
+    appEnvLicenseKeyCache :: Maybe (CredentialCache AgentLicenseKey)
   }
 
 -- | Represents the Dynamic Hasura State, these field are mutable and can be changed
@@ -300,6 +305,9 @@ buildAppContextRule = proc (ServeOptions {..}, env, _keys) -> do
                 | otherwise -> InternalErrorsDisabled
       returnA -< responseInternalErrorsConfig
 
+--------------------------------------------------------------------------------
+-- subsets
+
 initSQLGenCtx :: HashSet ExperimentalFeature -> Options.StringifyNumbers -> Options.DangerouslyCollapseBooleans -> SQLGenCtx
 initSQLGenCtx experimentalFeatures stringifyNum dangerousBooleanCollapse =
   let optimizePermissionFilters
@@ -311,26 +319,26 @@ initSQLGenCtx experimentalFeatures stringifyNum dangerousBooleanCollapse =
         | otherwise = Options.DisableBigQueryStringNumericInput
    in SQLGenCtx stringifyNum dangerousBooleanCollapse optimizePermissionFilters bigqueryStringNumericInput
 
---------------------------------------------------------------------------------
--- server config
-
--- | We are trying to slowly get rid of 'HasServerConfigCtx' (and consequently
--- of 'ServercConfigtx') in favour of smaller / more specific ad-hoc
--- types. However, in the meantime, it is often required to builda
--- 'ServerConfigCtx' at the boundary between parts of the code that use it and
--- part of the code that use the new 'AppEnv' and 'AppContext'.
-buildServerConfigCtx :: AppEnv -> AppContext -> ServerConfigCtx
-buildServerConfigCtx AppEnv {..} AppContext {..} =
-  ServerConfigCtx
-    { _sccFunctionPermsCtx = acFunctionPermsCtx,
-      _sccRemoteSchemaPermsCtx = acRemoteSchemaPermsCtx,
-      _sccSQLGenCtx = acSQLGenCtx,
-      _sccMaintenanceMode = appEnvEnableMaintenanceMode,
-      _sccExperimentalFeatures = acExperimentalFeatures,
-      _sccEventingMode = appEnvEventingMode,
-      _sccReadOnlyMode = appEnvEnableReadOnlyMode,
-      _sccDefaultNamingConvention = acDefaultNamingConvention,
-      _sccMetadataDefaults = acMetadataDefaults,
-      _sccCheckFeatureFlag = appEnvCheckFeatureFlag,
-      _sccApolloFederationStatus = acApolloFederationStatus
+buildCacheStaticConfig :: AppEnv -> CacheStaticConfig
+buildCacheStaticConfig AppEnv {..} =
+  CacheStaticConfig
+    { _cscMaintenanceMode = appEnvEnableMaintenanceMode,
+      _cscEventingMode = appEnvEventingMode,
+      _cscReadOnlyMode = appEnvEnableReadOnlyMode
     }
+
+buildCacheDynamicConfig :: MonadIO m => AppEnv -> AppContext -> m CacheDynamicConfig
+buildCacheDynamicConfig AppEnv {..} AppContext {..} = do
+  let CheckFeatureFlag runCheckFlag = appEnvCheckFeatureFlag
+  logicalModelsEnabled <- liftIO $ runCheckFlag logicalModelInterface
+  pure
+    CacheDynamicConfig
+      { _cdcFunctionPermsCtx = acFunctionPermsCtx,
+        _cdcRemoteSchemaPermsCtx = acRemoteSchemaPermsCtx,
+        _cdcSQLGenCtx = acSQLGenCtx,
+        _cdcExperimentalFeatures = acExperimentalFeatures,
+        _cdcDefaultNamingConvention = acDefaultNamingConvention,
+        _cdcMetadataDefaults = acMetadataDefaults,
+        _cdcApolloFederationStatus = acApolloFederationStatus,
+        _cdcAreLogicalModelsEnabled = logicalModelsEnabled
+      }

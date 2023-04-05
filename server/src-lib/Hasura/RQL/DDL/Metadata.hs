@@ -41,6 +41,7 @@ import Data.Text.Extended (dquote, dquoteList, (<<>))
 import Hasura.Base.Error
 import Hasura.CustomReturnType.API
 import Hasura.EncJSON
+import Hasura.Function.API
 import Hasura.Logging qualified as HL
 import Hasura.LogicalModel.API
 import Hasura.Metadata.Class
@@ -121,7 +122,7 @@ runClearMetadata ::
   ( MonadIO m,
     CacheRWM m,
     MetadataM m,
-    MonadMetadataStorageQueryAPI m,
+    MonadMetadataStorage m,
     MonadBaseControl IO m,
     MonadReader r m,
     MonadError QErr m,
@@ -194,7 +195,7 @@ runReplaceMetadata ::
     MetadataM m,
     MonadIO m,
     MonadBaseControl IO m,
-    MonadMetadataStorageQueryAPI m,
+    MonadMetadataStorage m,
     MonadReader r m,
     MonadError QErr m,
     Has (HL.Logger HL.Hasura) r,
@@ -212,7 +213,7 @@ runReplaceMetadataV1 ::
     MetadataM m,
     MonadIO m,
     MonadBaseControl IO m,
-    MonadMetadataStorageQueryAPI m,
+    MonadMetadataStorage m,
     MonadReader r m,
     MonadError QErr m,
     Has (HL.Logger HL.Hasura) r,
@@ -230,7 +231,7 @@ runReplaceMetadataV2 ::
     MetadataM m,
     MonadIO m,
     MonadBaseControl IO m,
-    MonadMetadataStorageQueryAPI m,
+    MonadMetadataStorage m,
     MonadReader r m,
     MonadError QErr m,
     Has (HL.Logger HL.Hasura) r,
@@ -254,7 +255,7 @@ runReplaceMetadataV2' ::
     MetadataM m,
     MonadIO m,
     MonadBaseControl IO m,
-    MonadMetadataStorageQueryAPI m,
+    MonadMetadataStorage m,
     MonadReader r m,
     MonadError QErr m,
     Has (HL.Logger HL.Hasura) r,
@@ -707,12 +708,12 @@ purgeMetadataObj = \case
       SMOFunctionPermission qf rn -> dropFunctionPermissionInMetadata @b source qf rn
       SMOCustomReturnType crt -> dropCustomReturnTypeInMetadata @b source crt
       SMOLogicalModel lm -> dropLogicalModelInMetadata @b source lm
-      SMOLogicalModelObj logicalModelName logicalModelMetadataObjId ->
+      SMOCustomReturnTypeObj customReturnTypeName customReturnTypeMetadataObjId ->
         MetadataModifier $
-          logicalModelMetadataSetter @b source logicalModelName
-            %~ case logicalModelMetadataObjId of
-              LMMOPerm roleName permType ->
-                dropLogicalModelPermissionInMetadata roleName permType
+          customReturnTypeMetadataSetter @b source customReturnTypeName
+            %~ case customReturnTypeMetadataObjId of
+              CRTMOPerm roleName permType ->
+                dropCustomReturnTypePermissionInMetadata roleName permType
       SMOTableObj qt tableObj ->
         MetadataModifier $
           tableMetadataSetter @b source qt %~ case tableObj of
@@ -759,12 +760,12 @@ purgeMetadataObj = \case
                 }
 
 runGetCatalogState ::
-  (MonadMetadataStorageQueryAPI m, MonadError QErr m) => GetCatalogState -> m EncJSON
+  (MonadMetadataStorage m, MonadError QErr m) => GetCatalogState -> m EncJSON
 runGetCatalogState _ =
   encJFromJValue <$> liftEitherM fetchCatalogState
 
 runSetCatalogState ::
-  (MonadMetadataStorageQueryAPI m, MonadError QErr m) => SetCatalogState -> m EncJSON
+  (MonadMetadataStorage m, MonadError QErr m) => SetCatalogState -> m EncJSON
 runSetCatalogState SetCatalogState {..} = do
   liftEitherM $ updateCatalogState _scsType _scsState
   pure successMsg
