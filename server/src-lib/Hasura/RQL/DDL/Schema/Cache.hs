@@ -48,9 +48,9 @@ import Hasura.GraphQL.Schema (buildGQLContext)
 import Hasura.GraphQL.Schema.NamingCase
 import Hasura.Incremental qualified as Inc
 import Hasura.Logging
-import Hasura.LogicalModel.Cache (LogicalModelCache, LogicalModelInfo (..))
-import Hasura.LogicalModel.Metadata (LogicalModelMetadata (..))
 import Hasura.Metadata.Class
+import Hasura.NativeQuery.Cache (NativeQueryCache, NativeQueryInfo (..))
+import Hasura.NativeQuery.Metadata (NativeQueryMetadata (..))
 import Hasura.Prelude
 import Hasura.QueryTags
 import Hasura.RQL.DDL.Action
@@ -530,7 +530,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
       Inc.dependOn -< Inc.selectKeyD sourceName invalidationKeys
       (|
         withRecordInconsistency
-          ( liftEitherA <<< bindA -< resolveSourceConfig @b logger sourceName sourceConfig backendKind backendInfo env httpMgr
+          ( bindErrorA -< ExceptT $ resolveSourceConfig @b sourceName sourceConfig backendKind backendInfo env httpMgr
           )
         |) metadataObj
 
@@ -563,9 +563,9 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
             _ ->
               (|
                 withRecordInconsistency
-                  ( liftEitherA <<< bindA
-                      -< do
-                        resSource <- resolveDatabaseMetadata _bcasmSourceMetadata sourceConfig
+                  ( bindErrorA
+                      -< ExceptT do
+                        resSource <- resolveDatabaseMetadata logger _bcasmSourceMetadata sourceConfig
                         for_ resSource $ liftIO . unLogger logger
                         pure $ (sourceConfig,) <$> resSource
                   )
@@ -654,7 +654,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
       )
         `arr` (SourceInfo b)
     buildSource = proc (dynamicConfig, allSources, sourceMetadata, sourceConfig, tablesRawInfo, eventTriggerInfoMaps, _dbTables, dbFunctions, remoteSchemaMap, orderedRoles) -> do
-      let SourceMetadata sourceName _backendKind tables functions logicalModels customReturnTypes _ queryTagsConfig sourceCustomization _healthCheckConfig = sourceMetadata
+      let SourceMetadata sourceName _backendKind tables functions nativeQueries customReturnTypes _ queryTagsConfig sourceCustomization _healthCheckConfig = sourceMetadata
           tablesMetadata = OMap.elems tables
           (_, nonColumnInputs, permissions) = unzip3 $ map mkTableInputs tablesMetadata
           alignTableMap :: HashMap (TableName b) a -> HashMap (TableName b) c -> HashMap (TableName b) (a, c)
@@ -666,7 +666,8 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
         interpretWriter
           -< for (tablesRawInfo `alignTableMap` nonColumnsByTable) \(tableRawInfo, nonColumnInput) -> do
             let columns = _tciFieldInfoMap tableRawInfo
-            allFields :: FieldInfoMap (FieldInfo b) <- addNonColumnFields allSources sourceName tablesRawInfo columns remoteSchemaMap dbFunctions nonColumnInput
+                customObjectTypes = _tciCustomObjectTypes tableRawInfo
+            allFields :: FieldInfoMap (FieldInfo b) <- addNonColumnFields allSources sourceName customObjectTypes tablesRawInfo columns remoteSchemaMap dbFunctions nonColumnInput
             pure $ tableRawInfo {_tciFieldInfoMap = allFields}
 
       -- permissions
@@ -752,8 +753,8 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
             (OMap.elems customReturnTypes)
             \crtm@CustomReturnTypeMetadata {..} ->
               withRecordInconsistencyM (mkCustomReturnTypeMetadataObject crtm) $ do
-                unless (_cdcAreLogicalModelsEnabled dynamicConfig) $
-                  throw400 InvalidConfiguration "The Logical Models feature is disabled"
+                unless (_cdcAreNativeQueriesEnabled dynamicConfig) $
+                  throw400 InvalidConfiguration "The Custom Return Type feature is disabled"
 
                 fieldInfoMap <- case toFieldInfo _crtmFields of
                   Nothing -> pure mempty
@@ -773,43 +774,61 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
       let customReturnTypesCache :: CustomReturnTypeCache b
           customReturnTypesCache = mapFromL _crtiName (catMaybes customReturnTypeCacheMaybes)
 
-      let mkLogicalModelMetadataObject :: LogicalModelMetadata b -> MetadataObject
-          mkLogicalModelMetadataObject lmm =
-            ( MetadataObject
-                ( MOSourceObjId sourceName $
-                    AB.mkAnyBackend $
-                      SMOLogicalModel @b (_lmmRootFieldName lmm)
-                )
-                (toJSON lmm)
-            )
-
-      logicalModelCacheMaybes <-
+      nativeQueryCacheMaybes <-
         interpretWriter
           -< for
-            (OMap.elems logicalModels)
-            \lmm@LogicalModelMetadata {..} ->
-              withRecordInconsistencyM (mkLogicalModelMetadataObject lmm) $ do
-                unless (_cdcAreLogicalModelsEnabled dynamicConfig) $
-                  throw400 InvalidConfiguration "The Logical Models feature is disabled"
+            (OMap.elems nativeQueries)
+            \nqm@NativeQueryMetadata {..} -> do
+              let metadataObject :: MetadataObject
+                  metadataObject =
+                    MetadataObject
+                      ( MOSourceObjId sourceName $
+                          AB.mkAnyBackend $
+                            SMONativeQuery @b _nqmRootFieldName
+                      )
+                      (toJSON nqm)
+
+                  schemaObjId :: SchemaObjId
+                  schemaObjId =
+                    SOSourceObj sourceName $
+                      AB.mkAnyBackend $
+                        SOINativeQuery @b _nqmRootFieldName
+
+                  dependency :: SchemaDependency
+                  dependency =
+                    SchemaDependency
+                      { sdObjId =
+                          SOSourceObj sourceName $
+                            AB.mkAnyBackend $
+                              SOICustomReturnType @b _nqmReturns,
+                        sdReason = DRCustomReturnType
+                      }
+
+              withRecordInconsistencyM metadataObject $ do
+                unless (_cdcAreNativeQueriesEnabled dynamicConfig) $
+                  throw400 InvalidConfiguration "The Native Queries feature is disabled"
 
                 customReturnType <-
                   onNothing
-                    (M.lookup _lmmReturns customReturnTypesCache)
-                    (throw400 InvalidConfiguration ("The custom return type " <> toTxt _lmmReturns <> " could not be found"))
+                    (M.lookup _nqmReturns customReturnTypesCache)
+                    (throw400 InvalidConfiguration ("The custom return type " <> toTxt _nqmReturns <> " could not be found"))
+
+                recordDependenciesM metadataObject schemaObjId $
+                  Seq.singleton dependency
 
                 pure
-                  LogicalModelInfo
-                    { _lmiRootFieldName = _lmmRootFieldName,
-                      _lmiCode = _lmmCode,
-                      _lmiReturns = customReturnType,
-                      _lmiArguments = _lmmArguments,
-                      _lmiDescription = _lmmDescription
+                  NativeQueryInfo
+                    { _nqiRootFieldName = _nqmRootFieldName,
+                      _nqiCode = _nqmCode,
+                      _nqiReturns = customReturnType,
+                      _nqiArguments = _nqmArguments,
+                      _nqiDescription = _nqmDescription
                     }
 
-      let logicalModelCache :: LogicalModelCache b
-          logicalModelCache = mapFromL _lmiRootFieldName (catMaybes logicalModelCacheMaybes)
+      let nativeQueryCache :: NativeQueryCache b
+          nativeQueryCache = mapFromL _nqiRootFieldName (catMaybes nativeQueryCacheMaybes)
 
-      returnA -< SourceInfo sourceName tableCache functionCache logicalModelCache customReturnTypesCache sourceConfig queryTagsConfig resolvedCustomization
+      returnA -< SourceInfo sourceName tableCache functionCache nativeQueryCache customReturnTypesCache sourceConfig queryTagsConfig resolvedCustomization
 
     buildAndCollectInfo ::
       forall arr m.
@@ -839,7 +858,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
             HS.fromList $
               concat $
                 OMap.elems sources >>= \(BackendSourceMetadata e) ->
-                  AB.dispatchAnyBackend @Backend e \(SourceMetadata _ _ tables _functions _logicalModels _customReturnTypes _ _ _ _) -> do
+                  AB.dispatchAnyBackend @Backend e \(SourceMetadata _ _ tables _functions _nativeQueries _customReturnTypes _ _ _ _) -> do
                     table <- OMap.elems tables
                     pure $
                       OMap.keys (_tmInsertPermissions table)

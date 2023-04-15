@@ -18,7 +18,7 @@ instance BackendMetadata 'MSSQL where
   buildComputedFieldInfo = MSSQL.buildComputedFieldInfo
   fetchAndValidateEnumValues = MSSQL.fetchAndValidateEnumValues
   resolveSourceConfig = MSSQL.resolveSourceConfig
-  resolveDatabaseMetadata _ = MSSQL.resolveDatabaseMetadata
+  resolveDatabaseMetadata _ _ = MSSQL.resolveDatabaseMetadata
   parseBoolExpOperations = MSSQL.parseBoolExpOperations
   buildFunctionInfo = MSSQL.buildFunctionInfo
   updateColumnInEventTrigger = MSSQL.updateColumnInEventTrigger
@@ -28,4 +28,4 @@ instance BackendMetadata 'MSSQL where
     throw500 "Computed fields are not yet defined for MSSQL backends"
   supportsBeingRemoteRelationshipTarget _ = True
   listAllTables = MSSQL.listAllTables
-  validateLogicalModel _ _ _ _ = pure () -- for now, all queries are valid
+  validateNativeQuery _ _ _ _ = pure () -- for now, all queries are valid

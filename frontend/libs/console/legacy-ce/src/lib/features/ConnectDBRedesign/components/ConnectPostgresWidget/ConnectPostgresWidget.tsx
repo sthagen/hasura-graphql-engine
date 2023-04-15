@@ -18,8 +18,7 @@ import { useEffect, useState } from 'react';
 import { LimitedFeatureWrapper } from '../LimitedFeatureWrapper/LimitedFeatureWrapper';
 import { DynamicDBRouting } from './parts/DynamicDBRouting';
 import { Tabs } from '../../../../new-components/Tabs';
-import { isProConsole } from '../../../../utils';
-import globals from '../../../../Globals';
+import { DisplayToastErrorMessage } from '../Common/DisplayToastErrorMessage';
 
 interface ConnectPostgresWidgetProps {
   dataSourceName?: string;
@@ -52,8 +51,8 @@ export const ConnectPostgresWidget = (props: ConnectPostgresWidgetProps) => {
       onError: err => {
         hasuraToast({
           type: 'error',
-          title: `Error while ${isEditMode ? 'updating' : 'adding'} database`,
-          children: JSON.stringify(err),
+          title: err.name,
+          children: <DisplayToastErrorMessage message={err.message} />,
         });
       },
     });
@@ -94,14 +93,20 @@ export const ConnectPostgresWidget = (props: ConnectPostgresWidgetProps) => {
     overrideDriver === 'cockroach' ? ['connectionParams'] : [];
 
   const dynamicDBRoutingTab =
-    dataSourceName && isEditMode && isProConsole(globals)
+    dataSourceName && isEditMode && window.__env.consoleType !== 'oss'
       ? [
           {
             value: 'dynamicDBRouting',
-            label: 'Dynamic DB Routing',
+            label: 'Dynamic Routing',
             content: (
               <div className="mt-sm">
-                <DynamicDBRouting sourceName={dataSourceName} />
+                <LimitedFeatureWrapper
+                  id="dynamic-db-routing"
+                  title="Dynamic Routing for Databases"
+                  description="Effortlessly scale your data architecture with Dynamic Routing for databases, allowing you to easily route GraphQL requests to different database connections and leverage different database topology patterns with Hasura."
+                >
+                  <DynamicDBRouting sourceName={dataSourceName} />
+                </LimitedFeatureWrapper>
               </div>
             ),
           },

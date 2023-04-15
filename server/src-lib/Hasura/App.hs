@@ -357,7 +357,7 @@ resolvePostgresConnInfo env dbUrlConf (fromMaybe 1 -> retries) = do
 -- such pieces of information that are required throughout the initialisation,
 -- but that aren't needed in the rest of the application.
 data AppInit = AppInit
-  { aiTLSAllowListRef :: TLSAllowListRef Hasura,
+  { aiTLSAllowListRef :: TLSAllowListRef,
     aiMetadataWithResourceVersion :: MetadataWithResourceVersion
   }
 
@@ -494,7 +494,7 @@ initialiseAppContext ::
 initialiseAppContext env serveOptions@ServeOptions {..} AppInit {..} = do
   appEnv@AppEnv {..} <- askAppEnv
   let CheckFeatureFlag runCheckFlag = appEnvCheckFeatureFlag
-  logicalModelsEnabled <- liftIO $ runCheckFlag logicalModelInterface
+  nativeQueriesEnabled <- liftIO $ runCheckFlag nativeQueryInterface
   let Loggers _ logger pgLogger = appEnvLoggers
       sqlGenCtx = initSQLGenCtx soExperimentalFeatures soStringifyNum soDangerousBooleanCollapse
       cacheStaticConfig = buildCacheStaticConfig appEnv
@@ -507,7 +507,7 @@ initialiseAppContext env serveOptions@ServeOptions {..} AppInit {..} = do
           soDefaultNamingConvention
           soMetadataDefaults
           soApolloFederationStatus
-          logicalModelsEnabled
+          nativeQueriesEnabled
 
   -- Create the schema cache
   rebuildableSchemaCache <-
@@ -527,7 +527,7 @@ initialiseAppContext env serveOptions@ServeOptions {..} AppInit {..} = do
   !rebuildableAppCtx <- onLeft rebuildableAppCtxE $ \e -> throwErrExit InvalidEnvironmentVariableOptionsError $ T.unpack $ qeError e
 
   -- Initialise the 'AppStateRef' from 'RebuildableSchemaCacheRef' and 'RebuildableAppContext'.
-  initialiseAppStateRef aiTLSAllowListRef appEnvServerMetrics rebuildableSchemaCache rebuildableAppCtx
+  initialiseAppStateRef aiTLSAllowListRef Nothing appEnvServerMetrics rebuildableSchemaCache rebuildableAppCtx
 
 -- | Runs catalogue migration, and returns the metadata that was fetched.
 --
@@ -788,7 +788,7 @@ instance MonadMetadataStorage AppM where
   checkMetadataStorageHealth = runInSeparateTx $ checkDbConnection
 
   getDeprivedCronTriggerStats = runInSeparateTx . getDeprivedCronTriggerStatsTx
-  getScheduledEventsForDelivery = runInSeparateTx getScheduledEventsForDeliveryTx
+  getScheduledEventsForDelivery = runInSeparateTx . getScheduledEventsForDeliveryTx
   insertCronEvents = runInSeparateTx . insertCronEventsTx
   insertOneOffScheduledEvent = runInSeparateTx . insertOneOffScheduledEventTx
   insertScheduledEventInvocation a b = runInSeparateTx $ insertInvocationTx a b
@@ -1123,7 +1123,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
 
     getLatestConfigForWSServer =
       fmap
-        (\appCtx -> (acAuthMode appCtx, acEnableAllowlist appCtx, acCorsPolicy appCtx))
+        (\appCtx -> (acAuthMode appCtx, acEnableAllowlist appCtx, acCorsPolicy appCtx, acSQLGenCtx appCtx, acExperimentalFeatures appCtx, acDefaultNamingConvention appCtx))
         (getAppContext appStateRef)
     getSchemaCache' = getSchemaCache appStateRef
 

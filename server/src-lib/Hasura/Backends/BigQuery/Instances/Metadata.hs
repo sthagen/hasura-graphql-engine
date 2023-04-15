@@ -16,7 +16,7 @@ instance BackendMetadata 'BigQuery where
   buildComputedFieldInfo = BigQuery.buildComputedFieldInfo
   fetchAndValidateEnumValues = BigQuery.fetchAndValidateEnumValues
   resolveSourceConfig = BigQuery.resolveSourceConfig
-  resolveDatabaseMetadata _ = BigQuery.resolveSource
+  resolveDatabaseMetadata _ _ = BigQuery.resolveSource
   parseBoolExpOperations = BigQuery.parseBoolExpOperations
   buildFunctionInfo = BigQuery.buildFunctionInfo
   updateColumnInEventTrigger = BigQuery.updateColumnInEventTrigger
@@ -26,4 +26,4 @@ instance BackendMetadata 'BigQuery where
     throw400 UnexpectedPayload "Computed fields are not supported in boolean expressions"
   supportsBeingRemoteRelationshipTarget _ = True
   listAllTables = BigQuery.listAllTables
-  validateLogicalModel _ _ _ _ = pure ()
+  validateNativeQuery _ _ _ _ = pure ()

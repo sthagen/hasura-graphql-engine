@@ -48,8 +48,9 @@ import Hasura.Backends.Postgres.SQL.Types qualified as Postgres
 import Hasura.Base.Error
 import Hasura.Base.ErrorMessage (toErrorMessage)
 import Hasura.CustomReturnType.Cache (CustomReturnTypeInfo (..))
+import Hasura.CustomReturnType.Types (CustomReturnTypeName (..))
 import Hasura.GraphQL.Parser.Class
-import Hasura.GraphQL.Parser.Internal.Parser qualified as P
+import Hasura.GraphQL.Parser.Internal.Parser qualified as IP
 import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.BoolExp
 import Hasura.GraphQL.Schema.Common
@@ -66,8 +67,8 @@ import Hasura.GraphQL.Schema.Parser
 import Hasura.GraphQL.Schema.Parser qualified as P
 import Hasura.GraphQL.Schema.Table
 import Hasura.GraphQL.Schema.Typename
-import Hasura.LogicalModel.Types (NullableScalarType (..))
 import Hasura.Name qualified as Name
+import Hasura.NativeQuery.Types (NullableScalarType (..))
 import Hasura.Prelude
 import Hasura.RQL.IR qualified as IR
 import Hasura.RQL.IR.BoolExp
@@ -75,6 +76,7 @@ import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.ComputedField
+import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.Metadata.Object
 import Hasura.RQL.Types.Permission qualified as Permission
 import Hasura.RQL.Types.Relationships.Local
@@ -460,7 +462,7 @@ defaultTableSelectionSet tableInfo = runMaybeT do
             <&> parsedSelectionsToFields IR.AFExpression
   where
     selectionSetObjectWithDirective name description parsers implementsInterfaces directives =
-      P.setParserDirectives directives $
+      IP.setParserDirectives directives $
         P.selectionSetObject name description parsers implementsInterfaces
 
 -- | List of table fields object.
@@ -491,10 +493,9 @@ defaultCustomReturnTypeSelectionSet ::
   forall b r m n.
   ( MonadBuildSchema b r m n
   ) =>
-  G.Name ->
   CustomReturnTypeInfo b ->
   SchemaT r m (Maybe (Parser 'Output n (AnnotatedFields b)))
-defaultCustomReturnTypeSelectionSet name customReturnType = runMaybeT $ do
+defaultCustomReturnTypeSelectionSet customReturnType = runMaybeT $ do
   roleName <- retrieve scRole
 
   selectableColumns <- hoistMaybe $ customReturnTypeColumnsForRole roleName customReturnType
@@ -519,7 +520,7 @@ defaultCustomReturnTypeSelectionSet name customReturnType = runMaybeT $ do
           P.selection columnName (G.Description <$> nstDescription) pathArg field
             <&> IR.mkAnnColumnField column columnType caseBoolExpUnpreparedValue
 
-  let fieldName = name
+  let fieldName = getCustomReturnTypeName (_crtiName customReturnType)
 
   -- which columns are we allowed to access given permissions?
   let allowedColumns =
@@ -540,11 +541,10 @@ defaultCustomReturnTypeSelectionSet name customReturnType = runMaybeT $ do
 
 customReturnTypeSelectionList ::
   (MonadBuildSchema b r m n, BackendCustomReturnTypeSelectSchema b) =>
-  G.Name ->
   CustomReturnTypeInfo b ->
   SchemaT r m (Maybe (Parser 'Output n (AnnotatedFields b)))
-customReturnTypeSelectionList name customReturnType =
-  fmap nonNullableObjectList <$> customReturnTypeSelectionSet name customReturnType
+customReturnTypeSelectionList customReturnType =
+  fmap nonNullableObjectList <$> customReturnTypeSelectionSet customReturnType
 
 -- | Converts an output type parser from object_type to [object_type!]!
 nonNullableObjectList :: Parser 'Output m a -> Parser 'Output m a
@@ -696,11 +696,10 @@ customReturnTypeWhereArg ::
   ( MonadBuildSchema b r m n,
     AggregationPredicatesSchema b
   ) =>
-  G.Name ->
   CustomReturnTypeInfo b ->
   SchemaT r m (InputFieldsParser n (Maybe (IR.AnnBoolExp b (IR.UnpreparedValue b))))
-customReturnTypeWhereArg name customReturnType = do
-  boolExpParser <- customReturnTypeBoolExp name customReturnType
+customReturnTypeWhereArg customReturnType = do
+  boolExpParser <- customReturnTypeBoolExp customReturnType
   pure $
     fmap join $
       P.fieldOptional whereName whereDesc $
@@ -715,12 +714,11 @@ customReturnTypeOrderByArg ::
   forall b r m n.
   ( MonadBuildSchema b r m n
   ) =>
-  G.Name ->
   CustomReturnTypeInfo b ->
   SchemaT r m (InputFieldsParser n (Maybe (NonEmpty (IR.AnnotatedOrderByItemG b (IR.UnpreparedValue b)))))
-customReturnTypeOrderByArg name customReturnType = do
+customReturnTypeOrderByArg customReturnType = do
   tCase <- retrieve $ _rscNamingConvention . _siCustomization @b
-  orderByParser <- customTypeOrderByExp name customReturnType
+  orderByParser <- customReturnTypeOrderByExp customReturnType
   let orderByName = applyFieldNameCaseCust tCase Name._order_by
       orderByDesc = Just $ G.Description "sort the rows by one or more columns"
   pure $ do
@@ -737,10 +735,11 @@ customReturnTypeDistinctArg ::
   forall b r m n.
   ( MonadBuildSchema b r m n
   ) =>
-  G.Name ->
   CustomReturnTypeInfo b ->
   SchemaT r m (InputFieldsParser n (Maybe (NonEmpty (Column b))))
-customReturnTypeDistinctArg name customReturnType = do
+customReturnTypeDistinctArg customReturnType = do
+  let name = getCustomReturnTypeName (_crtiName customReturnType)
+
   tCase <- retrieve $ _rscNamingConvention . _siCustomization @b
 
   let maybeColumnDefinitions =
@@ -954,7 +953,7 @@ tableConnectionArgs pkeyColumns tableInfo = do
               iResultToMaybe (executeJSONPath columnJsonPath cursorValue)
                 `onNothing` throwInvalidCursor
             pgValue <- liftQErr $ parseScalarValueColumnType columnType columnValue
-            let unresolvedValue = IR.UVParameter Nothing $ ColumnValue columnType pgValue
+            let unresolvedValue = IR.UVParameter IR.Unknown $ ColumnValue columnType pgValue
             pure $
               IR.ConnectionSplit splitKind unresolvedValue $
                 IR.OrderByItemG Nothing (IR.AOCColumn columnInfo) Nothing
@@ -966,7 +965,7 @@ tableConnectionArgs pkeyColumns tableInfo = do
               iResultToMaybe (executeJSONPath (map (J.Key . K.fromText) (getPathFromOrderBy annObCol)) cursorValue)
                 `onNothing` throwInvalidCursor
             pgValue <- liftQErr $ parseScalarValueColumnType columnType orderByItemValue
-            let unresolvedValue = IR.UVParameter Nothing $ ColumnValue columnType pgValue
+            let unresolvedValue = IR.UVParameter IR.Unknown $ ColumnValue columnType pgValue
             pure $
               IR.ConnectionSplit splitKind unresolvedValue $
                 IR.OrderByItemG orderType annObCol nullsOrder
@@ -1211,13 +1210,12 @@ defaultCustomReturnTypeArgs ::
   ( MonadBuildSchema b r m n,
     AggregationPredicatesSchema b
   ) =>
-  G.Name ->
   CustomReturnTypeInfo b ->
   SchemaT r m (InputFieldsParser n (SelectArgs b))
-defaultCustomReturnTypeArgs name customReturnType = do
-  whereParser <- customReturnTypeWhereArg name customReturnType
-  orderByParser <- customReturnTypeOrderByArg name customReturnType
-  distinctParser <- customReturnTypeDistinctArg name customReturnType
+defaultCustomReturnTypeArgs customReturnType = do
+  whereParser <- customReturnTypeWhereArg customReturnType
+  orderByParser <- customReturnTypeOrderByArg customReturnType
+  distinctParser <- customReturnTypeDistinctArg customReturnType
 
   defaultArgsParser whereParser orderByParser distinctParser
 
@@ -1276,6 +1274,8 @@ fieldSelection table tableInfo = \case
       pure $!
         P.selection fieldName (ciDescription columnInfo) pathArg field
           <&> IR.mkAnnColumnField (ciColumn columnInfo) (ciType columnInfo) caseBoolExpUnpreparedValue
+  FINestedObject nestedObjectInfo ->
+    pure . fmap IR.AFNestedObject <$> nestedObjectFieldParser tableInfo nestedObjectInfo
   FIRelationship relationshipInfo ->
     concat . maybeToList <$> relationshipField table relationshipInfo
   FIComputedField computedFieldInfo ->
@@ -1295,6 +1295,58 @@ fieldSelection table tableInfo = \case
         relationshipFields <- fromMaybe [] <$> remoteRelationshipField remoteFieldInfo
         let lhsFields = _rfiLHS remoteFieldInfo
         pure $ map (fmap (IR.AFRemote . IR.RemoteRelationshipSelect lhsFields)) relationshipFields
+  where
+    nestedObjectFieldParser :: TableInfo b -> NestedObjectInfo b -> SchemaT r m (FieldParser n (AnnotatedNestedObjectSelect b))
+    nestedObjectFieldParser TableInfo {..} NestedObjectInfo {..} = do
+      let customObjectTypes = _tciCustomObjectTypes _tiCoreInfo
+      case Map.lookup _noiType customObjectTypes of
+        Just objectType -> do
+          parser <- nestedObjectParser _noiSupportsNestedObjects customObjectTypes objectType _noiColumn _noiIsNullable
+          pure $ P.subselection_ _noiName _noiDescription parser
+        _ -> throw500 $ "fieldSelection: object type " <> _noiType <<> " not found"
+
+nestedObjectParser ::
+  forall b r m n.
+  MonadBuildSchema b r m n =>
+  XNestedObjects b ->
+  HashMap G.Name (TableObjectType b) ->
+  TableObjectType b ->
+  Column b ->
+  Bool ->
+  SchemaT r m (P.Parser 'Output n (AnnotatedNestedObjectSelect b))
+nestedObjectParser supportsNestedObjects objectTypes objectType column isNullable = do
+  allFieldParsers <- for (toList $ _totFields objectType) outputFieldParser
+  pure $
+    outputParserModifier isNullable $
+      P.selectionSet (_totName objectType) (_totDescription objectType) allFieldParsers
+        <&> IR.AnnNestedObjectSelectG supportsNestedObjects column . parsedSelectionsToFields IR.AFExpression
+  where
+    outputParserModifier True = P.nullableParser
+    outputParserModifier False = P.nonNullableParser
+
+    outputFieldParser ::
+      TableObjectFieldDefinition b ->
+      SchemaT r m (IP.FieldParser MetadataObjId n (IR.AnnFieldG b (IR.RemoteRelationshipField IR.UnpreparedValue) (IR.UnpreparedValue b)))
+    outputFieldParser (TableObjectFieldDefinition column' name description (GraphQLType gType) objectFieldType) =
+      P.memoizeOn 'nestedObjectParser (_totName objectType, name) do
+        case objectFieldType of
+          TOFTScalar fieldTypeName scalarType ->
+            wrapScalar scalarType $ customScalarParser fieldTypeName
+          TOFTObject objectName -> do
+            objectType' <- Map.lookup objectName objectTypes `onNothing` throw500 ("Custom type " <> objectName <<> " not found")
+            parser <- fmap (IR.AFNestedObject @b) <$> nestedObjectParser supportsNestedObjects objectTypes objectType' column' (G.isNullable gType)
+            pure $ P.subselection_ name description parser
+      where
+        wrapScalar scalarType parser =
+          pure $
+            P.wrapFieldParser gType (P.selection_ name description parser)
+              $> IR.mkAnnColumnField column' (ColumnScalar scalarType) Nothing Nothing
+        customScalarParser fieldTypeName =
+          let schemaType = P.TNamed P.NonNullable $ P.Definition fieldTypeName Nothing Nothing [] P.TIScalar
+           in P.Parser
+                { pType = schemaType,
+                  pParser = P.valueToJSON (P.toGraphQLType schemaType)
+                }
 
 {- Note [Permission filter deduplication]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1471,7 +1523,7 @@ relationshipField table ri = runMaybeT do
         _ -> pure Nullable
       pure $
         pure $
-          case nullable of { Nullable -> id; NotNullable -> P.nonNullableField } $
+          case nullable of { Nullable -> id; NotNullable -> IP.nonNullableField } $
             P.subselection_ relFieldName desc selectionSetParser
               <&> \fields ->
                 IR.AFObjectRelation $

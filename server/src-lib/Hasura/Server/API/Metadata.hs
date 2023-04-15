@@ -25,8 +25,8 @@ import Hasura.EncJSON
 import Hasura.Function.API qualified as Functions
 import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Logging qualified as L
-import Hasura.LogicalModel.API qualified as LogicalModels
 import Hasura.Metadata.Class
+import Hasura.NativeQuery.API qualified as NativeQueries
 import Hasura.Prelude hiding (first)
 import Hasura.RQL.DDL.Action
 import Hasura.RQL.DDL.ApiLimit
@@ -137,10 +137,10 @@ data RQLMetadataV1
   | RMDropComputedField !(AnyBackend DropComputedField)
   | -- Connection template
     RMTestConnectionTemplate !(AnyBackend TestConnectionTemplate)
-  | -- Logical Models
-    RMGetLogicalModel !(AnyBackend LogicalModels.GetLogicalModel)
-  | RMTrackLogicalModel !(AnyBackend LogicalModels.TrackLogicalModel)
-  | RMUntrackLogicalModel !(AnyBackend LogicalModels.UntrackLogicalModel)
+  | -- Native Queries
+    RMGetNativeQuery !(AnyBackend NativeQueries.GetNativeQuery)
+  | RMTrackNativeQuery !(AnyBackend NativeQueries.TrackNativeQuery)
+  | RMUntrackNativeQuery !(AnyBackend NativeQueries.UntrackNativeQuery)
   | -- Custom types
     RMGetCustomReturnType !(AnyBackend CustomReturnType.GetCustomReturnType)
   | RMTrackCustomReturnType !(AnyBackend CustomReturnType.TrackCustomReturnType)
@@ -234,6 +234,9 @@ data RQLMetadataV1
     RMGetFeatureFlag !GetFeatureFlag
   | -- Bulk metadata queries
     RMBulk [RQLMetadataRequest]
+  | -- Bulk metadata queries, but don't stop if something fails - return all
+    -- successes and failures as separate items
+    RMBulkKeepGoing [RQLMetadataRequest]
   deriving (Generic)
 
 -- NOTE! If you add a new request type here that is read-only, make sure to
@@ -312,6 +315,7 @@ instance FromJSON RQLMetadataV1 where
       "set_opentelemetry_status" -> RMSetOpenTelemetryStatus <$> args
       "get_feature_flag" -> RMGetFeatureFlag <$> args
       "bulk" -> RMBulk <$> args
+      "bulk_keep_going" -> RMBulkKeepGoing <$> args
       -- Backend prefixed metadata actions:
       _ -> do
         -- 1) Parse the backend source kind and metadata command:
@@ -508,15 +512,16 @@ queryModifiesMetadata = \case
       RMGetTableInfo _ -> False
       RMTestConnectionTemplate _ -> False
       RMSuggestRelationships _ -> False
-      RMGetLogicalModel _ -> False
-      RMTrackLogicalModel _ -> True
-      RMUntrackLogicalModel _ -> True
+      RMGetNativeQuery _ -> False
+      RMTrackNativeQuery _ -> True
+      RMUntrackNativeQuery _ -> True
       RMGetCustomReturnType _ -> False
       RMTrackCustomReturnType _ -> True
       RMUntrackCustomReturnType _ -> True
       RMCreateSelectCustomReturnTypePermission _ -> True
       RMDropSelectCustomReturnTypePermission _ -> True
       RMBulk qs -> any queryModifiesMetadata qs
+      RMBulkKeepGoing qs -> any queryModifiesMetadata qs
       -- We used to assume that the fallthrough was True,
       -- but it is better to be explicit here to warn when new constructors are added.
       RMAddSource _ -> True
@@ -671,8 +676,8 @@ runMetadataQueryV1M env checkFeatureFlag remoteSchemaPerms currentResourceVersio
   RMUpdateSource q -> dispatchMetadata runUpdateSource q
   RMListSourceKinds q -> runListSourceKinds q
   RMGetSourceKindCapabilities q -> runGetSourceKindCapabilities q
-  RMGetSourceTables q -> dispatchMetadata (runGetSourceTables env) q
-  RMGetTableInfo q -> runGetTableInfo env q
+  RMGetSourceTables q -> dispatchMetadata runGetSourceTables q
+  RMGetTableInfo q -> runGetTableInfo q
   RMTrackTable q -> dispatchMetadata runTrackTableV2Q q
   RMUntrackTable q -> dispatchMetadataAndEventTrigger runUntrackTableQ q
   RMSetFunctionCustomization q -> dispatchMetadata Functions.runSetFunctionCustomization q
@@ -704,9 +709,9 @@ runMetadataQueryV1M env checkFeatureFlag remoteSchemaPerms currentResourceVersio
   RMAddComputedField q -> dispatchMetadata runAddComputedField q
   RMDropComputedField q -> dispatchMetadata runDropComputedField q
   RMTestConnectionTemplate q -> dispatchMetadata runTestConnectionTemplate q
-  RMGetLogicalModel q -> dispatchMetadata LogicalModels.runGetLogicalModel q
-  RMTrackLogicalModel q -> dispatchMetadata (LogicalModels.runTrackLogicalModel env) q
-  RMUntrackLogicalModel q -> dispatchMetadata LogicalModels.runUntrackLogicalModel q
+  RMGetNativeQuery q -> dispatchMetadata NativeQueries.runGetNativeQuery q
+  RMTrackNativeQuery q -> dispatchMetadata (NativeQueries.runTrackNativeQuery env) q
+  RMUntrackNativeQuery q -> dispatchMetadata NativeQueries.runUntrackNativeQuery q
   RMGetCustomReturnType q -> dispatchMetadata CustomReturnType.runGetCustomReturnType q
   RMTrackCustomReturnType q -> dispatchMetadata CustomReturnType.runTrackCustomReturnType q
   RMUntrackCustomReturnType q -> dispatchMetadata CustomReturnType.runUntrackCustomReturnType q
@@ -805,6 +810,13 @@ runMetadataQueryV1M env checkFeatureFlag remoteSchemaPerms currentResourceVersio
   RMSetOpenTelemetryStatus q -> runSetOpenTelemetryStatus q
   RMGetFeatureFlag q -> runGetFeatureFlag checkFeatureFlag q
   RMBulk q -> encJFromList <$> indexedMapM (runMetadataQueryM env checkFeatureFlag remoteSchemaPerms currentResourceVersion) q
+  RMBulkKeepGoing commands -> do
+    results <-
+      commands & indexedMapM \command ->
+        runMetadataQueryM env checkFeatureFlag remoteSchemaPerms currentResourceVersion command
+          `catchError` \qerr -> pure (encJFromJValue qerr)
+
+    pure (encJFromList results)
   where
     dispatchMetadata ::
       (forall b. BackendMetadata b => i b -> a) ->

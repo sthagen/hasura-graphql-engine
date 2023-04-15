@@ -33,7 +33,7 @@ export const cockroach: Database = {
     getDriverInfo: async () => ({
       name: 'cockroach',
       displayName: 'CockroachDB',
-      release: 'Beta',
+      release: 'GA',
     }),
     getDatabaseConfiguration: async () => {
       return Feature.NotImplemented;
@@ -77,6 +77,7 @@ export const cockroach: Database = {
     getFKRelationships,
     getTablesListAsTree,
     getSupportedOperators,
+    getDatabaseSchemas: async () => Feature.NotImplemented,
   },
   query: {
     getTableRows,

@@ -13,6 +13,7 @@ import { Collapsible } from '../../../../new-components/Collapsible';
 import { PoolSettings } from './parts/PoolSettings';
 import { LimitedFeatureWrapper } from '../LimitedFeatureWrapper/LimitedFeatureWrapper';
 import { Tabs } from '../../../../new-components/Tabs';
+import { DisplayToastErrorMessage } from '../Common/DisplayToastErrorMessage';
 
 interface ConnectMssqlWidgetProps {
   dataSourceName?: string;
@@ -41,8 +42,8 @@ export const ConnectMssqlWidget = (props: ConnectMssqlWidgetProps) => {
       onError: err => {
         hasuraToast({
           type: 'error',
-          title: 'Error while adding database',
-          children: JSON.stringify(err),
+          title: err.name,
+          children: <DisplayToastErrorMessage message={err.message} />,
         });
       },
     });

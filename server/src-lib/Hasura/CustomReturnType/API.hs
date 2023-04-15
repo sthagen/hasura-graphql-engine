@@ -29,9 +29,9 @@ import Hasura.Base.Error
 import Hasura.CustomReturnType.Metadata (CustomReturnTypeMetadata (..), crtmSelectPermissions)
 import Hasura.CustomReturnType.Types (CustomReturnTypeName)
 import Hasura.EncJSON
-import Hasura.LogicalModel.Metadata (LogicalModelMetadata (..))
-import Hasura.LogicalModel.Types (NullableScalarType, nullableScalarTypeMapCodec)
 import Hasura.Metadata.DTO.Utils (codecNamePrefix)
+import Hasura.NativeQuery.Metadata (NativeQueryMetadata (..))
+import Hasura.NativeQuery.Types (NullableScalarType, nullableScalarTypeMapCodec)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (Backend (..))
 import Hasura.RQL.Types.Common (SourceName, defaultSource, sourceNameToText, successMsg)
@@ -228,16 +228,16 @@ runUntrackCustomReturnType q = do
 
   metadata <- getMetadata
 
-  let logicalModels :: [LogicalModelMetadata b]
-      logicalModels = metadata ^.. metaSources . ix source . toSourceMetadata @b . smLogicalModels . traversed
+  let nativeQueries :: [NativeQueryMetadata b]
+      nativeQueries = metadata ^.. metaSources . ix source . toSourceMetadata @b . smNativeQueries . traversed
 
-  case find ((== fieldName) . _lmmReturns) logicalModels of
-    Just LogicalModelMetadata {_lmmRootFieldName} ->
+  case find ((== fieldName) . _nqmReturns) nativeQueries of
+    Just NativeQueryMetadata {_nqmRootFieldName} ->
       throw400 ConstraintViolation $
         "Custom type "
           <> fieldName
-            <<> " still being used by logical model "
-          <> _lmmRootFieldName <<> "."
+            <<> " still being used by native query "
+          <> _nqmRootFieldName <<> "."
     Nothing -> pure ()
 
   buildSchemaCacheFor metadataObj $
@@ -248,7 +248,7 @@ runUntrackCustomReturnType q = do
     source = utctSource q
     fieldName = utctName q
 
--- | A permission for logical models is tied to a specific root field name and
+-- | A permission for custom return types is tied to a specific name and
 -- source. This wrapper adds both of those things to the JSON object that
 -- describes the permission.
 data CreateCustomReturnTypePermission a (b :: BackendType) = CreateCustomReturnTypePermission
@@ -291,8 +291,8 @@ runCreateSelectCustomReturnTypePermission CreateCustomReturnTypePermission {..} 
 
   pure successMsg
 
--- | To drop a permission, we need to know the source and root field name of
--- the logical model, as well as the role whose permission we want to drop.
+-- | To drop a permission, we need to know the source and name of
+-- the custom return type, as well as the role whose permission we want to drop.
 data DropCustomReturnTypePermission (b :: BackendType) = DropCustomReturnTypePermission
   { dcrtpSource :: SourceName,
     dcrtpName :: CustomReturnTypeName,
@@ -340,7 +340,7 @@ dropCustomReturnTypeInMetadata source name = do
 -- | check feature flag is enabled before carrying out any actions
 throwIfFeatureDisabled :: (HasFeatureFlagChecker m, MonadError QErr m) => m ()
 throwIfFeatureDisabled = do
-  enableCustomReturnTypes <- checkFlag FF.logicalModelInterface
+  enableCustomReturnTypes <- checkFlag FF.nativeQueryInterface
   unless enableCustomReturnTypes $ throw500 "CustomReturnTypes is disabled!"
 
 -- | Check whether a custom return type with the given root field name exists for

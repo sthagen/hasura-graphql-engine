@@ -18,6 +18,7 @@ import Data.Text.Extended
 import Hasura.Base.Error (throw500)
 import Hasura.CustomReturnType.Cache (CustomReturnTypeInfo (..))
 import Hasura.CustomReturnType.Common
+import Hasura.CustomReturnType.Types (CustomReturnTypeName (..))
 import Hasura.Function.Cache
 import Hasura.GraphQL.Parser.Class
 import Hasura.GraphQL.Schema.Backend
@@ -161,6 +162,7 @@ boolExpInternal gqlName fieldInfos description memoizeKey mkAggPredParser = do
 
         -- Using remote relationship fields in boolean expressions is not supported.
         FIRemoteRelationship _ -> empty
+        FINestedObject _ -> empty -- TODO(dmoverton)
 
 -- |
 -- > input type_bool_exp {
@@ -176,14 +178,14 @@ customReturnTypeBoolExp ::
   ( MonadBuildSchema b r m n,
     AggregationPredicatesSchema b
   ) =>
-  G.Name ->
   CustomReturnTypeInfo b ->
   SchemaT r m (Parser 'Input n (AnnBoolExp b (UnpreparedValue b)))
-customReturnTypeBoolExp name customReturnType =
+customReturnTypeBoolExp customReturnType =
   case toFieldInfo (_crtiFields customReturnType) of
     Nothing -> throw500 $ "Error creating fields for custom type " <> tshow (_crtiName customReturnType)
     Just fieldInfo -> do
-      let gqlName = mkTableBoolExpTypeName (C.fromCustomName name)
+      let name = getCustomReturnTypeName (_crtiName customReturnType)
+          gqlName = mkTableBoolExpTypeName (C.fromCustomName name)
 
           -- Aggregation parsers let us say things like, "select all authors
           -- with at least one article": they are predicates based on the

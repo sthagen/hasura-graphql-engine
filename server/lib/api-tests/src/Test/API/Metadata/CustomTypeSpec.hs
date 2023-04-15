@@ -24,8 +24,8 @@ import Test.Hspec (SpecWith, describe, it)
 
 -- ** Preamble
 
-featureFlagForLogicalModels :: String
-featureFlagForLogicalModels = "HASURA_FF_LOGICAL_MODEL_INTERFACE"
+featureFlagForNativeQueries :: String
+featureFlagForNativeQueries = "HASURA_FF_NATIVE_QUERY_INTERFACE"
 
 spec :: SpecWith GlobalTestEnvironment
 spec = do
@@ -38,7 +38,7 @@ spec = do
               }
           ]
 
-  Fixture.hgeWithEnv [(featureFlagForLogicalModels, "True")] do
+  Fixture.hgeWithEnv [(featureFlagForNativeQueries, "True")] do
     traverse_
       (Fixture.runClean fixtures)
       [ testImplementation,
@@ -58,13 +58,13 @@ testImplementation = do
         (Schema.customType "nice")
           { Schema.customTypeDescription = Just "hello",
             Schema.customTypeColumns =
-              [ (Schema.logicalModelColumn "divided" Schema.TInt)
-                  { Schema.logicalModelColumnDescription = Just "a divided thing"
+              [ (Schema.nativeQueryColumn "divided" Schema.TInt)
+                  { Schema.nativeQueryColumnDescription = Just "a divided thing"
                   }
               ]
           }
 
-  describe "When logical models are disabled" do
+  describe "When native queries are disabled" do
     let customTypesMetadata =
           [yaml|
                 fields:
@@ -99,8 +99,8 @@ testImplementation = do
               inconsistent_objects:
                 - definition: *customTypesMetadata
                   name: custom_type divided_stuff in source default
-                  reason: 'Inconsistent object: The Logical Models feature is disabled'
-                  type: custom_type 
+                  reason: 'Inconsistent object: The Custom Return Type feature is disabled'
+                  type: custom_type
               is_consistent: false
             |]
 
@@ -124,16 +124,16 @@ testImplementation = do
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
-              type: *getRequestType 
+              type: *getRequestType
               args:
                 source: *sourceName
             |]
         )
         [interpolateYaml|
-          - name: nice 
+          - name: nice
             description: hello
             fields:
-                - name: divided 
+                - name: divided
                   type: #{scalarTypeToText testEnvironment Schema.TInt}
                   nullable: false
                   description: "a divided thing"
@@ -154,7 +154,7 @@ testImplementation = do
         ( GraphqlEngine.postMetadata
             testEnvironment
             [yaml|
-              type: *getRequestType 
+              type: *getRequestType
               args:
                 source: *sourceName
             |]
@@ -167,12 +167,12 @@ testImplementation = do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           sourceName = BackendType.backendSourceName backendTypeMetadata
 
-          logicalModel :: Schema.LogicalModel
-          logicalModel =
-            (Schema.logicalModel "logical_model" "SELECT 1 as divided" "nice")
+          nativeQuery :: Schema.NativeQuery
+          nativeQuery =
+            (Schema.nativeQuery "native_query" "SELECT 1 as divided" "nice")
 
       Schema.trackCustomType sourceName myCustomType testEnvironment
-      Schema.trackLogicalModel sourceName logicalModel testEnvironment
+      Schema.trackNativeQuery sourceName nativeQuery testEnvironment
 
       shouldReturnYaml
         testEnvironment
@@ -181,7 +181,7 @@ testImplementation = do
         )
         [yaml|
           code: constraint-violation
-          error: Custom type "nice" still being used by logical model "logical_model".
+          error: Custom type "nice" still being used by native query "native_query".
           path: $.args
         |]
 
@@ -195,8 +195,8 @@ testPermissions = do
       customReturnType =
         (Schema.customType "divided_stuff")
           { Schema.customTypeColumns =
-              [ (Schema.logicalModelColumn "divided" Schema.TInt)
-                  { Schema.logicalModelColumnDescription = Just "a divided thing"
+              [ (Schema.nativeQueryColumn "divided" Schema.TInt)
+                  { Schema.nativeQueryColumnDescription = Just "a divided thing"
                   }
               ]
           }
@@ -257,7 +257,7 @@ testPermissions = do
                   filter: {}
         |]
 
-    it "Adds a logical model, removes it, and returns 200" $ \testEnvironment -> do
+    it "Adds a native query, removes it, and returns 200" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           sourceName = BackendType.backendSourceName backendTypeMetadata
           backendType = BackendType.backendTypeString backendTypeMetadata

@@ -22,7 +22,6 @@ import Hasura.Backends.BigQuery.Source
 import Hasura.Backends.BigQuery.Types
 import Hasura.Base.Error
 import Hasura.Function.Cache (FunctionOverloads (..))
-import Hasura.Logging (Hasura, Logger)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (BackendConfig)
 import Hasura.RQL.Types.Column
@@ -42,7 +41,6 @@ defaultRetryBaseDelay = 500000
 
 resolveSourceConfig ::
   MonadIO m =>
-  Logger Hasura ->
   SourceName ->
   BigQueryConnSourceConfig ->
   BackendSourceKind 'BigQuery ->
@@ -50,7 +48,7 @@ resolveSourceConfig ::
   Env.Environment ->
   manager ->
   m (Either QErr BigQuerySourceConfig)
-resolveSourceConfig _logger _name BigQueryConnSourceConfig {..} _backendKind _backendConfig env _manager = runExceptT $ do
+resolveSourceConfig _name BigQueryConnSourceConfig {..} _backendKind _backendConfig env _manager = runExceptT $ do
   eSA <- resolveConfigurationJson env _cscServiceAccount
   case eSA of
     Left e -> throw400 Unexpected $ T.pack e
@@ -132,7 +130,8 @@ resolveSource sourceConfig =
                             _ptmiForeignKeys = mempty,
                             _ptmiViewInfo = Just $ ViewInfo False False False,
                             _ptmiDescription = Nothing,
-                            _ptmiExtraTableMetadata = ()
+                            _ptmiExtraTableMetadata = (),
+                            _ptmiCustomObjectTypes = mempty
                           }
                       )
                       | (index, RestTable {tableReference, schema}) <-

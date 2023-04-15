@@ -10,6 +10,7 @@ import { useManageDatabaseConnection } from '../../hooks/useManageDatabaseConnec
 import { generateBigQueryRequestPayload } from './utils/generateRequests';
 import { Collapsible } from '../../../../new-components/Collapsible';
 import { Tabs } from '../../../../new-components/Tabs';
+import { DisplayToastErrorMessage } from '../Common/DisplayToastErrorMessage';
 
 interface ConnectBigQueryWidgetProps {
   dataSourceName?: string;
@@ -39,8 +40,8 @@ export const ConnectBigQueryWidget = (props: ConnectBigQueryWidgetProps) => {
       onError: err => {
         hasuraToast({
           type: 'error',
-          title: 'Error while adding database',
-          children: JSON.stringify(err),
+          title: err.name,
+          children: <DisplayToastErrorMessage message={err.message} />,
         });
       },
     });

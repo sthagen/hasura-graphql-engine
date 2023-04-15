@@ -14,7 +14,7 @@ import Hasura.Function.Cache
 import Hasura.GraphQL.Schema.NamingCase
 import Hasura.Incremental qualified as Inc
 import Hasura.Logging (Hasura, Logger)
-import Hasura.LogicalModel.Metadata (LogicalModelMetadata)
+import Hasura.NativeQuery.Metadata (NativeQueryMetadata)
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.Types.Backend
@@ -34,6 +34,7 @@ import Hasura.SQL.Backend
 import Hasura.SQL.Types
 import Hasura.Server.Migrate.Version
 import Hasura.Services.Network
+import Language.GraphQL.Draft.Syntax qualified as G
 import Network.HTTP.Client qualified as HTTP
 
 class
@@ -94,7 +95,6 @@ class
   -- creates a connection pool (and other related parameters) in the process
   resolveSourceConfig ::
     (MonadIO m, MonadBaseControl IO m, MonadResolveSource m) =>
-    Logger Hasura ->
     SourceName ->
     SourceConnConfiguration b ->
     BackendSourceKind b ->
@@ -106,6 +106,7 @@ class
   -- | Function that introspects a database for tables, columns, functions etc.
   resolveDatabaseMetadata ::
     (MonadIO m, MonadBaseControl IO m, MonadResolveSource m) =>
+    Logger Hasura ->
     SourceMetadata b ->
     SourceConfig b ->
     m (Either QErr (DBObjectsIntrospection b))
@@ -194,19 +195,27 @@ class
   -- to be tracked.
   listAllTables ::
     (CacheRM m, MonadBaseControl IO m, MetadataM m, MonadError QErr m, MonadIO m, MonadReader r m, Has (Logger Hasura) r, ProvidesNetwork m) =>
-    Env.Environment ->
     SourceName ->
     m [TableName b]
 
-  validateLogicalModel ::
+  validateNativeQuery ::
     (MonadIO m, MonadError QErr m) =>
     Env.Environment ->
     SourceConnConfiguration b ->
     CustomReturnTypeMetadata b ->
-    LogicalModelMetadata b ->
+    NativeQueryMetadata b ->
     m ()
-  validateLogicalModel _ _ _ _ =
-    throw500 "validateLogicalModel: not implemented for this backend."
+  validateNativeQuery _ _ _ _ =
+    throw500 "validateNativeQuery: not implemented for this backend."
+
+  -- | How to convert a column to a field.
+  -- For backends that don't support nested objects or arrays the default implementation
+  -- (i.e. wrapping the ColumnInfo in FIColumn) is what you want.
+  columnInfoToFieldInfo ::
+    HashMap G.Name (TableObjectType b) ->
+    ColumnInfo b ->
+    FieldInfo b
+  columnInfoToFieldInfo _ = FIColumn
 
   -- | Allows the backend to control whether or not a particular source supports being
   -- the target of remote relationships or not

@@ -4,7 +4,6 @@ module Hasura.Backends.BigQuery.Instances.Execute () where
 
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Text qualified as Aeson
-import Data.Environment qualified as Env
 import Data.HashMap.Strict qualified as Map
 import Data.HashMap.Strict.InsOrd qualified as OMap
 import Data.Text qualified as T
@@ -29,6 +28,7 @@ import Hasura.QueryTags
   )
 import Hasura.RQL.IR
 import Hasura.RQL.IR.Select qualified as IR
+import Hasura.RQL.IR.Value qualified as IR (Provenance (Unknown))
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
@@ -67,14 +67,13 @@ bqDBQueryPlan ::
   ( MonadError E.QErr m
   ) =>
   UserInfo ->
-  Env.Environment ->
   SourceName ->
   SourceConfig 'BigQuery ->
   QueryDB 'BigQuery Void (UnpreparedValue 'BigQuery) ->
   [HTTP.Header] ->
   Maybe G.Name ->
   m (DBStepInfo 'BigQuery)
-bqDBQueryPlan userInfo _env sourceName sourceConfig qrf _ _ = do
+bqDBQueryPlan userInfo sourceName sourceConfig qrf _ _ = do
   -- TODO (naveen): Append query tags to the query
   select <- planNoPlan (BigQuery.bigQuerySourceConfigToFromIrConfig sourceConfig) userInfo qrf
   let action = OnBaseMonad do
@@ -128,7 +127,6 @@ bqDBMutationPlan ::
   ( MonadError E.QErr m
   ) =>
   UserInfo ->
-  Env.Environment ->
   Options.StringifyNumbers ->
   SourceName ->
   SourceConfig 'BigQuery ->
@@ -136,7 +134,7 @@ bqDBMutationPlan ::
   [HTTP.Header] ->
   Maybe G.Name ->
   m (DBStepInfo 'BigQuery)
-bqDBMutationPlan _userInfo _environment _stringifyNum _sourceName _sourceConfig _mrf _headers _gName =
+bqDBMutationPlan _userInfo _stringifyNum _sourceName _sourceConfig _mrf _headers _gName =
   throw500 "mutations are not supported in BigQuery; this should be unreachable"
 
 -- explain
@@ -202,7 +200,6 @@ bqDBRemoteRelationshipPlan ::
   forall m.
   ( MonadError QErr m
   ) =>
-  Env.Environment ->
   UserInfo ->
   SourceName ->
   SourceConfig 'BigQuery ->
@@ -220,15 +217,15 @@ bqDBRemoteRelationshipPlan ::
   Maybe G.Name ->
   Options.StringifyNumbers ->
   m (DBStepInfo 'BigQuery)
-bqDBRemoteRelationshipPlan _env userInfo sourceName sourceConfig lhs lhsSchema argumentId relationship reqHeaders operationName stringifyNumbers = do
-  flip runReaderT emptyQueryTagsComment $ bqDBQueryPlan userInfo Env.emptyEnvironment sourceName sourceConfig rootSelection reqHeaders operationName
+bqDBRemoteRelationshipPlan userInfo sourceName sourceConfig lhs lhsSchema argumentId relationship reqHeaders operationName stringifyNumbers = do
+  flip runReaderT emptyQueryTagsComment $ bqDBQueryPlan userInfo sourceName sourceConfig rootSelection reqHeaders operationName
   where
     coerceToColumn = BigQuery.ColumnName . getFieldNameTxt
     joinColumnMapping = mapKeys coerceToColumn lhsSchema
 
     rowsArgument :: UnpreparedValue 'BigQuery
     rowsArgument =
-      UVParameter Nothing $
+      UVParameter IR.Unknown $
         ColumnValue (ColumnScalar BigQuery.StringScalarType) $
           BigQuery.StringValue . LT.toStrict $
             Aeson.encodeToLazyText lhs
