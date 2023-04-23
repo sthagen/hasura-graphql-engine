@@ -39,10 +39,10 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.Extended (dquote, dquoteList, (<<>))
 import Hasura.Base.Error
-import Hasura.CustomReturnType.API
 import Hasura.EncJSON
 import Hasura.Function.API
 import Hasura.Logging qualified as HL
+import Hasura.LogicalModel.API
 import Hasura.Metadata.Class
 import Hasura.NativeQuery.API
 import Hasura.Prelude hiding (first)
@@ -703,14 +703,19 @@ purgeMetadataObj = \case
       SMOTable qt -> dropTableInMetadata @b source qt
       SMOFunction qf -> dropFunctionInMetadata @b source qf
       SMOFunctionPermission qf rn -> dropFunctionPermissionInMetadata @b source qf rn
-      SMOCustomReturnType crt -> dropCustomReturnTypeInMetadata @b source crt
       SMONativeQuery lm -> dropNativeQueryInMetadata @b source lm
-      SMOCustomReturnTypeObj customReturnTypeName customReturnTypeMetadataObjId ->
+      SMONativeQueryObj nativeQueryName nativeQueryMetadataObjId ->
         MetadataModifier $
-          customReturnTypeMetadataSetter @b source customReturnTypeName
-            %~ case customReturnTypeMetadataObjId of
-              CRTMOPerm roleName permType ->
-                dropCustomReturnTypePermissionInMetadata roleName permType
+          nativeQueryMetadataSetter @b source nativeQueryName
+            %~ case nativeQueryMetadataObjId of
+              NQMORel rn _ -> dropNativeQueryRelationshipInMetadata rn
+      SMOLogicalModel lm -> dropLogicalModelInMetadata @b source lm
+      SMOLogicalModelObj logicalModelName logicalModelMetadataObjId ->
+        MetadataModifier $
+          logicalModelMetadataSetter @b source logicalModelName
+            %~ case logicalModelMetadataObjId of
+              LMMOPerm roleName permType ->
+                dropLogicalModelPermissionInMetadata roleName permType
       SMOTableObj qt tableObj ->
         MetadataModifier $
           tableMetadataSetter @b source qt %~ case tableObj of

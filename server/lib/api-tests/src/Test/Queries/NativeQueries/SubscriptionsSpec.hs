@@ -95,14 +95,14 @@ tests = do
                 from article
               |]
 
-            articleWithExcerptReturnType :: Schema.CustomType
-            articleWithExcerptReturnType =
-              (Schema.customType "article_with_excerpt")
-                { Schema.customTypeColumns =
-                    [ Schema.nativeQueryColumn "id" Schema.TInt,
-                      Schema.nativeQueryColumn "title" Schema.TStr,
-                      Schema.nativeQueryColumn "excerpt" Schema.TStr,
-                      Schema.nativeQueryColumn "date" Schema.TUTCTime
+            articleWithExcerptLogicalModel :: Schema.LogicalModel
+            articleWithExcerptLogicalModel =
+              (Schema.logicalModel "article_with_excerpt")
+                { Schema.logicalModelColumns =
+                    [ Schema.logicalModelScalar "id" Schema.TInt,
+                      Schema.logicalModelScalar "title" Schema.TStr,
+                      Schema.logicalModelScalar "excerpt" Schema.TStr,
+                      Schema.logicalModelScalar "date" Schema.TUTCTime
                     ]
                 }
 
@@ -113,7 +113,7 @@ tests = do
                     [Schema.nativeQueryColumn "length" Schema.TInt]
                 }
 
-        Schema.trackCustomType sourceName articleWithExcerptReturnType testEnvironment
+        Schema.trackLogicalModel sourceName articleWithExcerptLogicalModel testEnvironment
 
         Schema.trackNativeQuery sourceName articleWithExcerptNativeQuery testEnvironment
 
@@ -233,14 +233,14 @@ tests = do
             shouldBe :: IO Value -> Value -> IO ()
             shouldBe = shouldReturnYaml testEnvironment
 
-            customReturnType :: Schema.CustomType
-            customReturnType =
-              (Schema.customType "crt")
-                { Schema.customTypeColumns =
-                    [ Schema.nativeQueryColumn "id" Schema.TInt,
-                      Schema.nativeQueryColumn "title" Schema.TStr,
-                      Schema.nativeQueryColumn "content" Schema.TStr,
-                      Schema.nativeQueryColumn "date" Schema.TUTCTime
+            logicalModel :: Schema.LogicalModel
+            logicalModel =
+              (Schema.logicalModel "lm")
+                { Schema.logicalModelColumns =
+                    [ Schema.logicalModelScalar "id" Schema.TInt,
+                      Schema.logicalModelScalar "title" Schema.TStr,
+                      Schema.logicalModelScalar "content" Schema.TStr,
+                      Schema.logicalModelScalar "date" Schema.TUTCTime
                     ]
                 }
 
@@ -249,12 +249,12 @@ tests = do
 
             nativeQuery :: Schema.NativeQuery
             nativeQuery =
-              (Schema.nativeQuery "filtered_article" query "crt")
+              (Schema.nativeQuery "filtered_article" query "lm")
                 { Schema.nativeQueryArguments =
                     [Schema.nativeQueryColumn "pattern" Schema.TStr]
                 }
 
-        Schema.trackCustomType sourceName customReturnType testEnvironment
+        Schema.trackLogicalModel sourceName logicalModel testEnvironment
         Schema.trackNativeQuery sourceName nativeQuery testEnvironment
 
         one <- mkSubscription [graphql| subscription { filtered_article(args: { pattern: "%native%" }) { id, title } } |] []

@@ -77,18 +77,18 @@ buildDeleteTx deleteOperation stringifyNum queryTags = do
   -- Create a temp table
   Tx.unitQueryE defaultMSSQLTxErrorHandler (createInsertedTempTableQuery `withQueryTags` queryTags)
   let deleteQuery = TQ.fromDelete <$> TSQL.fromDelete deleteOperation
-  deleteQueryValidated <- toQueryFlat . qwdQuery <$> runFromIr deleteQuery
+  deleteQueryValidated <- toQueryFlat <$> runFromIrErrorOnCTEs deleteQuery
 
   -- Execute DELETE statement
   Tx.unitQueryE mutationMSSQLTxErrorHandler (deleteQueryValidated `withQueryTags` queryTags)
-  mutationOutputSelect <- qwdQuery <$> runFromIr (mkMutationOutputSelect stringifyNum withAlias $ _adOutput deleteOperation)
+  mutationOutputSelect <- runFromIrUseCTEs (mkMutationOutputSelect stringifyNum withAlias $ _adOutput deleteOperation)
 
   let withSelect =
         emptySelect
           { selectProjections = [StarProjection],
             selectFrom = Just $ FromTempTable $ Aliased tempTableNameDeleted "deleted_alias"
           }
-      finalMutationOutputSelect = mutationOutputSelect {selectWith = Just $ With $ pure $ Aliased withSelect withAlias}
+      finalMutationOutputSelect = mutationOutputSelect {selectWith = Just $ With $ pure $ Aliased (CTESelect withSelect) withAlias}
       mutationOutputSelectQuery = toQueryFlat $ TQ.fromSelect finalMutationOutputSelect
 
   -- Execute SELECT query and fetch mutation response

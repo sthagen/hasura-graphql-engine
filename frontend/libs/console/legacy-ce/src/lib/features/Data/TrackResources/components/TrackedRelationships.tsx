@@ -23,15 +23,16 @@ import {
   generateDeleteLocalRelationshipRequest,
   generateRemoteRelationshipDeleteRequest,
 } from '../../../DatabaseRelationships/utils/generateRequest';
-import { generateQueryKeys } from '../../../DatabaseRelationships/utils/queryClientUtils';
-import { useQueryClient } from 'react-query';
 import { exportMetadata } from '../../../DataSource';
 import { useHttpClient } from '../../../Network';
 import { IndicatorCard } from '../../../../new-components/IndicatorCard';
 import { MetadataDataSource } from '../../../../metadata/types';
 import Skeleton from 'react-loading-skeleton';
-import { getSuggestedRelationshipsCacheQuery } from '../../../DatabaseRelationships/components/SuggestedRelationships/hooks/useSuggestedRelationships';
+import { generateQueryKeys } from '../../../DatabaseRelationships/utils/queryClientUtils';
+import { useQueryClient } from 'react-query';
 import { useCheckRows } from '../../../DatabaseRelationships/hooks/useCheckRows';
+import { APIError } from '../../../../hooks/error';
+import { BulkKeepGoingResponse } from '../../../hasura-metadata-types';
 
 const getQueryFunction = (relationship: Relationship) => {
   if (relationship.type === 'localRelationship') {
@@ -59,7 +60,7 @@ interface TrackedRelationshipsProps {
   dataSourceName: string;
   driver?: MetadataDataSource['kind'];
   isLoading: boolean;
-  onRefetchMetadata: () => void;
+  onUpdate: () => void;
   relationships: Relationship[];
 }
 
@@ -67,12 +68,13 @@ export const TrackedRelationships: React.VFC<TrackedRelationshipsProps> = ({
   dataSourceName,
   driver,
   isLoading,
-  onRefetchMetadata,
+  onUpdate,
   relationships,
 }) => {
   const httpClient = useHttpClient();
-  const { mutateAsync } = useMetadataMigration();
+  const { mutateAsync } = useMetadataMigration<BulkKeepGoingResponse>();
   const queryClient = useQueryClient();
+
   const [isTrackingSelectedRelationships, setTrackingSelectedRelationships] =
     useState(false);
 
@@ -118,58 +120,70 @@ export const TrackedRelationships: React.VFC<TrackedRelationshipsProps> = ({
       );
 
       if (driver) {
-        for (let i = 0; i < selectedRelationships.length; i++) {
-          const selectedRelationship = selectedRelationships[i];
-          const mutationOptions = {
-            onSuccess: () => {
-              queryClient.invalidateQueries(generateQueryKeys.metadata());
+        const recentMetadata = await exportMetadata({ httpClient });
 
-              queryClient.invalidateQueries(
-                generateQueryKeys.suggestedRelationships({
-                  dataSourceName,
-                  table: selectedRelationship.fromTable,
-                })
-              );
-            },
-          };
+        const queries = selectedRelationships.map(relationship => {
+          const queryFunction = getQueryFunction(relationship);
 
-          const queryFunction = getQueryFunction(selectedRelationship);
-          if (queryFunction) {
-            const recentMetadata = await exportMetadata({ httpClient });
-            await mutateAsync(
-              {
-                query: queryFunction({
-                  driver,
-                  resource_version: recentMetadata.resource_version,
-                  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-                  // @ts-ignore
-                  relationship: selectedRelationship,
-                }),
-              },
-              mutationOptions
-            );
-            queryClient.invalidateQueries(
-              getSuggestedRelationshipsCacheQuery(
-                dataSourceName,
-                selectedRelationship.fromTable
-              )
-            );
-          }
-        }
-
-        onRefetchMetadata();
-
-        const relationshipLabel =
-          selectedRelationships.length > 1 ? 'Relationships' : 'Relationship';
-        const toastMessage = `${selectedRelationships.length} ${relationshipLabel} untracked`;
-
-        hasuraToast({
-          title: 'Success',
-          message: toastMessage,
-          type: 'success',
+          const query = queryFunction
+            ? queryFunction({
+                driver,
+                resource_version: recentMetadata.resource_version,
+                // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                // @ts-ignore
+                relationship,
+              })
+            : {};
+          return query;
         });
+
+        await mutateAsync(
+          {
+            query: {
+              type: 'bulk_keep_going',
+              args: queries,
+            },
+          },
+          {
+            onSuccess: response => {
+              response.forEach(result => {
+                if ('error' in result) {
+                  hasuraToast({
+                    type: 'error',
+                    title: 'Error while tracking table',
+                    children: result.error,
+                  });
+                }
+              });
+
+              const successfullyTrackedCounter = response.filter(
+                result => 'message' in result && result.message === 'success'
+              ).length;
+              const plural = successfullyTrackedCounter > 1 ? 's' : '';
+
+              hasuraToast({
+                type: 'success',
+                title: 'Successfully untracked',
+                message: `${successfullyTrackedCounter} object${plural} tracked`,
+              });
+            },
+            onError: err => {
+              hasuraToast({
+                type: 'error',
+                title: 'Unable to perform operation',
+                message: (err as APIError).message,
+              });
+            },
+            onSettled: () => {
+              queryClient.invalidateQueries(generateQueryKeys.metadata());
+            },
+          }
+        );
+
+        onUpdate();
       }
     } catch (err) {
+      console.error(err);
       setTrackingSelectedRelationships(false);
     }
     reset();
@@ -200,6 +214,7 @@ export const TrackedRelationships: React.VFC<TrackedRelationshipsProps> = ({
   };
 
   const onRelationshipActionSuccess = () => {
+    onUpdate();
     if (mode)
       fireNotification({
         type: 'success',

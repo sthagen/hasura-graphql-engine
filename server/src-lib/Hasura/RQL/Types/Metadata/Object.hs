@@ -7,7 +7,8 @@ module Hasura.RQL.Types.Metadata.Object
     MetadataObject (..),
     SourceMetadataObjId (..),
     TableMetadataObjId (..),
-    CustomReturnTypeMetadataObjId (..),
+    LogicalModelMetadataObjId (..),
+    NativeQueryMetadataObjId (..),
     droppableInconsistentMetadata,
     getInconsistentRemoteSchemas,
     groupInconsistentMetadataById,
@@ -44,7 +45,7 @@ import Data.Text.Extended
 import Hasura.Backends.DataConnector.Adapter.Types (DataConnectorName)
 import Hasura.Base.ErrorMessage
 import Hasura.Base.ToErrorValue
-import Hasura.CustomReturnType.Types
+import Hasura.LogicalModel.Types
 import Hasura.NativeQuery.Types
 import Hasura.Prelude
 import Hasura.RQL.Types.Action
@@ -72,12 +73,19 @@ data TableMetadataObjId
 
 instance Hashable TableMetadataObjId
 
--- | Identifiers for custom return type elements within the metadata structure.
-data CustomReturnTypeMetadataObjId
-  = CRTMOPerm RoleName PermType
+-- | Identifiers for logical model elements within the metadata structure.
+data LogicalModelMetadataObjId
+  = LMMOPerm RoleName PermType
   deriving (Show, Eq, Ord, Generic)
 
-instance Hashable CustomReturnTypeMetadataObjId
+instance Hashable LogicalModelMetadataObjId
+
+-- | the logical model should probably also link to its logical model
+data NativeQueryMetadataObjId
+  = NQMORel RelName RelType
+  deriving (Show, Eq, Ord, Generic)
+
+instance Hashable NativeQueryMetadataObjId
 
 data SourceMetadataObjId b
   = SMOTable (TableName b)
@@ -85,8 +93,9 @@ data SourceMetadataObjId b
   | SMOFunctionPermission (FunctionName b) RoleName
   | SMOTableObj (TableName b) TableMetadataObjId
   | SMONativeQuery NativeQueryName
-  | SMOCustomReturnType CustomReturnTypeName
-  | SMOCustomReturnTypeObj CustomReturnTypeName CustomReturnTypeMetadataObjId
+  | SMONativeQueryObj NativeQueryName NativeQueryMetadataObjId
+  | SMOLogicalModel LogicalModelName
+  | SMOLogicalModelObj LogicalModelName LogicalModelMetadataObjId
   deriving (Generic)
 
 deriving instance (Backend b) => Show (SourceMetadataObjId b)
@@ -148,9 +157,11 @@ moiTypeName = \case
       SMOTable _ -> "table"
       SMOFunction _ -> "function"
       SMONativeQuery _ -> "native_query"
-      SMOCustomReturnType _ -> "custom_type"
-      SMOCustomReturnTypeObj _ customReturnTypeObjectId -> case customReturnTypeObjectId of
-        CRTMOPerm _ permType -> permTypeToCode permType <> "_permission"
+      SMONativeQueryObj _ nativeQueryObjId -> case nativeQueryObjId of
+        NQMORel _ relType -> relTypeToTxt relType <> "_relation"
+      SMOLogicalModel _ -> "custom_type"
+      SMOLogicalModelObj _ logicalModelObjectId -> case logicalModelObjectId of
+        LMMOPerm _ permType -> permTypeToCode permType <> "_permission"
       SMOFunctionPermission _ _ -> "function_permission"
       SMOTableObj _ tableObjectId -> case tableObjectId of
         MTORel _ relType -> relTypeToTxt relType <> "_relation"
@@ -203,17 +214,20 @@ moiName objectId =
           <> " in source "
           <> toTxt source
       SMONativeQuery name -> toTxt name <> " in source " <> toTxt source
-      SMOCustomReturnType name -> toTxt name <> " in source " <> toTxt source
-      SMOCustomReturnTypeObj customReturnTypeName customReturnTypeObjectId -> do
+      SMONativeQueryObj nativeQueryName nativeQueryObjId ->
+        case nativeQueryObjId of
+          NQMORel name _ -> toTxt name <> " in " <> toTxt nativeQueryName
+      SMOLogicalModel name -> toTxt name <> " in source " <> toTxt source
+      SMOLogicalModelObj logicalModelName logicalModelObjectId -> do
         let objectName :: Text
-            objectName = case customReturnTypeObjectId of
-              CRTMOPerm name _ -> toTxt name
+            objectName = case logicalModelObjectId of
+              LMMOPerm name _ -> toTxt name
 
             sourceObjectId :: MetadataObjId
             sourceObjectId =
               MOSourceObjId source $
                 AB.mkAnyBackend $
-                  SMOCustomReturnType @b customReturnTypeName
+                  SMOLogicalModel @b logicalModelName
 
         objectName <> " in " <> moiName sourceObjectId
       SMOTableObj tableName tableObjectId ->

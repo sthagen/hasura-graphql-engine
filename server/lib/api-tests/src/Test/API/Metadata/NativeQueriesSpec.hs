@@ -1,10 +1,12 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
 
 -- | Tests of the Native Queries feature.
 module Test.API.Metadata.NativeQueriesSpec (spec) where
 
 import Control.Lens
 import Data.Aeson qualified as A
+import Data.Aeson.Key qualified as Key
 import Data.Aeson.Lens
 import Data.List.NonEmpty qualified as NE
 import Harness.Backend.BigQuery qualified as BigQuery
@@ -70,6 +72,7 @@ spec = do
     traverse_
       (Fixture.runClean fixtures)
       [ testAdminAccess,
+        testRelationships,
         testImplementation
       ]
 
@@ -84,15 +87,23 @@ schema =
           [ Schema.column "thing" Schema.TInt,
             Schema.column "date" Schema.TUTCTime
           ]
+      },
+    (Schema.table "article")
+      { Schema.tableColumns =
+          [ Schema.column "id" Schema.TInt,
+            Schema.column "author_id" Schema.TInt,
+            Schema.column "title" Schema.TStr,
+            Schema.column "content" Schema.TStr
+          ]
       }
   ]
 
-dividedStuffReturnType :: Schema.CustomType
-dividedStuffReturnType =
-  (Schema.customType "divided_stuff")
-    { Schema.customTypeColumns =
-        [ (Schema.nativeQueryColumn "divided" Schema.TInt)
-            { Schema.nativeQueryColumnDescription = Just "a divided thing"
+dividedStuffLogicalModel :: Schema.LogicalModel
+dividedStuffLogicalModel =
+  (Schema.logicalModel "divided_stuff")
+    { Schema.logicalModelColumns =
+        [ (Schema.logicalModelScalar "divided" Schema.TInt)
+            { Schema.logicalModelColumnDescription = Just "a divided thing"
             }
         ]
     }
@@ -117,7 +128,7 @@ testAdminAccess = do
         let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
             sourceName = BackendType.backendSourceName backendTypeMetadata
 
-        Schema.trackCustomType sourceName dividedStuffReturnType testEnvironment
+        Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
 
         shouldReturnYaml
           testEnvironment
@@ -139,7 +150,7 @@ testAdminAccess = do
         let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
             sourceName = BackendType.backendSourceName backendTypeMetadata
 
-        Schema.trackCustomType sourceName dividedStuffReturnType testEnvironment
+        Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
 
         shouldReturnYaml
           testEnvironment
@@ -183,6 +194,76 @@ testAdminAccess = do
           |]
 
 -------------------------
+-- Test relationships --
+-------------------------
+
+testRelationships :: SpecWith TestEnvironment
+testRelationships = do
+  let query :: Text
+      query = "SELECT * FROM (VALUES (1, 'Marenghi'), (2, 'other')) as t(\"id\", \"name\")"
+
+      articleLogicalModel :: Schema.LogicalModel
+      articleLogicalModel =
+        (Schema.logicalModel "article")
+          { Schema.logicalModelColumns =
+              [ Schema.logicalModelScalar "id" Schema.TInt,
+                Schema.logicalModelScalar "author_id" Schema.TInt,
+                Schema.logicalModelScalar "title" Schema.TStr,
+                Schema.logicalModelScalar "content" Schema.TStr
+              ]
+          }
+
+      -- we'll need to add the `articles` relationship row later
+      relationshipLogicalModel :: Schema.LogicalModel
+      relationshipLogicalModel =
+        (Schema.logicalModel "author")
+          { Schema.logicalModelColumns =
+              [ Schema.logicalModelScalar "id" Schema.TInt,
+                Schema.logicalModelScalar "name" Schema.TStr,
+                Schema.logicalModelReference "articles" "article"
+              ]
+          }
+
+      -- broadly, a 'SELECT * FROM authors' type query
+      relationshipNativeQuery :: Schema.NativeQuery
+      relationshipNativeQuery =
+        Schema.nativeQuery "relationship_test" query "author"
+
+  describe "Relationships" $ do
+    it "Adding a native query with a valid array relationship returns a 200" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          sourceName = BackendType.backendSourceName backendTypeMetadata
+          schemaName = Schema.getSchemaName testEnvironment
+
+          schemaKeyword :: String
+          schemaKeyword = Key.toString $ Fixture.backendSchemaKeyword backendTypeMetadata
+
+          arrayRel =
+            [interpolateYaml|
+                name: articles
+                using:
+                  column_mapping:
+                    id: author_id
+                  insertion_order: null
+                  remote_table:
+                    name: article
+                    #{schemaKeyword}: #{schemaName}
+            |]
+
+          nativeQueryWithRelationship =
+            relationshipNativeQuery
+              { Schema.nativeQueryArrayRelationships = [arrayRel]
+              }
+
+      Schema.trackLogicalModel sourceName articleLogicalModel testEnvironment
+      Schema.trackLogicalModel sourceName relationshipLogicalModel testEnvironment
+      let nativeQueryMetadata = Schema.trackNativeQueryCommand sourceName backendTypeMetadata nativeQueryWithRelationship
+
+      GraphqlEngine.postMetadata_
+        testEnvironment
+        nativeQueryMetadata
+
+-------------------------
 -- Test implementation --
 -------------------------
 
@@ -206,7 +287,7 @@ testImplementation = do
                   [Schema.nativeQueryColumn "unused" Schema.TInt]
               }
 
-      Schema.trackCustomType sourceName dividedStuffReturnType testEnvironment
+      Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
       Schema.trackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
 
     it "Adding a native query of a function with broken SQL returns a 400" $ \testEnvironment -> do
@@ -252,7 +333,7 @@ testImplementation = do
                   ]
               }
 
-      Schema.trackCustomType sourceName dividedStuffReturnType testEnvironment
+      Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
       Schema.trackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
 
       shouldReturnYaml
@@ -291,7 +372,7 @@ testImplementation = do
                   ]
               }
 
-      Schema.trackCustomType sourceName dividedStuffReturnType testEnvironment
+      Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
 
       Schema.trackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
       Schema.untrackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
@@ -311,7 +392,7 @@ testImplementation = do
                   ]
               }
 
-      Schema.trackCustomType sourceName dividedStuffReturnType testEnvironment
+      Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
       Schema.trackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
 
       Schema.untrackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
@@ -350,7 +431,7 @@ testImplementation = do
         )
         [yaml|
           code: not-found
-          error: Custom return type "bad_return_type" not found.
+          error: Logical model "bad_return_type" not found.
           path: $.args
         |]
 
@@ -376,7 +457,7 @@ testImplementation = do
                   ]
               }
 
-      Schema.trackCustomType sourceName dividedStuffReturnType testEnvironment
+      Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
 
       shouldReturnYaml
         testEnvironment
@@ -403,7 +484,7 @@ testImplementation = do
                   [Schema.nativeQueryColumn "unused" Schema.TInt]
               }
 
-      Schema.trackCustomType sourceName dividedStuffReturnType testEnvironment
+      Schema.trackLogicalModel sourceName dividedStuffLogicalModel testEnvironment
       Schema.trackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
 
       metadata <-
@@ -417,7 +498,7 @@ testImplementation = do
       let inconsistent :: A.Value
           inconsistent =
             metadata
-              & key "sources" . values . key "custom_return_types"
+              & key "sources" . values . key "logical_models"
                 .~ A.Array mempty
 
           integer :: Text
@@ -446,7 +527,7 @@ testImplementation = do
                 returns: divided_stuff
                 root_field_name: divided_stuff
               name: native_query divided_stuff in source #{sourceName}
-              reason: "Inconsistent object: The custom return type divided_stuff could not be found"
+              reason: "Inconsistent object: The logical model divided_stuff could not be found"
               type: native_query
           path: $.args
         |]
@@ -464,7 +545,7 @@ metadataHandlingWhenDisabledSpec = do
       $ withPostgresSource "default"
       $ do
         it "`replace_metadata` does not report any inconsistent objects" $ \env -> do
-          let command = Schema.trackCustomTypeCommand "default" Postgres.backendTypeMetadata dividedStuffReturnType
+          let command = Schema.trackLogicalModelCommand "default" Postgres.backendTypeMetadata dividedStuffLogicalModel
           _ <- hgePost env 200 "/v1/metadata" [] command
 
           currentMetadata <- export_metadata env
@@ -477,7 +558,7 @@ metadataHandlingWhenDisabledSpec = do
               |]
 
         it "They do appear in the schema" $ \env -> do
-          let command = Schema.trackCustomTypeCommand "default" Postgres.backendTypeMetadata dividedStuffReturnType
+          let command = Schema.trackLogicalModelCommand "default" Postgres.backendTypeMetadata dividedStuffLogicalModel
           _ <- hgePost env 200 "/v1/metadata" [] command
 
           currentMetadata <- export_metadata env

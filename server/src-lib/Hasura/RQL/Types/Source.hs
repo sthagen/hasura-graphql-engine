@@ -14,12 +14,13 @@ module Hasura.RQL.Types.Source
     unsafeSourceTables,
     siConfiguration,
     siNativeQueries,
-    siCustomReturnTypes,
+    siLogicalModels,
     siFunctions,
     siName,
     siQueryTagsConfig,
     siTables,
     siCustomization,
+    siDbObjectsIntrospection,
 
     -- * Schema cache
     DBObjectsIntrospection (..),
@@ -48,9 +49,9 @@ import Data.Environment
 import Data.HashMap.Strict qualified as Map
 import Database.PG.Query qualified as PG
 import Hasura.Base.Error
-import Hasura.CustomReturnType.Cache (CustomReturnTypeCache)
 import Hasura.Function.Cache
 import Hasura.Logging qualified as L
+import Hasura.LogicalModel.Cache (LogicalModelCache)
 import Hasura.NativeQuery.Cache (NativeQueryCache)
 import Hasura.Prelude
 import Hasura.QueryTags.Types
@@ -74,13 +75,12 @@ data SourceInfo b = SourceInfo
     _siTables :: TableCache b,
     _siFunctions :: FunctionCache b,
     _siNativeQueries :: NativeQueryCache b,
-    _siCustomReturnTypes :: CustomReturnTypeCache b,
+    _siLogicalModels :: LogicalModelCache b,
     _siConfiguration :: ~(SourceConfig b),
     _siQueryTagsConfig :: Maybe QueryTagsConfig,
-    _siCustomization :: ResolvedSourceCustomization
+    _siCustomization :: ResolvedSourceCustomization,
+    _siDbObjectsIntrospection :: DBObjectsIntrospection b
   }
-
-$(makeLenses ''SourceInfo)
 
 instance
   ( Backend b,
@@ -117,9 +117,7 @@ unsafeSourceInfo :: forall b. HasTag b => BackendSourceInfo -> Maybe (SourceInfo
 unsafeSourceInfo = AB.unpackAnyBackend
 
 unsafeSourceName :: BackendSourceInfo -> SourceName
-unsafeSourceName bsi = AB.dispatchAnyBackend @Backend bsi go
-  where
-    go (SourceInfo name _ _ _ _ _ _ _) = name
+unsafeSourceName bsi = AB.dispatchAnyBackend @Backend bsi _siName
 
 unsafeSourceTables :: forall b. HasTag b => BackendSourceInfo -> Maybe (TableCache b)
 unsafeSourceTables = fmap _siTables . unsafeSourceInfo @b
@@ -234,3 +232,5 @@ data SourcePingInfo b = SourcePingInfo
 type BackendSourcePingInfo = AB.AnyBackend SourcePingInfo
 
 type SourcePingCache = HashMap SourceName BackendSourcePingInfo
+
+$(makeLenses ''SourceInfo)

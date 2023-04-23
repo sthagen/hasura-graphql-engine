@@ -1,10 +1,12 @@
 import collections
 import http.server
+import json
 import inspect
 import os
 import pytest
 import socket
 import sqlalchemy
+import subprocess
 import sys
 import threading
 import time
@@ -15,8 +17,10 @@ import uuid
 import auth_webhook_server
 from context import ActionsWebhookServer, EvtsWebhookServer, GQLWsClient, GraphQLWSClient, HGECtx, HGECtxGQLServer, HGECtxWebhook, PytestConf
 import fixtures.hge
+import fixtures.jwt
 import fixtures.postgres
 import fixtures.tls
+import jwk_server
 import ports
 import webhook
 import PortToHaskell
@@ -46,25 +50,10 @@ def pytest_addoption(parser):
     parser.addoption('--tls-ca-key', help='The CA key used for helper services', required=False)
 
     parser.addoption(
-        "--hge-jwt-key-file", metavar="HGE_JWT_KEY_FILE", help="File containing the private key used to encode jwt tokens using RS512 algorithm", required=False
-    )
-    parser.addoption(
-        "--hge-jwt-conf", metavar="HGE_JWT_CONF", help="The JWT conf", required=False
-    )
-
-    parser.addoption(
         "--test-hge-scale-url",
         metavar="<url>",
         required=False,
         help="Run testcases for horizontal scaling"
-    )
-
-    parser.addoption(
-        "--test-logging",
-        action="store_true",
-        default=False,
-        required=False,
-        help="Run testcases for logging"
     )
 
     parser.addoption(
@@ -119,18 +108,6 @@ This option may result in test failures if the schema has to change between the 
         metavar="<path>",
         required=False,
         help="When used along with collect-only, it will write the list of upgrade tests into the file specified"
-    )
-
-    parser.addoption(
-        "--test-unauthorized-role",
-        action="store_true",
-        help="Run testcases for unauthorized role",
-    )
-
-    parser.addoption(
-        "--test-no-cookie-and-unauth-role",
-        action="store_true",
-        help="Run testcases for no unauthorized role and no cookie jwt header set (cookie auth is set as part of jwt config upon engine startup)",
     )
 
     parser.addoption(
@@ -386,7 +363,7 @@ def tls_ca_configuration(request: pytest.FixtureRequest, tmp_path_factory: pytes
 
 # TODO: remove once parallelization work is completed
 @pytest.fixture(scope='class', autouse=True)
-def hge_skip(request: pytest.FixtureRequest, hge_server: Optional[str], hge_fixture_env: dict[str, str]):
+def hge_skip(request: pytest.FixtureRequest, hge_server: Optional[Any], hge_fixture_env: dict[str, str]):
     # Let `hge_server` manage this stuff.
     if hge_server:
         return
@@ -472,7 +449,7 @@ def hge_server(
     hge_key: Optional[str],
     hge_fixture_env: dict[str, str],
     metadata_schema_url: str,
-) -> Optional[str]:
+) -> Optional[subprocess.Popen[bytes]]:
     # TODO: remove once parallelization work is completed
     #       `hge_bin` will no longer be optional
     if not hge_bin:
@@ -531,8 +508,9 @@ def hge_ctx_fixture(
 @pytest.fixture(scope='class')
 def hge_ctx(
     hge_ctx_fixture: HGECtx,
-    hge_server: Optional[str],
-    source_backend: Optional[fixtures.postgres.Backend],
+    hge_server,
+    hge_url,
+    source_backend,
 ):
     return hge_ctx_fixture
 
@@ -714,6 +692,63 @@ def ws_client_graphql_ws(hge_ctx):
     time.sleep(0.1)
     yield client
     client.teardown()
+
+@pytest.fixture(scope='class')
+@pytest.mark.early
+def jwt_configuration(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    hge_fixture_env: dict[str, str],
+) -> Optional[fixtures.jwt.JWTConfiguration]:
+    marker = request.node.get_closest_marker('jwt')
+    if not marker:
+        raise Exception('JWT configuration is required.')
+
+    algorithm = marker.args[0]
+    try:
+        configuration = marker.args[1]
+    except IndexError:
+        configuration = {}
+
+    tmp_path = tmp_path_factory.mktemp('jwt')
+    match algorithm:
+        case 'rsa':
+            configuration = fixtures.jwt.init_rsa(tmp_path, configuration)
+        case 'ed25519':
+            configuration = fixtures.jwt.init_ed25519(tmp_path, configuration)
+        case _:
+            raise Exception(f'Unsupported JWT configuration: {marker.args!r}')
+
+    hge_fixture_env['HASURA_GRAPHQL_JWT_SECRET'] = json.dumps(configuration.server_configuration)
+    return configuration
+
+@pytest.fixture(scope='class')
+@pytest.mark.early
+def jwk_server_url(request: pytest.FixtureRequest, hge_fixture_env: dict[str, str]):
+    path_marker = request.node.get_closest_marker('jwk_path')
+    assert path_marker is not None, 'The test must set the `jwk_path` marker.'
+    path: str = path_marker.args[0]
+
+    # If the JWK server was started outside, just set the environment variable
+    # so that the test is skipped if the value is wrong.
+    env_var = os.getenv('JWK_SERVER_URL')
+    if env_var:
+        hge_fixture_env['HASURA_GRAPHQL_JWT_SECRET'] = '{"jwk_url": "' + env_var + path + '"}'
+        return env_var
+
+    server_address = extract_server_address_from('JWK_SERVER_URL')
+    server = jwk_server.create_server(server_address)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    request.addfinalizer(server.shutdown)
+
+    host = server.server_address[0]
+    port = server.server_address[1]
+    ports.wait_for_port(port)
+    url = f'http://{host}:{port}'
+    print(f'{jwk_server_url.__name__} server started on {url}')
+    hge_fixture_env['HASURA_GRAPHQL_JWT_SECRET'] = '{"jwk_url": "' + url + path + '"}'
+    return url
 
 def extract_server_address_from(env_var: str) -> tuple[str, int]:
     """

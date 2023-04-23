@@ -31,7 +31,7 @@ import Hasura.RQL.IR.Update.Batch (UpdateBatch (..))
 import Hasura.RQL.IR.Value (UnpreparedValue)
 import Hasura.RQL.Types.Column (ColumnInfo (..))
 import Hasura.RQL.Types.Common (SourceName (..))
-import Hasura.RQL.Types.Source (SourceInfo (..))
+import Hasura.RQL.Types.Source (DBObjectsIntrospection (..), SourceInfo (..))
 import Hasura.RQL.Types.SourceCustomization (ResolvedSourceCustomization (..))
 import Hasura.RQL.Types.Table (TableInfo (..))
 import Hasura.SQL.Backend (BackendType (Postgres), PostgresKind (Vanilla))
@@ -99,10 +99,11 @@ runUpdateFieldTest UpdateTestSetup {..} =
           _siTables = HM.singleton table tableInfo,
           _siFunctions = mempty,
           _siNativeQueries = mempty,
-          _siCustomReturnTypes = mempty,
+          _siLogicalModels = mempty,
           _siConfiguration = notImplementedYet "SourceConfig",
           _siQueryTagsConfig = Nothing,
-          _siCustomization = ResolvedSourceCustomization mempty mempty HasuraCase Nothing
+          _siCustomization = ResolvedSourceCustomization mempty mempty HasuraCase Nothing,
+          _siDbObjectsIntrospection = DBObjectsIntrospection mempty mempty mempty
         }
 
     byName :: Syntax.Name -> Parser -> Bool

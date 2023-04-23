@@ -60,20 +60,20 @@ tests = do
   let simpleQuery :: Text
       simpleQuery = "SELECT (thing / 2)::integer AS divided FROM stuff"
 
-      conflictingReturnType :: Schema.CustomType
-      conflictingReturnType =
-        (Schema.customType "conflicting")
-          { Schema.customTypeColumns =
-              [ Schema.nativeQueryColumn "thing" Schema.TInt,
-                Schema.nativeQueryColumn "date" Schema.TUTCTime
+      conflictingLogicalModel :: Schema.LogicalModel
+      conflictingLogicalModel =
+        (Schema.logicalModel "conflicting")
+          { Schema.logicalModelColumns =
+              [ Schema.logicalModelScalar "thing" Schema.TInt,
+                Schema.logicalModelScalar "date" Schema.TUTCTime
               ]
           }
 
-      dividedReturnType :: Schema.CustomType
-      dividedReturnType =
-        (Schema.customType "divided_stuff")
-          { Schema.customTypeColumns =
-              [ Schema.nativeQueryColumn "divided" Schema.TInt
+      dividedLogicalModel :: Schema.LogicalModel
+      dividedLogicalModel =
+        (Schema.logicalModel "divided_stuff")
+          { Schema.logicalModelColumns =
+              [ Schema.logicalModelScalar "divided" Schema.TInt
               ]
           }
 
@@ -126,7 +126,7 @@ tests = do
                     ]
                 }
 
-        Schema.trackCustomType sourceName dividedReturnType testEnvironment
+        Schema.trackLogicalModel sourceName dividedLogicalModel testEnvironment
 
         actual <-
           GraphqlEngine.postMetadataWithStatus
@@ -163,7 +163,7 @@ tests = do
                       status_code: "42P01"
               |]
 
-        Schema.trackCustomType sourceName dividedReturnType testEnvironment
+        Schema.trackLogicalModel sourceName dividedLogicalModel testEnvironment
 
         actual <-
           GraphqlEngine.postMetadataWithStatus
@@ -193,7 +193,7 @@ tests = do
 
             expectedError = "Encountered conflicting definitions in the selection set for 'subscription_root' for field 'hasura_stuff' defined in [table hasura.stuff in source " <> sourceName <> ", native_query hasura_stuff in source " <> sourceName <> "]. Fields must not be defined more than once across all sources."
 
-        Schema.trackCustomType sourceName conflictingReturnType testEnv
+        Schema.trackLogicalModel sourceName conflictingLogicalModel testEnv
 
         shouldReturnYaml
           testEnv
@@ -226,7 +226,7 @@ tests = do
                     ]
                 }
 
-        Schema.trackCustomType source conflictingReturnType testEnv
+        Schema.trackLogicalModel source conflictingLogicalModel testEnv
 
         shouldReturnYaml
           testEnv
@@ -272,7 +272,7 @@ tests = do
                   error: Failed to validate query
                 |]
 
-        Schema.trackCustomType sourceName dividedReturnType testEnvironment
+        Schema.trackLogicalModel sourceName dividedLogicalModel testEnvironment
 
         actual <-
           GraphqlEngine.postMetadataWithStatus
@@ -298,11 +298,11 @@ tests = do
 
             query = "SELECT {{text}} AS not_text"
 
-            brokenColumnsReturn :: Schema.CustomType
+            brokenColumnsReturn :: Schema.LogicalModel
             brokenColumnsReturn =
-              (Schema.customType "failing")
-                { Schema.customTypeColumns =
-                    [ Schema.nativeQueryColumn "text" Schema.TStr
+              (Schema.logicalModel "failing")
+                { Schema.logicalModelColumns =
+                    [ Schema.logicalModelScalar "text" Schema.TStr
                     ]
                 }
 
@@ -314,7 +314,7 @@ tests = do
                     ]
                 }
 
-        Schema.trackCustomType sourceName brokenColumnsReturn testEnvironment
+        Schema.trackLogicalModel sourceName brokenColumnsReturn testEnvironment
 
         actual <-
           GraphqlEngine.postMetadataWithStatus
@@ -335,7 +335,7 @@ tests = do
             missingArgsNativeQuery =
               (Schema.nativeQuery "divided_falling" query "divided_stuff")
 
-        Schema.trackCustomType sourceName dividedReturnType testEnvironment
+        Schema.trackLogicalModel sourceName dividedLogicalModel testEnvironment
 
         shouldReturnYaml
           testEnvironment
@@ -349,6 +349,34 @@ tests = do
              error: 'Undeclared arguments: "denominator"'
              path: $.args
           |]
+
+    it "when the native query name has a non-standard character" $
+      \testEnvironment -> do
+        let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+            sourceName = BackendType.backendSourceName backendTypeMetadata
+
+            dividedStuffNativeQuery :: Schema.NativeQuery
+            dividedStuffNativeQuery =
+              (Schema.nativeQuery "Divided-Stuff" simpleQuery "divided_stuff")
+                { Schema.nativeQueryArguments =
+                    [ Schema.nativeQueryColumn "denominator" Schema.TInt,
+                      Schema.nativeQueryColumn "target_date" Schema.TUTCTime
+                    ]
+                }
+
+        Schema.trackLogicalModel sourceName dividedLogicalModel testEnvironment
+
+        actual <-
+          GraphqlEngine.postMetadataWithStatus
+            400
+            testEnvironment
+            (Schema.trackNativeQueryCommand sourceName backendTypeMetadata dividedStuffNativeQuery)
+        let expected =
+              [yaml|
+                 code: parse-failed
+                 path: $.args.root_field_name
+              |]
+        actual `shouldAtLeastBe` expected
 
   describe "Validation succeeds" do
     it "when tracking then untracking then re-tracking a native query" $
@@ -365,10 +393,28 @@ tests = do
                     ]
                 }
 
-        Schema.trackCustomType sourceName dividedReturnType testEnvironment
+        Schema.trackLogicalModel sourceName dividedLogicalModel testEnvironment
 
         Schema.trackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
 
         Schema.untrackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
+
+        Schema.trackNativeQuery sourceName dividedStuffNativeQuery testEnvironment
+
+    it "when the native query name has an uppercase letter" $
+      \testEnvironment -> do
+        let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+            sourceName = BackendType.backendSourceName backendTypeMetadata
+
+            dividedStuffNativeQuery :: Schema.NativeQuery
+            dividedStuffNativeQuery =
+              (Schema.nativeQuery "DividedStuff" simpleQuery "divided_stuff")
+                { Schema.nativeQueryArguments =
+                    [ Schema.nativeQueryColumn "denominator" Schema.TInt,
+                      Schema.nativeQueryColumn "target_date" Schema.TUTCTime
+                    ]
+                }
+
+        Schema.trackLogicalModel sourceName dividedLogicalModel testEnvironment
 
         Schema.trackNativeQuery sourceName dividedStuffNativeQuery testEnvironment

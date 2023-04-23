@@ -21,8 +21,11 @@ import type {
   GetTableColumnsProps,
   GetTableRowsProps,
   GetTablesListAsTreeProps,
+  GetTrackableFunctionProps,
   GetTrackableTablesProps,
+  IntrospectedFunction,
   GetVersionProps,
+  GetIsTableViewProps,
   // Property,
   IntrospectedTable,
   Operator,
@@ -132,9 +135,15 @@ export type Database = {
     getSupportedOperators: (
       props: GetSupportedOperatorsProps
     ) => Promise<Operator[] | Feature.NotImplemented>;
+    getTrackableFunctions: (
+      props: GetTrackableFunctionProps
+    ) => Promise<IntrospectedFunction[] | Feature.NotImplemented>;
     getDatabaseSchemas: (
       props: GetDatabaseSchemaProps
     ) => Promise<string[] | Feature.NotImplemented>;
+    getIsTableView: (
+      props: GetIsTableViewProps
+    ) => Promise<boolean | Feature.NotImplemented>;
   };
   query?: {
     getTableRows: (
@@ -527,6 +536,13 @@ export const DataSource = (httpClient: AxiosInstance) => ({
       driver
     );
   },
+  getTrackableFunctions: async (dataSourceName: string) => {
+    const database = await getDatabaseMethods({ dataSourceName, httpClient });
+    return database.introspection?.getTrackableFunctions({
+      dataSourceName,
+      httpClient,
+    });
+  },
   getDatabaseSchemas: async ({
     dataSourceName,
   }: {
@@ -549,5 +565,31 @@ export const DataSource = (httpClient: AxiosInstance) => ({
       throw new Error(`modify methods are not callable for ${dataSourceName}`);
 
     return database.modify;
+  },
+  getIsTableView: async ({
+    dataSourceName,
+    table,
+    httpClient,
+  }: {
+    dataSourceName: string;
+    table: Table;
+  } & NetworkArgs) => {
+    const database = await getDatabaseMethods({ dataSourceName, httpClient });
+
+    if (!database) return false;
+
+    const introspection = database.introspection;
+
+    if (!introspection) return false;
+
+    const isView = await introspection.getIsTableView({
+      dataSourceName,
+      httpClient,
+      table,
+    });
+
+    if (isView === Feature.NotImplemented) return false;
+
+    return isView;
   },
 });

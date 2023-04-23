@@ -1,21 +1,25 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
 
 -- | Access to the SQL
 module Test.Queries.NativeQueries.NativeQueriesSpec (spec) where
 
 import Data.Aeson (Value)
+import Data.Aeson.Key qualified as Key
 import Data.List.NonEmpty qualified as NE
 import Harness.Backend.Citus qualified as Citus
 import Harness.Backend.Cockroach qualified as Cockroach
 import Harness.Backend.Postgres qualified as Postgres
 import Harness.Backend.Sqlserver qualified as Sqlserver
 import Harness.GraphqlEngine qualified as GraphqlEngine
+import Harness.Permissions (Permission (..), SelectPermissionDetails (..), selectPermission)
 import Harness.Quoter.Graphql
 import Harness.Quoter.Yaml (interpolateYaml, yaml)
 import Harness.Schema (Table (..), table)
 import Harness.Schema qualified as Schema
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
+import Harness.Test.SetupAction (setupPermissionsAction)
 import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment, getBackendTypeConfig)
 import Harness.Yaml (shouldAtLeastBe, shouldBeYaml, shouldReturnYaml)
 import Hasura.Prelude
@@ -33,22 +37,26 @@ spec =
       ( NE.fromList
           [ (Fixture.fixture $ Fixture.Backend Postgres.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
-                  [ Postgres.setupTablesAction schema testEnvironment
+                  [ Postgres.setupTablesAction schema testEnvironment,
+                    setupPermissionsAction permissions testEnvironment
                   ]
               },
             (Fixture.fixture $ Fixture.Backend Cockroach.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
-                  [ Cockroach.setupTablesAction schema testEnvironment
+                  [ Cockroach.setupTablesAction schema testEnvironment,
+                    setupPermissionsAction permissions testEnvironment
                   ]
               },
             (Fixture.fixture $ Fixture.Backend Citus.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
-                  [ Citus.setupTablesAction schema testEnvironment
+                  [ Citus.setupTablesAction schema testEnvironment,
+                    setupPermissionsAction permissions testEnvironment
                   ]
               },
             (Fixture.fixture $ Fixture.Backend Sqlserver.backendTypeMetadata)
               { Fixture.setupTeardown = \(testEnvironment, _) ->
-                  [ Sqlserver.setupTablesAction schema testEnvironment
+                  [ Sqlserver.setupTablesAction schema testEnvironment,
+                    setupPermissionsAction permissions testEnvironment
                   ]
               }
           ]
@@ -66,7 +74,35 @@ schema =
           [ Schema.column "thing" Schema.TInt,
             Schema.column "date" Schema.TUTCTime
           ]
+      },
+    (Schema.table "article")
+      { Schema.tableColumns =
+          [ Schema.column "id" Schema.TInt,
+            Schema.column "author_id" Schema.TInt,
+            Schema.column "title" Schema.TStr,
+            Schema.column "content" Schema.TStr
+          ],
+        Schema.tableData =
+          [ [Schema.VInt 1, Schema.VInt 1, Schema.VStr "Fright Knight", Schema.VStr "Well, well, well"],
+            [Schema.VInt 2, Schema.VInt 2, Schema.VStr "Man to Man", Schema.VStr "Well2, well2, well2"]
+          ]
       }
+  ]
+
+permissions :: [Permission]
+permissions =
+  [ SelectPermission
+      selectPermission
+        { selectPermissionTable = "article",
+          selectPermissionRole = "sufficient",
+          selectPermissionColumns = ["title", "author_id"]
+        },
+    SelectPermission
+      selectPermission
+        { selectPermissionTable = "article",
+          selectPermissionRole = "insufficient",
+          selectPermissionColumns = ["author_id"]
+        }
   ]
 
 tests :: SpecWith TestEnvironment
@@ -74,12 +110,12 @@ tests = do
   let query :: Text
       query = "SELECT * FROM (VALUES ('hello', 'world'), ('welcome', 'friend')) as t(\"one\", \"two\")"
 
-      helloWorldReturnType :: Schema.CustomType
-      helloWorldReturnType =
-        (Schema.customType "hello_world_return_type")
-          { Schema.customTypeColumns =
-              [ Schema.nativeQueryColumn "one" Schema.TStr,
-                Schema.nativeQueryColumn "two" Schema.TStr
+      helloWorldLogicalModel :: Schema.LogicalModel
+      helloWorldLogicalModel =
+        (Schema.logicalModel "hello_world_return_type")
+          { Schema.logicalModelColumns =
+              [ Schema.logicalModelScalar "one" Schema.TStr,
+                Schema.logicalModelScalar "two" Schema.TStr
               ]
           }
 
@@ -92,7 +128,7 @@ tests = do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           sourceName = BackendType.backendSourceName backendTypeMetadata
 
-      Schema.trackCustomType sourceName helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel sourceName helloWorldLogicalModel testEnvironment
 
       Schema.trackNativeQuery sourceName helloWorldNativeQuery testEnvironment
 
@@ -124,19 +160,19 @@ tests = do
 
           nullableQuery = "SELECT (thing / 2)::integer AS divided, null::text as something_nullable FROM stuff"
 
-          descriptionsAndNullableReturnType :: Schema.CustomType
-          descriptionsAndNullableReturnType =
-            (Schema.customType "divided_stuff")
-              { Schema.customTypeColumns =
-                  [ (Schema.nativeQueryColumn "divided" Schema.TInt)
-                      { Schema.nativeQueryColumnDescription = Just "A divided thing"
+          descriptionsAndNullableLogicalModel :: Schema.LogicalModel
+          descriptionsAndNullableLogicalModel =
+            (Schema.logicalModel "divided_stuff")
+              { Schema.logicalModelColumns =
+                  [ (Schema.logicalModelScalar "divided" Schema.TInt)
+                      { Schema.logicalModelColumnDescription = Just "A divided thing"
                       },
-                    (Schema.nativeQueryColumn "something_nullable" Schema.TStr)
-                      { Schema.nativeQueryColumnDescription = Just "Something nullable",
-                        Schema.nativeQueryColumnNullable = True
+                    (Schema.logicalModelScalar "something_nullable" Schema.TStr)
+                      { Schema.logicalModelColumnDescription = Just "Something nullable",
+                        Schema.logicalModelColumnNullable = True
                       }
                   ],
-                Schema.customTypeDescription = Just "Return type description"
+                Schema.logicalModelDescription = Just "Return type description"
               }
 
           descriptionsAndNullableNativeQuery :: Schema.NativeQuery
@@ -147,7 +183,7 @@ tests = do
                   ]
               }
 
-      Schema.trackCustomType sourceName descriptionsAndNullableReturnType testEnvironment
+      Schema.trackLogicalModel sourceName descriptionsAndNullableLogicalModel testEnvironment
 
       Schema.trackNativeQuery sourceName descriptionsAndNullableNativeQuery testEnvironment
 
@@ -215,7 +251,7 @@ tests = do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           source = BackendType.backendSourceName backendTypeMetadata
 
-      Schema.trackCustomType source helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel source helloWorldLogicalModel testEnvironment
       Schema.trackNativeQuery source helloWorldNativeQuery testEnvironment
 
       let expected =
@@ -243,11 +279,47 @@ tests = do
 
       shouldReturnYaml testEnvironment actual expected
 
+    it "Runs the a simple query with uppercase letters in the name" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          source = BackendType.backendSourceName backendTypeMetadata
+
+          uppercaseNativeQuery :: Schema.NativeQuery
+          uppercaseNativeQuery =
+            (Schema.nativeQuery "UppercaseNativeQuery" query "hello_world_return_type")
+
+      Schema.trackLogicalModel source helloWorldLogicalModel testEnvironment
+      Schema.trackNativeQuery source uppercaseNativeQuery testEnvironment
+
+      let expected =
+            [yaml|
+                data:
+                  UppercaseNativeQuery:
+                    - one: "hello"
+                      two: "world"
+                    - one: "welcome"
+                      two: "friend"
+              |]
+
+          actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+              query {
+                UppercaseNativeQuery {
+                  one
+                  two
+                }
+              }
+           |]
+
+      shouldReturnYaml testEnvironment actual expected
+
     it "Runs simple query with a basic where clause" $ \testEnvironment -> do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           source = BackendType.backendSourceName backendTypeMetadata
 
-      Schema.trackCustomType source helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel source helloWorldLogicalModel testEnvironment
       Schema.trackNativeQuery source helloWorldNativeQuery testEnvironment
 
       let expected =
@@ -277,7 +349,7 @@ tests = do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           sourceName = BackendType.backendSourceName backendTypeMetadata
 
-      Schema.trackCustomType sourceName helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel sourceName helloWorldLogicalModel testEnvironment
       Schema.trackNativeQuery sourceName helloWorldNativeQuery testEnvironment
 
       let expected =
@@ -315,7 +387,7 @@ tests = do
                   ]
               }
 
-      Schema.trackCustomType source helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel source helloWorldLogicalModel testEnvironment
 
       Schema.trackNativeQuery source helloWorldNativeQueryWithDummyArgument testEnvironment
 
@@ -352,7 +424,7 @@ tests = do
           helloCommentNativeQuery =
             (Schema.nativeQuery "hello_comment_function" spicyQuery "hello_world_return_type")
 
-      Schema.trackCustomType source helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel source helloWorldLogicalModel testEnvironment
 
       Schema.trackNativeQuery source helloCommentNativeQuery testEnvironment
 
@@ -385,13 +457,13 @@ tests = do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           source = BackendType.backendSourceName backendTypeMetadata
           backendType = BackendType.backendTypeString backendTypeMetadata
-          createPermRequestType = backendType <> "_create_custom_return_type_select_permission"
+          createPermRequestType = backendType <> "_create_logical_model_select_permission"
 
           helloWorldPermNativeQuery :: Schema.NativeQuery
           helloWorldPermNativeQuery =
             (Schema.nativeQuery "hello_world_with_permissions" query "hello_world_return_type")
 
-      Schema.trackCustomType source helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel source helloWorldLogicalModel testEnvironment
 
       Schema.trackNativeQuery source helloWorldPermNativeQuery testEnvironment
 
@@ -444,13 +516,13 @@ tests = do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           source = BackendType.backendSourceName backendTypeMetadata
           backendType = BackendType.backendTypeString backendTypeMetadata
-          createPermRequestType = backendType <> "_create_custom_return_type_select_permission"
+          createPermRequestType = backendType <> "_create_logical_model_select_permission"
 
           helloWorldPermNativeQuery :: Schema.NativeQuery
           helloWorldPermNativeQuery =
             (Schema.nativeQuery "hello_world_with_permissions" query "hello_world_return_type")
 
-      Schema.trackCustomType source helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel source helloWorldLogicalModel testEnvironment
 
       Schema.trackNativeQuery source helloWorldPermNativeQuery testEnvironment
 
@@ -504,13 +576,13 @@ tests = do
       let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
           source = BackendType.backendSourceName backendTypeMetadata
           backendType = BackendType.backendTypeString backendTypeMetadata
-          createPermRequestType = backendType <> "_create_custom_return_type_select_permission"
+          createPermRequestType = backendType <> "_create_logical_model_select_permission"
 
           helloWorldPermNativeQuery :: Schema.NativeQuery
           helloWorldPermNativeQuery =
             (Schema.nativeQuery "hello_world_with_permissions" query "hello_world_return_type")
 
-      Schema.trackCustomType source helloWorldReturnType testEnvironment
+      Schema.trackLogicalModel source helloWorldLogicalModel testEnvironment
 
       Schema.trackNativeQuery source helloWorldPermNativeQuery testEnvironment
 
@@ -555,6 +627,198 @@ tests = do
                 hello_world_with_permissions {
                   one
                   two
+                }
+              }
+           |]
+
+      shouldReturnYaml testEnvironment actual expected
+
+  describe "Native Query relationships" $ do
+    let relationshipQuery :: Text
+        relationshipQuery = "SELECT * FROM (VALUES (1, 'Marenghi'), (2, 'Learner')) as t(\"id\", \"name\")"
+
+        articleLogicalModel :: Schema.LogicalModel
+        articleLogicalModel =
+          (Schema.logicalModel "article")
+            { Schema.logicalModelColumns =
+                [ Schema.logicalModelScalar "id" Schema.TInt,
+                  Schema.logicalModelScalar "author_id" Schema.TInt,
+                  Schema.logicalModelScalar "title" Schema.TStr,
+                  Schema.logicalModelScalar "content" Schema.TStr
+                ]
+            }
+
+        -- we'll need to add the `articles` relationship row later
+        authorLogicalModel :: Schema.LogicalModel
+        authorLogicalModel =
+          (Schema.logicalModel "author")
+            { Schema.logicalModelColumns =
+                [ Schema.logicalModelScalar "id" Schema.TInt,
+                  Schema.logicalModelScalar "name" Schema.TStr,
+                  Schema.logicalModelReference "articles" "article"
+                ]
+            }
+
+        -- broadly, a 'SELECT * FROM authors' type query
+        relationshipNativeQuery :: Schema.NativeQuery
+        relationshipNativeQuery =
+          Schema.nativeQuery "relationship_test" relationshipQuery "author"
+
+        nativeQueryWithRelationship :: String -> Schema.SchemaName -> Schema.NativeQuery
+        nativeQueryWithRelationship schemaKeyword schemaName =
+          let arrayRel =
+                [interpolateYaml|
+                      name: articles
+                      using:
+                        column_mapping:
+                          id: author_id
+                        insertion_order: null
+                        remote_table:
+                          name: article
+                          #{schemaKeyword}: #{schemaName}
+                  |]
+           in relationshipNativeQuery
+                { Schema.nativeQueryArrayRelationships = [arrayRel]
+                }
+
+    it "Adding a native query with a valid array relationship returns table data along with results for admin role" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          sourceName = BackendType.backendSourceName backendTypeMetadata
+          schemaName = Schema.getSchemaName testEnvironment
+
+          schemaKeyword :: String
+          schemaKeyword = Key.toString $ Fixture.backendSchemaKeyword backendTypeMetadata
+
+      Schema.trackLogicalModel sourceName articleLogicalModel testEnvironment
+      Schema.trackLogicalModel sourceName authorLogicalModel testEnvironment
+      Schema.trackNativeQuery sourceName (nativeQueryWithRelationship schemaKeyword schemaName) testEnvironment
+
+      let expected =
+            [yaml|
+                data:
+                  relationship_test:
+                    - id: 1
+                      name: "Marenghi"
+                      articles:
+                        - title: "Fright Knight"
+                    - id: 2
+                      name: "Learner"
+                      articles:
+                        - title: "Man to Man"
+              |]
+
+          actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+              query {
+                relationship_test {
+                  id
+                  name
+                  articles {
+                    title
+                  }
+                }
+              }
+           |]
+
+      shouldReturnYaml testEnvironment actual expected
+
+    it "Adding a native query with a valid array relationship fails when underlying table permissions are insufficient" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          sourceName = BackendType.backendSourceName backendTypeMetadata
+          schemaName = Schema.getSchemaName testEnvironment
+          backendType = BackendType.backendTypeString backendTypeMetadata
+
+          schemaKeyword :: String
+          schemaKeyword = Key.toString $ Fixture.backendSchemaKeyword backendTypeMetadata
+
+      Schema.trackLogicalModel sourceName articleLogicalModel testEnvironment
+      Schema.trackLogicalModel sourceName authorLogicalModel testEnvironment
+      Schema.trackNativeQuery sourceName (nativeQueryWithRelationship schemaKeyword schemaName) testEnvironment
+
+      -- we're deliberately giving full permissions to the Logical Model -
+      -- we're more interested in whether we're allowed to select from the
+      -- `article` table
+      void $
+        GraphqlEngine.postMetadata
+          testEnvironment
+          [interpolateYaml|
+              type: bulk
+              args:
+                - type: #{backendType}_create_logical_model_select_permission
+                  args:
+                    source: #{sourceName}
+                    name: author 
+                    role: "insufficient"
+                    permission:
+                      columns: "*" 
+                      filter: {}
+            |]
+
+      let expected =
+            [yaml|
+                errors:
+                  - extensions:
+                      code: validation-failed
+                      path: $.selectionSet.relationship_test
+                    message: "field 'relationship_test' not found in type: 'query_root'"
+              |]
+
+          actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphqlWithHeaders
+              testEnvironment
+              [ ("X-Hasura-Role", "sufficient")
+              ]
+              [graphql|
+              query {
+                relationship_test {
+                  id
+                  name
+                  articles {
+                    title
+                  }
+                }
+              }
+           |]
+
+      shouldReturnYaml testEnvironment actual expected
+
+    -- I don't think this is the test we want - ideally checks of this kind
+    -- would happen before the resolve the schema
+    -- however for now let's just check that doing a stupid thing is not
+    -- possible
+    it "Native Query fails if we have not provided a way to fulfil a column of it's Logical Model" $ \testEnvironment -> do
+      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+          sourceName = BackendType.backendSourceName backendTypeMetadata
+
+      Schema.trackLogicalModel sourceName articleLogicalModel testEnvironment
+      Schema.trackLogicalModel sourceName authorLogicalModel testEnvironment
+      Schema.trackNativeQuery sourceName relationshipNativeQuery testEnvironment
+
+      let expected =
+            [yaml|
+                errors:
+                  - extensions:
+                      code: validation-failed
+                      path: $.selectionSet.relationship_test
+                    message: "field 'relationship_test' not found in type: 'query_root'"
+              |]
+
+          actual :: IO Value
+          actual =
+            GraphqlEngine.postGraphql
+              testEnvironment
+              [graphql|
+              query {
+                relationship_test {
+                  id
+                  name
+                  articles {
+                    title
+                  }
                 }
               }
            |]

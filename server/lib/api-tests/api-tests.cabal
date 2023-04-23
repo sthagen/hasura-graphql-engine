@@ -65,6 +65,7 @@ library
     , filepath
     , graphql-engine
     , graphql-parser
+    , hasura-extras
     , hasura-prelude
     , hspec
     , hspec-core
@@ -97,7 +98,7 @@ library
     Test.API.GraphQL.ContentLengthSpec
     Test.API.Metadata.BulkKeepGoingSpec
     Test.API.Metadata.ComputedFieldsSpec
-    Test.API.Metadata.CustomTypeSpec
+    Test.API.Metadata.LogicalModelSpec
     Test.API.Metadata.InconsistentSpec
     Test.API.Metadata.NativeQueriesSpec
     Test.API.Metadata.NativeQueries.TypeCheckingSpec
@@ -214,6 +215,7 @@ library
     Test.Regression.NullsOrderParsing8780Spec
     Test.Regression.ObjectRelationshipsLimit7936Spec
     Test.Regression.RemoteRelationshipStringifyNum8387Spec
+    Test.Regression.RootExistElementAliasing9457Spec
     Test.Regression.StreamConflictSpec
     Test.Regression.UsingTheSameFunctionForRootFieldAndComputedField8643Spec
     Test.Regression.SqlServerIdentifierQuotingSpec
@@ -350,6 +352,7 @@ executable produce-feature-matrix
     , fast-logger
     , feature-matrix
     , filepath
+    , hasura-extras
     , hasura-prelude
     , hspec
     , optparse-generic

@@ -30,7 +30,7 @@ import Hasura.RQL.IR.Value (Provenance (Unknown), UnpreparedValue (UVParameter))
 import Hasura.RQL.Types.Column (ColumnType (ColumnScalar), ColumnValue (..))
 import Hasura.RQL.Types.Common (InsertOrder (..), RelName (..), RelType (..), SourceName (..))
 import Hasura.RQL.Types.Relationships.Local (RelInfo (..))
-import Hasura.RQL.Types.Source (SourceInfo (..))
+import Hasura.RQL.Types.Source (DBObjectsIntrospection (..), SourceInfo (..))
 import Hasura.RQL.Types.SourceCustomization (ResolvedSourceCustomization (..))
 import Hasura.RQL.Types.Table
   ( TableCoreInfoG (_tciName),
@@ -321,10 +321,11 @@ spec = do
           _siTables = makeTableCache [albumTableInfo, trackTableInfo],
           _siFunctions = mempty,
           _siNativeQueries = mempty,
-          _siCustomReturnTypes = mempty,
+          _siLogicalModels = mempty,
           _siConfiguration = notImplementedYet "SourceConfig",
           _siQueryTagsConfig = Nothing,
-          _siCustomization = ResolvedSourceCustomization mempty mempty HasuraCase Nothing
+          _siCustomization = ResolvedSourceCustomization mempty mempty HasuraCase Nothing,
+          _siDbObjectsIntrospection = DBObjectsIntrospection mempty mempty mempty
         }
 
     makeTableCache :: [TableInfo ('Postgres 'Vanilla)] -> HashMap QualifiedTable (TableInfo ('Postgres 'Vanilla))

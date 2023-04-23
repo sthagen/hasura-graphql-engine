@@ -16,7 +16,6 @@ module Hasura.Backends.MSSQL.ToQuery
     toQueryPretty,
     fromInsert,
     fromMerge,
-    fromTempTableDDL,
     fromSetIdentityInsert,
     fromDelete,
     fromUpdate,
@@ -40,7 +39,6 @@ import Data.Text.Lazy qualified as L
 import Data.Text.Lazy.Builder qualified as L
 import Database.ODBC.SQLServer
 import Hasura.Backends.MSSQL.Types
-import Hasura.Backends.MSSQL.Types qualified as MSSQL
 import Hasura.NativeQuery.Metadata (InterpolatedItem (..), InterpolatedQuery (..))
 import Hasura.Prelude hiding (GT, LT)
 
@@ -439,32 +437,6 @@ fromUpdateSet setColumns =
       UpdateSet p -> " = " <+> p
       UpdateInc p -> " += " <+> p
 
-fromTempTableDDL :: MSSQL.TempTableDDL -> Printer
-fromTempTableDDL = \case
-  CreateTemp tempTableName tempColumns ->
-    "CREATE TABLE "
-      <+> fromTempTableName tempTableName
-      <+> " ( "
-      <+> columns
-      <+> " ) "
-    where
-      columns =
-        SepByPrinter
-          ("," <+> NewlinePrinter)
-          (map columnNameAndType tempColumns)
-      columnNameAndType (UnifiedColumn name ty) =
-        fromColumnName name
-          <+> " "
-          <+> fromString (T.unpack (scalarTypeDBName DataLengthMax ty))
-  InsertTemp tempTableName interpolatedQuery ->
-    "INSERT INTO "
-      <+> fromTempTableName tempTableName
-      <+> " "
-      <+> renderInterpolatedQuery interpolatedQuery
-  DropTemp tempTableName ->
-    "DROP TABLE "
-      <+> fromTempTableName tempTableName
-
 -- | Converts `SelectIntoTempTable`.
 --
 --  > SelectIntoTempTable (TempTableName "deleted")  [UnifiedColumn "id" IntegerType, UnifiedColumn "name" TextType] (TableName "table" "schema")
@@ -563,7 +535,16 @@ fromWith (With withSelects) =
   "WITH " <+> SepByPrinter ", " (map fromAliasedSelect (toList withSelects)) <+> NewlinePrinter
   where
     fromAliasedSelect (Aliased {..}) =
-      fromNameText aliasedAlias <+> " AS " <+> "( " <+> fromSelect aliasedThing <+> " )"
+      fromNameText aliasedAlias
+        <+> " AS "
+        <+> "( "
+        <+> ( case aliasedThing of
+                CTESelect select ->
+                  fromSelect select
+                CTEUnsafeRawSQL nativeQuery ->
+                  renderInterpolatedQuery nativeQuery <+> "\n"
+            )
+        <+> " )"
 
 renderInterpolatedQuery :: InterpolatedQuery Expression -> Printer
 renderInterpolatedQuery = foldr (<+>) "" . renderedParts

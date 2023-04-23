@@ -286,6 +286,8 @@ common lib-depends
                      , fast-logger
                      , free
                      , hashable
+                     , hasura-base
+                     , hasura-extras
                      , hasura-prelude
                      , http-client-tls
                      , http-conduit
@@ -487,32 +489,14 @@ common lib-depends
 library
   import: common-all, lib-depends
   hs-source-dirs:      src-lib
-  exposed-modules:     Autodocodec.Extended
-                     , Control.Concurrent.Extended
+  exposed-modules:     Control.Concurrent.Extended
                      , Control.Monad.Circular
                      , Control.Monad.Memoize
                      , Control.Monad.Stateless
                      , Control.Monad.Trans.Extended
                      , Control.Monad.Trans.Managed
-                     , Data.Aeson.Extended
                      , Data.Aeson.Kriti.Functions
-                     , Data.Environment
-                     , Data.HashMap.Strict.Extended
-                     , Data.HashMap.Strict.InsOrd.Autodocodec
-                     , Data.HashMap.Strict.InsOrd.Extended
-                     , Data.HashMap.Strict.Multi
-                     , Data.HashMap.Strict.NonEmpty
-                     , Data.List.Extended
-                     , Data.Parser.CacheControl
-                     , Data.Parser.Expires
-                     , Data.Parser.JSONPath
-                     , Data.SerializableBlob
                      , Data.SqlCommenter
-                     , Data.Text.Casing
-                     , Data.Text.Extended
-                     , Data.Text.NonEmpty
-                     , Data.Trie
-                     , Data.URL.Template
                      , Database.MSSQL.Transaction
                      , Database.MSSQL.Pool
                      , GHC.AssertNF.CPP
@@ -521,9 +505,6 @@ library
 
                      , Hasura.App
                      , Hasura.Metadata.Class
-
-                     , Hasura.Base.Error
-                     , Hasura.Base.Instances
 
                      , Hasura.App.State
                      , Hasura.Backends.BigQuery.Connection
@@ -703,6 +684,8 @@ library
                      , Hasura.Server.API.Backend
                      , Hasura.Server.API.Instances
                      , Hasura.Server.API.Metadata
+                     , Hasura.Server.API.Metadata.Instances
+                     , Hasura.Server.API.Metadata.Types
                      , Hasura.Server.API.PGDump
                      , Hasura.Server.API.Query
                      , Hasura.Server.API.V2Query
@@ -730,13 +713,13 @@ library
                      , Hasura.Server.Version
                      , Hasura.ShutdownLatch
 
-                     , Hasura.CustomReturnType.API
-                     , Hasura.CustomReturnType.Cache
-                     , Hasura.CustomReturnType.Common
-                     , Hasura.CustomReturnType.IR
-                     , Hasura.CustomReturnType.Metadata
-                     , Hasura.CustomReturnType.Schema
-                     , Hasura.CustomReturnType.Types
+                     , Hasura.LogicalModel.API
+                     , Hasura.LogicalModel.Cache
+                     , Hasura.LogicalModel.Common
+                     , Hasura.LogicalModel.IR
+                     , Hasura.LogicalModel.Metadata
+                     , Hasura.LogicalModel.Schema
+                     , Hasura.LogicalModel.Types
 
                      , Hasura.EncJSON
 
@@ -919,6 +902,12 @@ library
                      , Hasura.RQL.IR.Returning
                      , Hasura.RQL.IR.Root
                      , Hasura.RQL.IR.Select
+                     , Hasura.RQL.IR.Select.AnnSelectG
+                     , Hasura.RQL.IR.Select.Args
+                     , Hasura.RQL.IR.Select.From
+                     , Hasura.RQL.IR.Select.OrderBy
+                     , Hasura.RQL.IR.Select.RelationSelect
+                     , Hasura.RQL.IR.Select.TablePerm
                      , Hasura.RQL.IR.Update
                      , Hasura.RQL.IR.Update.Batch
                      , Hasura.RQL.IR.Value
@@ -1048,6 +1037,7 @@ executable graphql-engine
                    , bytestring
                    , ekg-core
                    , ekg-prometheus
+                   , hasura-extras
                    , hasura-prelude
                    , kan-extensions
                    , pg-client

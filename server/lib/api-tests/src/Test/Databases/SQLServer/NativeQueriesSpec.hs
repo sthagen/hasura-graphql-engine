@@ -16,7 +16,7 @@ import Harness.Schema qualified as Schema
 import Harness.Test.BackendType qualified as BackendType
 import Harness.Test.Fixture qualified as Fixture
 import Harness.TestEnvironment (GlobalTestEnvironment, TestEnvironment, getBackendTypeConfig)
-import Harness.Yaml (shouldAtLeastBe, shouldReturnYaml)
+import Harness.Yaml (shouldReturnYaml)
 import Hasura.Prelude
 import Test.Hspec (SpecWith, describe, it)
 
@@ -66,14 +66,14 @@ tests = do
       articleQuery schemaName =
         "select id, title,(substring(content, 1, {{length}}) + (case when len(content) < {{length}} then '' else '...' end)) as excerpt,date from [" <> Schema.unSchemaName schemaName <> "].[article]"
 
-      articleWithExcerptReturnType :: Schema.CustomType
-      articleWithExcerptReturnType =
-        (Schema.customType "article_with_excerpt")
-          { Schema.customTypeColumns =
-              [ Schema.nativeQueryColumn "id" Schema.TInt,
-                Schema.nativeQueryColumn "title" Schema.TStr,
-                Schema.nativeQueryColumn "excerpt" Schema.TStr,
-                Schema.nativeQueryColumn "date" Schema.TUTCTime
+      articleWithExcerptLogicalModel :: Schema.LogicalModel
+      articleWithExcerptLogicalModel =
+        (Schema.logicalModel "article_with_excerpt")
+          { Schema.logicalModelColumns =
+              [ Schema.logicalModelScalar "id" Schema.TInt,
+                Schema.logicalModelScalar "title" Schema.TStr,
+                Schema.logicalModelScalar "excerpt" Schema.TStr,
+                Schema.logicalModelScalar "date" Schema.TUTCTime
               ]
           }
 
@@ -91,7 +91,7 @@ tests = do
           source = BackendType.backendSourceName backendTypeMetadata
           schemaName = Schema.getSchemaName testEnvironment
 
-      Schema.trackCustomType source articleWithExcerptReturnType testEnvironment
+      Schema.trackLogicalModel source articleWithExcerptLogicalModel testEnvironment
 
       Schema.trackNativeQuery source (articleWithExcerptNativeQuery "article_with_excerpt" schemaName) testEnvironment
 
@@ -127,7 +127,7 @@ tests = do
           source = BackendType.backendSourceName backendTypeMetadata
           schemaName = Schema.getSchemaName testEnvironment
 
-      Schema.trackCustomType source articleWithExcerptReturnType testEnvironment
+      Schema.trackLogicalModel source articleWithExcerptLogicalModel testEnvironment
 
       Schema.trackNativeQuery
         source
@@ -170,7 +170,7 @@ tests = do
           source = BackendType.backendSourceName backendTypeMetadata
           schemaName = Schema.getSchemaName testEnvironment
 
-      Schema.trackCustomType source articleWithExcerptReturnType testEnvironment
+      Schema.trackLogicalModel source articleWithExcerptLogicalModel testEnvironment
 
       Schema.trackNativeQuery source (articleWithExcerptNativeQuery "article_with_excerpt" schemaName) testEnvironment
 
@@ -205,7 +205,7 @@ tests = do
           source = BackendType.backendSourceName backendTypeMetadata
           schemaName = Schema.getSchemaName testEnvironment
 
-      Schema.trackCustomType source articleWithExcerptReturnType testEnvironment
+      Schema.trackLogicalModel source articleWithExcerptLogicalModel testEnvironment
 
       Schema.trackNativeQuery source (articleWithExcerptNativeQuery "article_with_excerpt" schemaName) testEnvironment
 
@@ -235,49 +235,3 @@ tests = do
               |]
 
       shouldReturnYaml testEnvironment actual expected
-
-    it "Runs a query that uses a built-in Stored Procedure" $ \testEnvironment -> do
-      let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
-          source = BackendType.backendSourceName backendTypeMetadata
-
-          goodQuery = "EXEC sp_databases"
-
-          storedProcedureReturnType :: Schema.CustomType
-          storedProcedureReturnType =
-            (Schema.customType "stored_procedure")
-              { Schema.customTypeColumns =
-                  [ Schema.nativeQueryColumn "database_name" Schema.TStr,
-                    Schema.nativeQueryColumn "database_size" Schema.TInt,
-                    Schema.nativeQueryColumn "remarks" Schema.TStr
-                  ]
-              }
-
-          useStoredProcedure :: Schema.NativeQuery
-          useStoredProcedure =
-            (Schema.nativeQuery "use_stored_procedure" goodQuery "stored_procedure")
-
-      Schema.trackCustomType source storedProcedureReturnType testEnvironment
-
-      Schema.trackNativeQuery source useStoredProcedure testEnvironment
-
-      -- making an assumption here that an SQLServer instance will always have
-      -- a `master` database
-      let expected =
-            [yaml|
-                data:
-                  use_stored_procedure:
-                    - database_name: "master"
-              |]
-
-      actual <-
-        GraphqlEngine.postGraphql
-          testEnvironment
-          [graphql|
-              query {
-                use_stored_procedure {
-                  database_name
-                }
-              }
-           |]
-
-      actual `shouldAtLeastBe` expected

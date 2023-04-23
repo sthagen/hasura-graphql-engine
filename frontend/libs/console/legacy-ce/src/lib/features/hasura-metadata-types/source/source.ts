@@ -15,8 +15,14 @@ export type NativeDrivers =
   | 'bigquery'
   | 'citus'
   | 'cockroach';
-export type GDCDriver = string;
-export type SupportedDrivers = Driver | GDCDriver;
+
+export type SuperConnectorDrivers =
+  | 'snowflake'
+  | 'athena'
+  | 'mysqlgdc'
+  | string;
+
+export type SupportedDrivers = Driver | SuperConnectorDrivers;
 
 export type NamingConvention = 'hasura-default' | 'graphql-default';
 
@@ -33,8 +39,8 @@ export type SourceCustomization = {
   naming_convention?: NamingConvention;
 };
 
-export type PGFunction = {
-  function: string | { name: string; schema: string };
+export type MetadataFunction = {
+  function: QualifiedFunction;
   configuration?: {
     custom_name?: string;
     custom_root_fields?: {
@@ -50,11 +56,11 @@ export type Source = {
   name: string;
   tables: MetadataTable[];
   customization?: SourceCustomization;
+  functions?: MetadataFunction[];
 } & (
   | {
       kind: 'postgres';
       configuration: PostgresConfiguration;
-      functions?: PGFunction[];
     }
   | {
       kind: 'mssql';
@@ -77,3 +83,16 @@ export type Source = {
       configuration: unknown;
     }
 );
+
+export type QualifiedFunction = unknown;
+
+export type BulkKeepGoingResponse = [
+  | {
+      message: 'success';
+    }
+  | {
+      code: string;
+      error: string;
+      path: string;
+    }
+];
