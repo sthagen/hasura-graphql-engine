@@ -34,14 +34,15 @@ import Control.Lens (Lens', (.~), (^?))
 import Data.Aeson
 import Data.Aeson.Key qualified as K
 import Data.Aeson.KeyMap qualified as KM
-import Data.HashMap.Strict qualified as HM
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.HashSet qualified as HS
 import Data.Sequence qualified as Seq
 import Data.Text.Extended
 import Hasura.Base.Error
 import Hasura.EncJSON
-import Hasura.LogicalModel.Types (LogicalModelName)
+import Hasura.LogicalModel.Common (logicalModelFieldsToFieldInfo)
+import Hasura.LogicalModel.Types (LogicalModelField (..), LogicalModelName)
 import Hasura.Prelude
 import Hasura.RQL.DDL.Permission.Internal
 import Hasura.RQL.IR.BoolExp
@@ -54,13 +55,14 @@ import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Metadata.Object
 import Hasura.RQL.Types.Permission
 import Hasura.RQL.Types.Relationships.Local
+import Hasura.RQL.Types.Roles (RoleName, adminRoleName)
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.SchemaCacheTypes
 import Hasura.RQL.Types.Table
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.Types
-import Hasura.Session
+import Hasura.Session (UserInfoM)
 
 {- Note [Backend only permissions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -181,14 +183,14 @@ procSetObj ::
 procSetObj source tn fieldInfoMap mObj = do
   (setColTups, deps) <- withPathK "set" $
     fmap unzip $
-      forM (HM.toList setObj) $ \(pgCol, val) -> do
+      forM (HashMap.toList setObj) $ \(pgCol, val) -> do
         ty <-
           askColumnType fieldInfoMap pgCol $
             "column " <> pgCol <<> " not found in table " <>> tn
         sqlExp <- parseCollectableType (CollectableTypeScalar ty) val
         let dep = mkColDep @b (getDepReason sqlExp) source tn pgCol
         return ((pgCol, sqlExp), dep)
-  return (HM.fromList setColTups, depHeaders, Seq.fromList deps)
+  return (HashMap.fromList setColTups, depHeaders, Seq.fromList deps)
   where
     setObj = fromMaybe mempty mObj
     depHeaders =
@@ -196,7 +198,7 @@ procSetObj source tn fieldInfoMap mObj = do
         Object $
           KM.fromList $
             map (first (K.fromText . toTxt)) $
-              HM.toList setObj
+              HashMap.toList setObj
 
     getDepReason = bool DRSessionVariable DROnType . isStaticValue
 
@@ -211,10 +213,10 @@ addPermissionToMetadata ::
   TableMetadata b ->
   TableMetadata b
 addPermissionToMetadata permDef = case _pdPermission permDef of
-  InsPerm' _ -> tmInsertPermissions %~ OMap.insert (_pdRole permDef) permDef
-  SelPerm' _ -> tmSelectPermissions %~ OMap.insert (_pdRole permDef) permDef
-  UpdPerm' _ -> tmUpdatePermissions %~ OMap.insert (_pdRole permDef) permDef
-  DelPerm' _ -> tmDeletePermissions %~ OMap.insert (_pdRole permDef) permDef
+  InsPerm' _ -> tmInsertPermissions %~ InsOrdHashMap.insert (_pdRole permDef) permDef
+  SelPerm' _ -> tmSelectPermissions %~ InsOrdHashMap.insert (_pdRole permDef) permDef
+  UpdPerm' _ -> tmUpdatePermissions %~ InsOrdHashMap.insert (_pdRole permDef) permDef
+  DelPerm' _ -> tmDeletePermissions %~ InsOrdHashMap.insert (_pdRole permDef) permDef
 
 buildPermInfo ::
   ( BackendMetadata b,
@@ -244,7 +246,7 @@ buildLogicalModelPermInfo ::
   ) =>
   SourceName ->
   LogicalModelName ->
-  FieldInfoMap (FieldInfo b) ->
+  InsOrdHashMap.InsOrdHashMap (Column b) (LogicalModelField b) ->
   PermDefPermission b perm ->
   m (WithDeps (PermInfo perm b))
 buildLogicalModelPermInfo sourceName logicalModelName fieldInfoMap = \case
@@ -350,7 +352,7 @@ buildInsPermInfo source tn fieldInfoMap (InsPerm checkCond set mCols backendOnly
         reqHdrs = fltrHeaders `HS.union` (HS.fromList setHdrs)
         insColDeps = mkColDep @b DRUntyped source tn <$> insCols
         deps = mkParentDep @b source tn Seq.:<| beDeps <> setColDeps <> Seq.fromList insColDeps
-        insColsWithoutPresets = HS.fromList insCols `HS.difference` HM.keysSet setColsSQL
+        insColsWithoutPresets = HS.fromList insCols `HS.difference` HashMap.keysSet setColsSQL
 
     return (InsPermInfo insColsWithoutPresets be setColsSQL backendOnly reqHdrs, deps)
   where
@@ -430,17 +432,19 @@ buildLogicalModelSelPermInfo ::
   ) =>
   SourceName ->
   LogicalModelName ->
-  FieldInfoMap (FieldInfo b) ->
+  InsOrdHashMap.InsOrdHashMap (Column b) (LogicalModelField b) ->
   SelPerm b ->
   m (WithDeps (SelPermInfo b))
-buildLogicalModelSelPermInfo source logicalModelName fieldInfoMap sp = withPathK "permission" do
+buildLogicalModelSelPermInfo source logicalModelName logicalModelFieldMap sp = withPathK "permission" do
   let columns :: [Column b]
-      columns = interpColSpec (ciColumn <$> getCols fieldInfoMap) (spColumns sp)
+      columns = interpColSpec (lmfName <$> InsOrdHashMap.elems logicalModelFieldMap) (spColumns sp)
 
   -- Interpret the row permissions in the 'SelPerm' definition.
+  -- TODO: do row permisions work on non-scalar fields? Going to assume not and
+  -- filter out the non-scalars.
   (spiFilter, boolExpDeps) <-
     withPathK "filter" $
-      procLogicalModelBoolExp source logicalModelName fieldInfoMap (spFilter sp)
+      procLogicalModelBoolExp source logicalModelName (logicalModelFieldsToFieldInfo logicalModelFieldMap) (spFilter sp)
 
   let -- What parts of the metadata are interesting when computing the
       -- permissions? These dependencies bubble all the way up to
@@ -471,7 +475,7 @@ buildLogicalModelSelPermInfo source logicalModelName fieldInfoMap sp = withPathK
       -- TODO: do we care about inherited roles? We don't seem to set this to
       -- anything other than 'Nothing' for in 'buildSelPermInfo' either.
       spiCols :: HashMap (Column b) (Maybe (AnnColumnCaseBoolExpPartialSQL b))
-      spiCols = HM.fromList (map (,Nothing) columns)
+      spiCols = HashMap.fromList (map (,Nothing) columns)
 
       -- Native queries don't have computed fields.
       spiComputedFields :: HashMap ComputedFieldName (Maybe (AnnColumnCaseBoolExpPartialSQL b))
@@ -546,7 +550,7 @@ buildSelPermInfo source tableName fieldInfoMap roleName sp = withPathK "permissi
     when (value < 0) $
       throw400 NotSupported "unexpected negative value"
 
-  let spiCols = HM.fromList $ map (,Nothing) pgCols
+  let spiCols = HashMap.fromList $ map (,Nothing) pgCols
       spiComputedFields = HS.toMap (HS.fromList validComputedFields) $> Nothing
 
   (spiAllowedQueryRootFields, spiAllowedSubscriptionRootFields) <-
@@ -598,7 +602,7 @@ buildUpdPermInfo source tn fieldInfoMap (UpdPerm colSpec set fltr check backendO
       deps = mkParentDep @b source tn Seq.:<| beDeps <> maybe mempty snd checkExpr <> Seq.fromList updColDeps <> setColDeps
       depHeaders = getDependentHeaders fltr
       reqHeaders = depHeaders `HS.union` (HS.fromList setHeaders)
-      updColsWithoutPreSets = HS.fromList updCols `HS.difference` HM.keysSet setColsSQL
+      updColsWithoutPreSets = HS.fromList updCols `HS.difference` HashMap.keysSet setColsSQL
 
   return (UpdPermInfo updColsWithoutPreSets tn be (fst <$> checkExpr) setColsSQL backendOnly reqHeaders, deps)
   where

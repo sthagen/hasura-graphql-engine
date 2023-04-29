@@ -18,6 +18,7 @@ import Hasura.NativeQuery.Metadata (NativeQueryMetadata)
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.BoolExp
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
@@ -30,10 +31,10 @@ import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.Table
-import Hasura.SQL.Backend
 import Hasura.SQL.Types
 import Hasura.Server.Migrate.Version
 import Hasura.Services.Network
+import Hasura.StoredProcedure.Metadata (StoredProcedureMetadata)
 import Language.GraphQL.Draft.Syntax qualified as G
 import Network.HTTP.Client qualified as HTTP
 
@@ -119,6 +120,24 @@ class
     ColumnReference b ->
     Value ->
     m [OpExpG b v]
+
+  buildObjectRelationshipInfo ::
+    (MonadError QErr m) =>
+    SourceConfig b ->
+    SourceName ->
+    HashMap (TableName b) (HashSet (ForeignKey b)) ->
+    TableName b ->
+    ObjRelDef b ->
+    m (RelInfo b, Seq SchemaDependency)
+
+  buildArrayRelationshipInfo ::
+    (MonadError QErr m) =>
+    SourceConfig b ->
+    SourceName ->
+    HashMap (TableName b) (HashSet (ForeignKey b)) ->
+    TableName b ->
+    ArrRelDef b ->
+    m (RelInfo b, Seq SchemaDependency)
 
   buildFunctionInfo ::
     (MonadError QErr m) =>
@@ -207,6 +226,16 @@ class
     m ()
   validateNativeQuery _ _ _ _ =
     throw500 "validateNativeQuery: not implemented for this backend."
+
+  validateStoredProcedure ::
+    (MonadIO m, MonadError QErr m) =>
+    Env.Environment ->
+    SourceConnConfiguration b ->
+    LogicalModelMetadata b ->
+    StoredProcedureMetadata b ->
+    m ()
+  validateStoredProcedure _ _ _ _ =
+    throw500 "validateStoredProcedure: not implemented for this backend."
 
   -- | How to convert a column to a field.
   -- For backends that don't support nested objects or arrays the default implementation

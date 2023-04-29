@@ -15,8 +15,8 @@ module Harness.Schema
     SchemaName (..),
     NativeQuery (..),
     NativeQueryColumn (..),
-    trackNativeQueryCommand,
-    untrackNativeQueryCommand,
+    StoredProcedure (..),
+    StoredProcedureColumn (..),
     resolveTableSchema,
     trackTable,
     untrackTable,
@@ -32,9 +32,19 @@ module Harness.Schema
     untrackComputedField,
     runSQL,
     addSource,
+    getSchemaName,
+    nativeQuery,
+    nativeQueryColumn,
     trackNativeQuery,
     untrackNativeQuery,
-    getSchemaName,
+    trackNativeQueryCommand,
+    untrackNativeQueryCommand,
+    storedProcedure,
+    storedProcedureColumn,
+    trackStoredProcedure,
+    untrackStoredProcedure,
+    trackStoredProcedureCommand,
+    untrackStoredProcedureCommand,
     module Harness.Schema.Table,
     module Harness.Schema.Name,
     module Harness.Schema.LogicalModel,
@@ -42,15 +52,17 @@ module Harness.Schema
 where
 
 import Data.Aeson (Value, (.=))
-import Data.Aeson qualified as Aeson
+import Data.Aeson qualified as J
 import Data.Aeson.Key qualified as K
-import Data.Aeson.Types qualified as Aeson
+import Data.Aeson.Types qualified as J
 import Data.Vector qualified as V
 import Harness.Exceptions
 import Harness.GraphqlEngine qualified as GraphqlEngine
 import Harness.Quoter.Yaml (interpolateYaml, yaml)
 import Harness.Schema.LogicalModel
 import Harness.Schema.Name
+import Harness.Schema.NativeQuery
+import Harness.Schema.StoredProcedure
 import Harness.Schema.Table
 import Harness.Test.BackendType (BackendTypeConfig)
 import Harness.Test.BackendType qualified as BackendType
@@ -90,9 +102,9 @@ trackTable source tbl@(Table {tableName}) testEnvironment = do
     |]
   where
     columnsConfig :: [Column] -> Value
-    columnsConfig = Aeson.object . mapMaybe columnConfig
+    columnsConfig = J.object . mapMaybe columnConfig
 
-    columnConfig :: Column -> Maybe Aeson.Pair
+    columnConfig :: Column -> Maybe J.Pair
     columnConfig col = do
       alias <- columnGqlAlias col
       return $
@@ -163,8 +175,8 @@ trackComputedField ::
   Table ->
   String ->
   String ->
-  Aeson.Value ->
-  Aeson.Value ->
+  J.Value ->
+  J.Value ->
   TestEnvironment ->
   IO ()
 trackComputedField source Table {tableName} functionName asFieldName argumentMapping returnTable testEnvironment = do
@@ -223,11 +235,11 @@ mkObjectRelationshipName Reference {referenceLocalColumn, referenceTargetTable, 
         Nothing -> referenceTargetColumn
    in referenceTargetTable <> "_by_" <> referenceLocalColumn <> "_to_" <> columnName
 
--- | Build an 'Aeson.Value' representing a 'BackendType' specific @TableName@.
-mkTableField :: BackendTypeConfig -> SchemaName -> Text -> Aeson.Value
+-- | Build an 'J.Value' representing a 'BackendType' specific @TableName@.
+mkTableField :: BackendTypeConfig -> SchemaName -> Text -> J.Value
 mkTableField backendTypeMetadata schemaName tableName =
-  let dcFieldName = Aeson.Array $ V.fromList [Aeson.String (unSchemaName schemaName), Aeson.String tableName]
-      nativeFieldName = Aeson.object [BackendType.backendSchemaKeyword backendTypeMetadata .= Aeson.String (unSchemaName schemaName), "name" .= Aeson.String tableName]
+  let dcFieldName = J.Array $ V.fromList [J.String (unSchemaName schemaName), J.String tableName]
+      nativeFieldName = J.object [BackendType.backendSchemaKeyword backendTypeMetadata .= J.String (unSchemaName schemaName), "name" .= J.String tableName]
    in case BackendType.backendType backendTypeMetadata of
         BackendType.Postgres -> nativeFieldName
         BackendType.SQLServer -> nativeFieldName
@@ -266,12 +278,12 @@ trackObjectRelationships tbl@(Table {tableName, tableReferences, tableManualRela
           Nothing -> getSchemaName testEnvironment
         relationshipName = mkObjectRelationshipName ref
         targetTableField = mkTableField backendTypeMetadata targetSchema referenceTargetTable
-        manualConfiguration :: Aeson.Value
+        manualConfiguration :: J.Value
         manualConfiguration =
-          Aeson.object
+          J.object
             [ "remote_table" .= targetTableField,
               "column_mapping"
-                .= Aeson.object [K.fromText referenceLocalColumn .= referenceTargetColumn]
+                .= J.object [K.fromText referenceLocalColumn .= referenceTargetColumn]
             ]
         payload =
           [yaml|
@@ -330,13 +342,13 @@ trackArrayRelationships tbl@(Table {tableName, tableReferences, tableManualRelat
           Nothing -> getSchemaName testEnvironment
         relationshipName = mkArrayRelationshipName tableName referenceTargetColumn referenceLocalColumn referenceTargetQualifiers
         targetTableField = mkTableField backendTypeMetadata targetSchema referenceTargetTable
-        manualConfiguration :: Aeson.Value
+        manualConfiguration :: J.Value
         manualConfiguration =
-          Aeson.object
+          J.object
             [ "remote_table"
                 .= tableField,
               "column_mapping"
-                .= Aeson.object [K.fromText referenceTargetColumn .= referenceLocalColumn]
+                .= J.object [K.fromText referenceTargetColumn .= referenceLocalColumn]
             ]
         payload =
           [yaml|
@@ -418,70 +430,3 @@ addSource sourceName sourceConfig testEnvironment = do
         name: #{ sourceName }
         configuration: #{ sourceConfig }
       |]
-
-trackNativeQueryCommand :: String -> BackendTypeConfig -> NativeQuery -> Value
-trackNativeQueryCommand sourceName backendTypeConfig (NativeQuery {nativeQueryArrayRelationships, nativeQueryName, nativeQueryArguments, nativeQueryQuery, nativeQueryLogicalModel}) =
-  -- arguments are a map from name to type details
-  let argsToJson =
-        Aeson.object
-          . fmap
-            ( \NativeQueryColumn {..} ->
-                let key = K.fromText nativeQueryColumnName
-                    descriptionPair = case nativeQueryColumnDescription of
-                      Just desc -> ["description" .= desc]
-                      Nothing -> []
-
-                    value =
-                      Aeson.object $
-                        [ ("type" .= (BackendType.backendScalarType backendTypeConfig) nativeQueryColumnType),
-                          ("nullable" .= nativeQueryColumnNullable)
-                        ]
-                          <> descriptionPair
-                 in (key, value)
-            )
-
-      arguments = argsToJson nativeQueryArguments
-
-      backendType = BackendType.backendTypeString backendTypeConfig
-
-      requestType = backendType <> "_track_native_query"
-   in [yaml|
-        type: *requestType
-        args:
-          type: query
-          source: *sourceName
-          root_field_name: *nativeQueryName 
-          code: *nativeQueryQuery
-          arguments: *arguments
-          array_relationships: *nativeQueryArrayRelationships
-          returns: *nativeQueryLogicalModel
-      |]
-
-trackNativeQuery :: HasCallStack => String -> NativeQuery -> TestEnvironment -> IO ()
-trackNativeQuery sourceName logMod testEnvironment = do
-  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
-
-  let command = trackNativeQueryCommand sourceName backendTypeMetadata logMod
-
-  GraphqlEngine.postMetadata_ testEnvironment command
-
-untrackNativeQueryCommand :: String -> BackendTypeConfig -> NativeQuery -> Value
-untrackNativeQueryCommand source backendTypeMetadata NativeQuery {nativeQueryName} =
-  let backendType = BackendType.backendTypeString backendTypeMetadata
-      requestType = backendType <> "_untrack_native_query"
-   in [yaml|
-      type: *requestType
-      args:
-        source: *source
-        root_field_name: *nativeQueryName 
-    |]
-
-untrackNativeQuery :: HasCallStack => String -> NativeQuery -> TestEnvironment -> IO ()
-untrackNativeQuery source logMod testEnvironment = do
-  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
-
-  let command = untrackNativeQueryCommand source backendTypeMetadata logMod
-
-  GraphqlEngine.postMetadata_
-    testEnvironment
-    command

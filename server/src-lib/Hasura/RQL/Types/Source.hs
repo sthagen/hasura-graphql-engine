@@ -14,9 +14,11 @@ module Hasura.RQL.Types.Source
     unsafeSourceTables,
     siConfiguration,
     siNativeQueries,
+    siStoredProcedures,
     siLogicalModels,
     siFunctions,
     siName,
+    siSourceKind,
     siQueryTagsConfig,
     siTables,
     siCustomization,
@@ -46,7 +48,7 @@ where
 import Control.Lens hiding ((.=))
 import Data.Aeson.Extended
 import Data.Environment
-import Data.HashMap.Strict qualified as Map
+import Data.HashMap.Strict qualified as HashMap
 import Database.PG.Query qualified as PG
 import Hasura.Base.Error
 import Hasura.Function.Cache
@@ -56,14 +58,15 @@ import Hasura.NativeQuery.Cache (NativeQueryCache)
 import Hasura.Prelude
 import Hasura.QueryTags.Types
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendTag
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.HealthCheck
 import Hasura.RQL.Types.Instances ()
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.SQL.Backend
-import Hasura.SQL.Tag
+import Hasura.StoredProcedure.Cache (StoredProcedureCache)
 import Hasura.Tracing qualified as Tracing
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -72,9 +75,11 @@ import Language.GraphQL.Draft.Syntax qualified as G
 
 data SourceInfo b = SourceInfo
   { _siName :: SourceName,
+    _siSourceKind :: BackendSourceKind b,
     _siTables :: TableCache b,
     _siFunctions :: FunctionCache b,
     _siNativeQueries :: NativeQueryCache b,
+    _siStoredProcedures :: StoredProcedureCache b,
     _siLogicalModels :: LogicalModelCache b,
     _siConfiguration :: ~(SourceConfig b),
     _siQueryTagsConfig :: Maybe QueryTagsConfig,
@@ -87,6 +92,7 @@ instance
     ToJSON (TableCache b),
     ToJSON (FunctionCache b),
     ToJSON (NativeQueryCache b),
+    ToJSON (StoredProcedureCache b),
     ToJSON (QueryTagsConfig),
     ToJSON (SourceCustomization)
   ) =>
@@ -98,6 +104,7 @@ instance
         "tables" .= _siTables,
         "functions" .= _siFunctions,
         "native_queries" .= _siNativeQueries,
+        "stored_procedures" .= _siStoredProcedures,
         "configuration" .= _siConfiguration,
         "query_tags_config" .= _siQueryTagsConfig
       ]
@@ -149,7 +156,7 @@ instance Backend b => FromJSON (DBObjectsIntrospection b) where
     tables <- o .: "tables"
     functions <- o .: "functions"
     scalars <- o .: "scalars"
-    pure $ DBObjectsIntrospection (Map.fromList tables) (Map.fromList functions) (ScalarMap (Map.fromList scalars))
+    pure $ DBObjectsIntrospection (HashMap.fromList tables) (HashMap.fromList functions) (ScalarMap (HashMap.fromList scalars))
 
 instance (L.ToEngineLog (DBObjectsIntrospection b) L.Hasura) where
   toEngineLog _ = (L.LevelDebug, L.ELTStartup, toJSON rsLog)

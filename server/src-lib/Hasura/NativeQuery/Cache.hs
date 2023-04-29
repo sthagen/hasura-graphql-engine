@@ -1,30 +1,22 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | The representation of native queries as derived from the schema cache.
 module Hasura.NativeQuery.Cache
   ( NativeQueryInfo (..),
     NativeQueryCache,
-    nqiRootFieldName,
-    nqiArrayRelationships,
-    nqiCode,
-    nqiReturns,
-    nqiArguments,
-    nqiDescription,
   )
 where
 
-import Control.Lens (makeLenses)
 import Data.Aeson (ToJSON (toJSON), genericToJSON)
 import Hasura.LogicalModel.Cache (LogicalModelInfo)
 import Hasura.NativeQuery.Metadata (InterpolatedQuery, NativeQueryArgumentName, NativeQueryName)
 import Hasura.NativeQuery.Types (NullableScalarType)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (Backend)
+import Hasura.RQL.Types.BackendType (BackendType)
 import Hasura.RQL.Types.Common (RelName)
 import Hasura.RQL.Types.Relationships.Local (RelInfo)
 import Hasura.RQL.Types.Table (RolePermInfoMap)
-import Hasura.SQL.Backend (BackendType)
 
 type NativeQueryCache b = HashMap NativeQueryName (NativeQueryInfo b)
 
@@ -45,5 +37,3 @@ instance
   ToJSON (NativeQueryInfo b)
   where
   toJSON = genericToJSON hasuraJSON
-
-makeLenses ''NativeQueryInfo

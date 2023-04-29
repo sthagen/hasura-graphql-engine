@@ -9,8 +9,8 @@ import Control.Monad.Trans.Control
 import Data.Aeson.Ordered qualified as JO
 import Data.ByteString.Lazy qualified as BL
 import Data.Environment qualified as Env
-import Data.HashMap.Strict.Extended qualified as Map
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict.Extended qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.HashMap.Strict.NonEmpty qualified as NEMap
 import Data.HashSet qualified as HS
 import Data.IntMap.Strict qualified as IntMap
@@ -151,7 +151,7 @@ foldJoinTreeWith callSource callRemoteSchema userInfo lhs joinTree reqHeaders op
   (compositeValue, joins) <- collectJoinArguments (assignJoinIds joinTree) lhs
   joinIndices <- fmap catMaybes $
     for joins $ \JoinArguments {..} -> do
-      let joinArguments = IntMap.fromList $ map swap $ Map.toList _jalArguments
+      let joinArguments = IntMap.fromList $ map swap $ HashMap.toList _jalArguments
       previousStep <- case _jalJoin of
         RemoteJoinRemoteSchema remoteSchemaJoin childJoinTree -> do
           let remoteSchemaInfo = rsDef $ _rsjRemoteSchema remoteSchemaJoin
@@ -242,7 +242,7 @@ collectJoinArguments joinTree lhs = do
         -- This needs to be tested so we can verify that the result of this
         -- function call is reasonable.
         Just (JoinArguments _remoteJoin arguments _fieldName) ->
-          case Map.lookup argument arguments of
+          case HashMap.lookup argument arguments of
             Just argumentId -> pure $ ReplacementToken joinId argumentId
             Nothing -> addNewArgument counter joins arguments
         Nothing -> addNewArgument counter joins mempty
@@ -252,7 +252,7 @@ collectJoinArguments joinTree lhs = do
               newArguments =
                 JoinArguments
                   remoteJoin
-                  (Map.insert argument argumentId arguments)
+                  (HashMap.insert argument argumentId arguments)
                   fieldName
           put (counter + 1, IntMap.insert joinId newArguments joins)
           pure $ ReplacementToken joinId argumentId
@@ -337,7 +337,7 @@ collectJoinArguments joinTree lhs = do
               onNothing (JO.lookup aliasTxt object) $
                 throw500 $
                   "a join column is missing from the response: " <> aliasTxt
-            if Map.null (Map.filter (== JO.Null) joinArgument)
+            if HashMap.null (HashMap.filter (== JO.Null) joinArgument)
               then
                 Just . CVFromRemote
                   <$> getReplacementToken joinId remoteJoin (JoinArgument joinArgument) (FieldName fieldName)
@@ -351,7 +351,7 @@ collectJoinArguments joinTree lhs = do
               then pure Nothing
               else pure $ Just $ CVOrdValue value_
 
-      pure . OMap.fromList $
+      pure . InsOrdHashMap.fromList $
         -- filter out the Nothings
         mapMaybe sequenceA compositeObject
 
@@ -378,7 +378,7 @@ joinResults remoteResults compositeValues = do
 
 -------------------------------------------------------------------------------
 
-type CompositeObject a = OMap.InsOrdHashMap Text (CompositeValue a)
+type CompositeObject a = InsOrdHashMap.InsOrdHashMap Text (CompositeValue a)
 
 -- | A hybrid JSON value representation which captures the context of remote join field in type parameter.
 data CompositeValue a
@@ -391,7 +391,7 @@ data CompositeValue a
 compositeValueToJSON :: CompositeValue JO.Value -> JO.Value
 compositeValueToJSON = \case
   CVOrdValue v -> v
-  CVObject obj -> JO.object $ OMap.toList $ OMap.map compositeValueToJSON obj
+  CVObject obj -> JO.object $ InsOrdHashMap.toList $ InsOrdHashMap.map compositeValueToJSON obj
   CVObjectArray vals -> JO.array $ map compositeValueToJSON vals
   CVFromRemote v -> v
 

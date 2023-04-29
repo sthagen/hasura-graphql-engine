@@ -28,9 +28,9 @@ module Hasura.Server.Migrate
 where
 
 import Control.Monad.Trans.Control (MonadBaseControl)
-import Data.Aeson qualified as A
+import Data.Aeson qualified as J
 import Data.FileEmbed (makeRelativeToProject)
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Data.Time.Clock (UTCTime)
@@ -45,15 +45,14 @@ import Hasura.RQL.DDL.Schema
 import Hasura.RQL.DDL.Schema.LegacyCatalog
 import Hasura.RQL.Types.ApiLimit
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.Metadata
-import Hasura.RQL.Types.Network
 import Hasura.RQL.Types.OpenTelemetry (emptyOpenTelemetryConfig)
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.SQL.Backend
 import Hasura.Server.Init (DowngradeOptions (..), databaseUrlOption, _envVar)
 import Hasura.Server.Logging (StartupLog (..))
 import Hasura.Server.Migrate.Internal
@@ -62,6 +61,7 @@ import Hasura.Server.Migrate.Version
 import Hasura.Server.Types (MaintenanceMode (..))
 import Language.Haskell.TH.Lib qualified as TH
 import Language.Haskell.TH.Syntax qualified as TH
+import Network.Types.Extended
 import System.Directory (doesFileExist)
 
 data MigrationResult
@@ -78,7 +78,7 @@ instance ToEngineLog MigrationResult Hasura where
       StartupLog
         { slLogLevel = LevelInfo,
           slKind = "catalog_migrate",
-          slInfo = A.toJSON $ case result of
+          slInfo = J.toJSON $ case result of
             MRNothingToDo ->
               "Already at the latest catalog version ("
                 <> latestCatalogVersionString
@@ -163,11 +163,12 @@ migrateCatalog maybeDefaultSourceConfig extensionsSchema maintenanceMode migrati
                         mempty
                         mempty
                         mempty
+                        mempty
                         defaultSourceConfig
                         Nothing
                         emptySourceCustomization
                         Nothing
-                  sources = OMap.singleton defaultSource $ BackendSourceMetadata defaultSourceMetadata
+                  sources = InsOrdHashMap.singleton defaultSource $ BackendSourceMetadata defaultSourceMetadata
                in emptyMetadata {_metaSources = sources}
 
       liftTx $ insertMetadataInCatalog emptyMetadata'
@@ -336,9 +337,9 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
                     defaultSourceMetadata =
                       BackendSourceMetadata $
                         AB.mkAnyBackend $
-                          SourceMetadata defaultSource PostgresVanillaKind _mnsTables _mnsFunctions mempty mempty defaultSourceConfig Nothing emptySourceCustomization Nothing
+                          SourceMetadata defaultSource PostgresVanillaKind _mnsTables _mnsFunctions mempty mempty mempty defaultSourceConfig Nothing emptySourceCustomization Nothing
                  in Metadata
-                      (OMap.singleton defaultSource defaultSourceMetadata)
+                      (InsOrdHashMap.singleton defaultSource defaultSourceMetadata)
                       _mnsRemoteSchemas
                       _mnsQueryCollections
                       _mnsAllowlist
@@ -364,7 +365,7 @@ migrations maybeDefaultSourceConfig dryRun maintenanceMode =
           multiQ query
           let emptyMetadataNoSources =
                 MetadataNoSources mempty mempty mempty mempty mempty emptyCustomTypes mempty mempty
-          metadataV2 <- case OMap.toList _metaSources of
+          metadataV2 <- case InsOrdHashMap.toList _metaSources of
             [] -> pure emptyMetadataNoSources
             [(_, BackendSourceMetadata exists)] ->
               pure $ case AB.unpackAnyBackend exists of

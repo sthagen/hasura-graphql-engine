@@ -10,7 +10,7 @@ module Hasura.Backends.MySQL.FromIr
 where
 
 import Control.Monad.Validate
-import Data.HashMap.Strict qualified as HM
+import Data.HashMap.Strict qualified as HashMap
 import Data.HashSet.InsOrd qualified as OSet
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -21,10 +21,10 @@ import Hasura.Backends.MySQL.Instances.Types ()
 import Hasura.Backends.MySQL.Types
 import Hasura.Prelude hiding (GT)
 import Hasura.RQL.IR qualified as IR
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Column qualified as IR
 import Hasura.RQL.Types.Common qualified as IR
 import Hasura.RQL.Types.Relationships.Local qualified as IR
-import Hasura.SQL.Backend
 
 data FieldSource
   = ExpressionFieldSource (Aliased Expression)
@@ -224,7 +224,7 @@ fromMapping ::
   From ->
   HashMap Column Column ->
   ReaderT EntityAlias FromIr [Expression]
-fromMapping localFrom = traverse columnsToEqs . HM.toList
+fromMapping localFrom = traverse columnsToEqs . HashMap.toList
   where
     columnsToEqs (remoteColumn, localColumn) = do
       localFieldName <- local (const (fromAlias localFrom)) (fromColumn localColumn)
@@ -508,6 +508,7 @@ fromSelectAggregate mparentRelationship annSelectG = do
       IR.FromIdentifier {} -> refute $ pure IdentifierNotSupported
       IR.FromFunction {} -> refute $ pure FunctionNotSupported
       IR.FromNativeQuery {} -> refute $ pure NativeQueryNotSupported
+      IR.FromStoredProcedure {} -> error "fromSelectAggregate: FromStoredProcedure"
   _mforeignKeyConditions <- fmap (Where . fromMaybe []) $
     for mparentRelationship $
       \(entityAlias, mapping) ->
@@ -699,6 +700,7 @@ fromSelectRows annSelectG = do
       IR.FromIdentifier {} -> refute $ pure IdentifierNotSupported
       IR.FromFunction {} -> refute $ pure FunctionNotSupported
       IR.FromNativeQuery {} -> refute $ pure NativeQueryNotSupported
+      IR.FromStoredProcedure {} -> error "fromSelectRow: FromStoredProcedure"
   Args
     { argsOrderBy,
       argsWhere,
@@ -849,7 +851,7 @@ fromMappingFieldNames localFrom =
               (remoteFieldName)
           )
     )
-    . HM.toList
+    . HashMap.toList
 
 fieldTextNames :: IR.AnnFieldsG 'MySQL Void Expression -> [Text]
 fieldTextNames = fmap (\(IR.FieldName name, _) -> name)

@@ -6,7 +6,7 @@ module Hasura.LogicalModel.Schema
   )
 where
 
-import Data.HashMap.Strict qualified as HM
+import Data.HashMap.Strict qualified as HashMap
 import Hasura.GraphQL.Schema.Backend
   ( BackendLogicalModelSelectSchema (..),
     MonadBuildSchema,
@@ -31,8 +31,8 @@ import Hasura.RQL.IR.Value qualified as IR
 import Hasura.RQL.Types.Backend (Backend)
 import Hasura.RQL.Types.Common (RelName)
 import Hasura.RQL.Types.Relationships.Local (RelInfo)
+import Hasura.RQL.Types.Roles (RoleName, adminRoleName)
 import Hasura.RQL.Types.Table (SelPermInfo (..), _permSel)
-import Hasura.Session (RoleName, adminRoleName)
 
 -- | find list of columns we're allowed to access for this role
 getSelPermInfoForLogicalModel ::
@@ -40,7 +40,7 @@ getSelPermInfoForLogicalModel ::
   LogicalModelInfo b ->
   Maybe (SelPermInfo b)
 getSelPermInfoForLogicalModel role logicalModel =
-  HM.lookup role (_lmiPermissions logicalModel) >>= _permSel
+  HashMap.lookup role (_lmiPermissions logicalModel) >>= _permSel
 
 -- | build select permissions for logical model
 -- `admin` can always select everything

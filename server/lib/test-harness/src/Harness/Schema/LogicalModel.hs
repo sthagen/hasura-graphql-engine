@@ -7,7 +7,8 @@ module Harness.Schema.LogicalModel
     LogicalModelColumn (..),
     logicalModel,
     logicalModelScalar,
-    logicalModelReference,
+    logicalModelArrayReference,
+    logicalModelObjectReference,
     trackLogicalModel,
     trackLogicalModelCommand,
     untrackLogicalModel,
@@ -16,7 +17,7 @@ module Harness.Schema.LogicalModel
 where
 
 import Data.Aeson (Value, (.=))
-import Data.Aeson qualified as Aeson
+import Data.Aeson qualified as J
 import Data.Vector qualified as V
 import Harness.Exceptions
 import Harness.GraphqlEngine qualified as GraphqlEngine
@@ -27,6 +28,13 @@ import Harness.Test.ScalarType
 import Harness.TestEnvironment (TestEnvironment, getBackendTypeConfig)
 import Hasura.Prelude
 
+data ReferenceType = ArrayReference | ObjectReference
+  deriving (Show, Eq)
+
+instance J.ToJSON ReferenceType where
+  toJSON ArrayReference = "array"
+  toJSON ObjectReference = "object"
+
 data LogicalModelColumn
   = LogicalModelScalar
       { logicalModelColumnName :: Text,
@@ -36,7 +44,8 @@ data LogicalModelColumn
       }
   | LogicalModelReference
       { logicalModelColumnName :: Text,
-        logicalModelColumnReference :: Text
+        logicalModelColumnReference :: Text,
+        logicalModelColumnReferenceType :: ReferenceType
       }
   deriving (Show, Eq)
 
@@ -49,11 +58,20 @@ logicalModelScalar name colType =
       logicalModelColumnDescription = Nothing
     }
 
-logicalModelReference :: Text -> Text -> LogicalModelColumn
-logicalModelReference name ref =
+logicalModelArrayReference :: Text -> Text -> LogicalModelColumn
+logicalModelArrayReference name ref =
   LogicalModelReference
     { logicalModelColumnName = name,
-      logicalModelColumnReference = ref
+      logicalModelColumnReference = ref,
+      logicalModelColumnReferenceType = ArrayReference
+    }
+
+logicalModelObjectReference :: Text -> Text -> LogicalModelColumn
+logicalModelObjectReference name ref =
+  LogicalModelReference
+    { logicalModelColumnName = name,
+      logicalModelColumnReference = ref,
+      logicalModelColumnReferenceType = ObjectReference
     }
 
 data LogicalModel = LogicalModel
@@ -75,20 +93,21 @@ trackLogicalModelCommand :: String -> BackendTypeConfig -> LogicalModel -> Value
 trackLogicalModelCommand sourceName backendTypeConfig (LogicalModel {logicalModelDescription, logicalModelName, logicalModelColumns}) =
   -- return type is an array of items
   let returnTypeToJson =
-        Aeson.Array
+        J.Array
           . V.fromList
           . fmap
             ( \case
                 LogicalModelReference {..} ->
-                  Aeson.object $
+                  J.object $
                     [ ("logical_model" .= logicalModelColumnReference),
+                      ("link_type" .= logicalModelColumnReferenceType),
                       ("name" .= logicalModelColumnName)
                     ]
                 LogicalModelScalar {..} ->
                   let descriptionPair = case logicalModelColumnDescription of
                         Just desc -> [("description" .= desc)]
                         Nothing -> []
-                   in Aeson.object $
+                   in J.object $
                         [ ("name" .= logicalModelColumnName),
                           ("type" .= (BackendType.backendScalarType backendTypeConfig) logicalModelColumnType),
                           ("nullable" .= logicalModelColumnNullable)

@@ -35,13 +35,14 @@ import Hasura.Eventing.EventTrigger
 import Hasura.GraphQL.Execute.Subscription.Options
 import Hasura.GraphQL.Execute.Subscription.State qualified as ES
 import Hasura.GraphQL.Schema.NamingCase
-import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Incremental qualified as Inc
 import Hasura.Logging qualified as L
 import Hasura.Prelude
 import Hasura.RQL.DDL.Schema.Cache.Config
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Metadata
+import Hasura.RQL.Types.Roles (RoleName)
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.SchemaCache (MetadataResourceVersion)
 import Hasura.Server.Auth
 import Hasura.Server.Cors qualified as Cors
@@ -50,7 +51,6 @@ import Hasura.Server.Logging
 import Hasura.Server.Metrics
 import Hasura.Server.Prometheus
 import Hasura.Server.Types
-import Hasura.Session
 import Hasura.ShutdownLatch
 import Hasura.Tracing qualified as Tracing
 import Network.HTTP.Client qualified as HTTP
@@ -324,21 +324,18 @@ buildCacheStaticConfig AppEnv {..} =
   CacheStaticConfig
     { _cscMaintenanceMode = appEnvEnableMaintenanceMode,
       _cscEventingMode = appEnvEventingMode,
-      _cscReadOnlyMode = appEnvEnableReadOnlyMode
+      _cscReadOnlyMode = appEnvEnableReadOnlyMode,
+      _cscAreNativeQueriesEnabled = False
     }
 
-buildCacheDynamicConfig :: MonadIO m => AppEnv -> AppContext -> m CacheDynamicConfig
-buildCacheDynamicConfig AppEnv {..} AppContext {..} = do
-  let CheckFeatureFlag runCheckFlag = appEnvCheckFeatureFlag
-  nativeQueriesEnabled <- liftIO $ runCheckFlag nativeQueryInterface
-  pure
-    CacheDynamicConfig
-      { _cdcFunctionPermsCtx = acFunctionPermsCtx,
-        _cdcRemoteSchemaPermsCtx = acRemoteSchemaPermsCtx,
-        _cdcSQLGenCtx = acSQLGenCtx,
-        _cdcExperimentalFeatures = acExperimentalFeatures,
-        _cdcDefaultNamingConvention = acDefaultNamingConvention,
-        _cdcMetadataDefaults = acMetadataDefaults,
-        _cdcApolloFederationStatus = acApolloFederationStatus,
-        _cdcAreNativeQueriesEnabled = nativeQueriesEnabled
-      }
+buildCacheDynamicConfig :: AppContext -> CacheDynamicConfig
+buildCacheDynamicConfig AppContext {..} = do
+  CacheDynamicConfig
+    { _cdcFunctionPermsCtx = acFunctionPermsCtx,
+      _cdcRemoteSchemaPermsCtx = acRemoteSchemaPermsCtx,
+      _cdcSQLGenCtx = acSQLGenCtx,
+      _cdcExperimentalFeatures = acExperimentalFeatures,
+      _cdcDefaultNamingConvention = acDefaultNamingConvention,
+      _cdcMetadataDefaults = acMetadataDefaults,
+      _cdcApolloFederationStatus = acApolloFederationStatus
+    }

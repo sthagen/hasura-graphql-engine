@@ -21,17 +21,17 @@ where
 
 import Autodocodec (HasCodec, bimapCodec, disjointEitherCodec, optionalFieldWithDefault', requiredField')
 import Autodocodec qualified as AC
+import Autodocodec.Extended (discriminatorBoolField)
 import Data.Aeson
 import Data.Aeson.TH (deriveJSON, deriveToJSON)
-import Data.HashMap.Strict.Extended qualified as M
-import Data.HashMap.Strict.InsOrd.Extended qualified as OM
+import Data.HashMap.Strict.Extended qualified as HashMap
+import Data.HashMap.Strict.InsOrd.Extended qualified as InsOrdHashMap
 import Data.HashSet qualified as S
 import Data.Text.Extended ((<<>))
 import Hasura.GraphQL.Parser.Name qualified as GName
-import Hasura.Metadata.DTO.Utils (discriminatorBoolField)
 import Hasura.Prelude
 import Hasura.RQL.Types.QueryCollection
-import Hasura.Session (RoleName)
+import Hasura.RQL.Types.Roles (RoleName)
 import Language.GraphQL.Draft.Syntax qualified as G
 
 newtype DropCollectionFromAllowlist = DropCollectionFromAllowlist
@@ -119,7 +119,7 @@ type MetadataAllowlist = InsOrdHashMap CollectionName AllowlistEntry
 metadataAllowlistInsert ::
   AllowlistEntry -> MetadataAllowlist -> Either Text MetadataAllowlist
 metadataAllowlistInsert entry@(AllowlistEntry coll _) al =
-  OM.alterF insertIfAbsent coll al
+  InsOrdHashMap.alterF insertIfAbsent coll al
   where
     insertIfAbsent = \case
       Nothing -> Right (Just entry)
@@ -132,7 +132,7 @@ metadataAllowlistInsert entry@(AllowlistEntry coll _) al =
 metadataAllowlistUpdateScope ::
   AllowlistEntry -> MetadataAllowlist -> Either Text MetadataAllowlist
 metadataAllowlistUpdateScope entry@(AllowlistEntry coll _) al =
-  OM.alterF setIfPresent coll al
+  InsOrdHashMap.alterF setIfPresent coll al
   where
     setIfPresent = \case
       Just _ -> Right (Just entry)
@@ -142,7 +142,7 @@ metadataAllowlistUpdateScope entry@(AllowlistEntry coll _) al =
 -- This is used in 'runDropCollection' to function to ensure that we don't delete
 -- any collections which are referred to in the allowlist.
 metadataAllowlistAllCollections :: MetadataAllowlist -> [CollectionName]
-metadataAllowlistAllCollections = toList . OM.map aeCollection
+metadataAllowlistAllCollections = toList . InsOrdHashMap.map aeCollection
 
 -- | A query stripped of typenames. A query is allowed if it occurs
 -- in an allowed query collection after normalization.
@@ -208,16 +208,16 @@ inlineAllowlist collections allowlist = InlinedAllowlist global perRole
   where
     globalCollections :: [CollectionName]
     globalCollections =
-      [coll | AllowlistEntry coll AllowlistScopeGlobal <- OM.elems allowlist]
+      [coll | AllowlistEntry coll AllowlistScopeGlobal <- InsOrdHashMap.elems allowlist]
     perRoleCollections :: HashMap RoleName [CollectionName]
     perRoleCollections =
       inverseMap $
         [ (coll, toList roles)
-          | AllowlistEntry coll (AllowlistScopeRoles roles) <- OM.elems allowlist
+          | AllowlistEntry coll (AllowlistScopeRoles roles) <- InsOrdHashMap.elems allowlist
         ]
 
     inverseMap :: Hashable b => [(a, [b])] -> HashMap b [a]
-    inverseMap = M.fromListWith (<>) . concatMap (\(c, rs) -> [(r, [c]) | r <- rs])
+    inverseMap = HashMap.fromListWith (<>) . concatMap (\(c, rs) -> [(r, [c]) | r <- rs])
 
     global = inlineQueries globalCollections
     perRole = inlineQueries <$> perRoleCollections
@@ -232,7 +232,7 @@ inlineAllowlist collections allowlist = InlinedAllowlist global perRole
 
     lookupQueries :: CollectionName -> [G.ExecutableDocument G.Name]
     lookupQueries coll =
-      maybe [] collectionQueries $ OM.lookup coll collections
+      maybe [] collectionQueries $ InsOrdHashMap.lookup coll collections
 
 -- | The mode in which the allowlist functions. In global mode,
 -- collections with non-global scope are ignored.
@@ -246,4 +246,4 @@ allowlistAllowsQuery (InlinedAllowlist global perRole) mode role query =
     AllowlistModeFull -> inAllowlist global || inAllowlist roleAllowlist
   where
     inAllowlist = S.member (normalizeQuery query)
-    roleAllowlist = M.findWithDefault mempty role perRole
+    roleAllowlist = HashMap.findWithDefault mempty role perRole

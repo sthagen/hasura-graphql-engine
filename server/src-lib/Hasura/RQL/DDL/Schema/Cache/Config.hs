@@ -9,10 +9,10 @@ module Hasura.RQL.DDL.Schema.Cache.Config
 where
 
 import Hasura.GraphQL.Schema.NamingCase (NamingCase)
-import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Prelude
 import Hasura.RQL.Types.Common (SQLGenCtx)
 import Hasura.RQL.Types.Metadata (MetadataDefaults)
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.Server.Types
 
 --------------------------------------------------------------------------------
@@ -30,7 +30,10 @@ import Hasura.Server.Types
 data CacheStaticConfig = CacheStaticConfig
   { _cscMaintenanceMode :: MaintenanceMode (),
     _cscEventingMode :: EventingMode,
-    _cscReadOnlyMode :: ReadOnlyMode
+    _cscReadOnlyMode :: ReadOnlyMode,
+    -- | Native queries can be enabled or disabled on the fly via a feature
+    -- flag, however we only recognise a change on a restart
+    _cscAreNativeQueriesEnabled :: Bool
   }
 
 class Monad m => HasCacheStaticConfig m where
@@ -64,11 +67,6 @@ data CacheDynamicConfig = CacheDynamicConfig
     _cdcExperimentalFeatures :: HashSet ExperimentalFeature,
     _cdcDefaultNamingConvention :: NamingCase,
     _cdcMetadataDefaults :: MetadataDefaults,
-    _cdcApolloFederationStatus :: ApolloFederationStatus,
-    -- | Native queries can be enabled or disabled on the fly via a feature
-    -- flag: we want to be able to properly rebuild the relevant parts of the
-    -- schema cache when this value changes, hence the need for it to be part of
-    -- the dynamic config.
-    _cdcAreNativeQueriesEnabled :: Bool
+    _cdcApolloFederationStatus :: ApolloFederationStatus
   }
   deriving (Eq)

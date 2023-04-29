@@ -16,7 +16,7 @@ import Data.Aeson.Key qualified as K
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Text (encodeToTextBuilder)
 import Data.ByteString (ByteString)
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.Pool
 import Data.Scientific (fromFloatDigits)
 import Data.Text qualified as T
@@ -35,10 +35,10 @@ import Hasura.Backends.MySQL.Types
 import Hasura.Base.Error
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (BackendConfig)
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.Table (TableEventTriggers)
-import Hasura.SQL.Backend
 
 resolveSourceConfig :: (MonadIO m) => SourceName -> ConnSourceConfig -> BackendSourceKind 'MySQL -> BackendConfig 'MySQL -> environment -> manager -> m (Either QErr SourceConfig)
 resolveSourceConfig _name csc@ConnSourceConfig {_cscPoolSettings = ConnPoolSettings {..}, ..} _backendKind _backendConfig _env _manager = do
@@ -130,7 +130,7 @@ parseAndCollectRows ::
   Vector (InsOrdHashMap DataLoaderPlan.FieldName J.Value)
 parseAndCollectRows columns rows =
   V.fromList
-    [ OMap.fromList
+    [ InsOrdHashMap.fromList
         [ (DataLoaderPlan.FieldName . decodeUtf8 . fieldName $ column, parseFieldResult column value)
           | (column, value) <- zip columns row :: [(Field, Maybe ByteString)]
         ]

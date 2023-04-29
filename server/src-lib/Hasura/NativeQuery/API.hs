@@ -18,17 +18,18 @@ import Autodocodec qualified as AC
 import Control.Lens (Traversal', has, preview, (^?))
 import Data.Aeson
 import Data.Environment qualified as Env
-import Data.HashMap.Strict.InsOrd.Extended qualified as InsOrd
+import Data.HashMap.Strict.InsOrd.Extended qualified as InsOrdHashMap
 import Data.Text.Extended (toTxt, (<<>))
 import Hasura.Base.Error
 import Hasura.EncJSON
 import Hasura.LogicalModel.API (getCustomTypes)
 import Hasura.LogicalModel.Metadata (LogicalModelName)
-import Hasura.Metadata.DTO.Utils (codecNamePrefix)
 import Hasura.NativeQuery.Metadata (NativeQueryArgumentName, NativeQueryMetadata (..), parseInterpolatedQuery)
 import Hasura.NativeQuery.Types (NativeQueryName, NullableScalarType, nativeQueryArrayRelationshipsCodec)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (Backend, SourceConnConfiguration)
+import Hasura.RQL.Types.BackendTag
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
   ( RelName,
     SourceName,
@@ -41,8 +42,6 @@ import Hasura.RQL.Types.Metadata.Object
 import Hasura.RQL.Types.Relationships.Local (RelDef, RelManualConfig)
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.SQL.Backend
-import Hasura.SQL.Tag
 import Hasura.Server.Init.FeatureFlag (HasFeatureFlagChecker (..))
 import Hasura.Server.Init.FeatureFlag qualified as FF
 
@@ -52,7 +51,7 @@ data TrackNativeQuery (b :: BackendType) = TrackNativeQuery
     tnqRootFieldName :: NativeQueryName,
     tnqCode :: Text,
     tnqArguments :: HashMap NativeQueryArgumentName (NullableScalarType b),
-    tnqArrayRelationships :: InsOrd.InsOrdHashMap RelName (RelDef (RelManualConfig b)),
+    tnqArrayRelationships :: InsOrdHashMap.InsOrdHashMap RelName (RelDef (RelManualConfig b)),
     tnqDescription :: Maybe Text,
     tnqReturns :: LogicalModelName
   }
@@ -61,7 +60,7 @@ instance (Backend b) => HasCodec (TrackNativeQuery b) where
   codec =
     AC.CommentCodec
       ("A request to track a native query")
-      $ AC.object (codecNamePrefix @b <> "TrackNativeQuery")
+      $ AC.object (backendPrefix @b <> "TrackNativeQuery")
       $ TrackNativeQuery
         <$> AC.requiredField "source" sourceDoc
           AC..= tnqSource
@@ -169,7 +168,7 @@ runGetNativeQuery q = do
   let nativeQuery :: Maybe (NativeQueries b)
       nativeQuery = metadata ^? metaSources . ix (gnqSource q) . toSourceMetadata . smNativeQueries @b
 
-  pure (encJFromJValue (InsOrd.elems <$> nativeQuery))
+  pure (encJFromJValue (InsOrdHashMap.elems <$> nativeQuery))
 
 -- | Handler for the 'track_native_query' endpoint. The type 'TrackNativeQuery b'
 -- (appearing here in wrapped as 'BackendTrackNativeQuery b' for 'AnyBackend'
@@ -211,7 +210,7 @@ runTrackNativeQuery env trackNativeQueryRequest = do
         MOSourceObjId source $
           AB.mkAnyBackend $
             SMONativeQuery @b fieldName
-      existingNativeQueries = InsOrd.keys (_smNativeQueries sourceMetadata)
+      existingNativeQueries = InsOrdHashMap.keys (_smNativeQueries sourceMetadata)
 
   when (fieldName `elem` existingNativeQueries) do
     throw400 AlreadyTracked $ "Native query '" <> toTxt fieldName <> "' is already tracked."
@@ -219,7 +218,7 @@ runTrackNativeQuery env trackNativeQueryRequest = do
   buildSchemaCacheFor metadataObj $
     MetadataModifier $
       (metaSources . ix source . toSourceMetadata @b . smNativeQueries)
-        %~ InsOrd.insert fieldName metadata
+        %~ InsOrdHashMap.insert fieldName metadata
 
   pure successMsg
   where
@@ -280,7 +279,7 @@ dropNativeQueryInMetadata :: forall b. BackendMetadata b => SourceName -> Native
 dropNativeQueryInMetadata source rootFieldName = do
   MetadataModifier $
     metaSources . ix source . toSourceMetadata @b . smNativeQueries
-      %~ InsOrd.delete rootFieldName
+      %~ InsOrdHashMap.delete rootFieldName
 
 -- | check feature flag is enabled before carrying out any actions
 throwIfFeatureDisabled :: (HasFeatureFlagChecker m, MonadError QErr m) => m ()

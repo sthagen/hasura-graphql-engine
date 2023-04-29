@@ -29,9 +29,8 @@ import Data.Aeson (ToJSON, toJSON)
 import Data.Aeson.TH
 import Data.Environment qualified as Env
 import Data.FileEmbed (makeRelativeToProject)
-import Data.HashMap.Strict qualified as HM
-import Data.HashMap.Strict.Extended qualified as Map
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict.Extended qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.HashSet qualified as Set
 import Data.List.Extended qualified as LE
 import Data.List.NonEmpty qualified as NE
@@ -47,12 +46,12 @@ import Hasura.Function.Cache
 import Hasura.Logging
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.EventTrigger (RecreateEventTriggers (..))
 import Hasura.RQL.Types.Metadata (SourceMetadata (..), TableMetadata (..), _cfmDefinition)
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.Table
-import Hasura.SQL.Backend
 import Hasura.Server.Migrate.Internal
 import Hasura.Server.Migrate.Version qualified as Version
 import Language.Haskell.TH.Lib qualified as TH
@@ -161,14 +160,14 @@ resolveDatabaseMetadata ::
   m (Either QErr (DBObjectsIntrospection ('Postgres pgKind)))
 resolveDatabaseMetadata sourceMetadata sourceConfig =
   runExceptT $ _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo (Tx PG.ReadOnly Nothing) InternalRawQuery) do
-    tablesMeta <- fetchTableMetadata $ HM.keysSet $ OMap.toHashMap $ _smTables sourceMetadata
+    tablesMeta <- fetchTableMetadata $ HashMap.keysSet $ InsOrdHashMap.toHashMap $ _smTables sourceMetadata
     let allFunctions =
           Set.fromList $
-            OMap.keys (_smFunctions sourceMetadata) -- Tracked functions
-              <> concatMap getComputedFieldFunctionsMetadata (OMap.elems $ _smTables sourceMetadata) -- Computed field functions
+            InsOrdHashMap.keys (_smFunctions sourceMetadata) -- Tracked functions
+              <> concatMap getComputedFieldFunctionsMetadata (InsOrdHashMap.elems $ _smTables sourceMetadata) -- Computed field functions
     functionsMeta <- fetchFunctionMetadata @pgKind allFunctions
     pgScalars <- fetchPgScalars
-    let scalarsMap = Map.fromList do
+    let scalarsMap = HashMap.fromList do
           scalar <- Set.toList pgScalars
           name <- afold @(Either QErr) $ mkScalarTypeName scalar
           pure (name, scalar)
@@ -177,7 +176,7 @@ resolveDatabaseMetadata sourceMetadata sourceConfig =
     -- A helper function to list all functions underpinning computed fields from a table metadata
     getComputedFieldFunctionsMetadata :: TableMetadata ('Postgres pgKind) -> [FunctionName ('Postgres pgKind)]
     getComputedFieldFunctionsMetadata =
-      map (_cfdFunction . _cfmDefinition) . OMap.elems . _tmComputedFields
+      map (_cfdFunction . _cfmDefinition) . InsOrdHashMap.elems . _tmComputedFields
 
 -- | Initialise catalog tables for a source, including those required by the event delivery subsystem.
 prepareCatalog ::
@@ -375,7 +374,7 @@ pgFetchTableMetadata tables = do
         [PG.ViaJSON $ LE.uniques $ Set.toList tables]
         True
   pure $
-    Map.fromList $
+    HashMap.fromList $
       flip map results $
         \(schema, table, PG.ViaJSON info) -> (QualifiedObject schema table, info)
 
@@ -394,7 +393,7 @@ cockroachFetchTableMetadata _tables = do
         []
         True
   pure $
-    Map.fromList $
+    HashMap.fromList $
       flip map results $
         \(schema, table, PG.ViaJSON info) -> (QualifiedObject schema table, info)
 
@@ -424,7 +423,7 @@ pgFetchFunctionMetadata functions = do
         [PG.ViaJSON functions]
         True
   pure $
-    Map.fromList $
+    HashMap.fromList $
       flip map results $
         \(schema, table, PG.ViaJSON infos) -> (QualifiedObject schema table, infos)
 
@@ -484,7 +483,7 @@ postDropSourceHook sourceConfig tableTriggersMap = do
           -- tables from the database's "hdb_catalog" schema.
           | hdbMetadataTableExist -> do
               -- drop the event trigger functions from the table for default sources
-              for_ (HM.toList tableTriggersMap) $ \(_table, triggers) ->
+              for_ (HashMap.toList tableTriggersMap) $ \(_table, triggers) ->
                 for_ triggers $ \triggerName ->
                   liftTx $ dropTriggerQ triggerName
               PG.multiQE

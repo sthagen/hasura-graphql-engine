@@ -42,7 +42,8 @@ data PrometheusMetrics = PrometheusMetrics
     pmActionBytesReceived :: Counter,
     pmActionBytesSent :: Counter,
     pmScheduledTriggerMetrics :: ScheduledTriggerMetrics,
-    pmSubscriptionMetrics :: SubscriptionMetrics
+    pmSubscriptionMetrics :: SubscriptionMetrics,
+    pmWebsocketMsgQueueTimeSeconds :: Histogram
   }
 
 data GraphQLRequestMetrics = GraphQLRequestMetrics
@@ -50,6 +51,8 @@ data GraphQLRequestMetrics = GraphQLRequestMetrics
     gqlRequestsQueryFailure :: Counter,
     gqlRequestsMutationSuccess :: Counter,
     gqlRequestsMutationFailure :: Counter,
+    gqlRequestsSubscriptionSuccess :: Counter,
+    gqlRequestsSubscriptionFailure :: Counter,
     gqlRequestsUnknownFailure :: Counter,
     gqlExecutionTimeSecondsQuery :: Histogram,
     gqlExecutionTimeSecondsMutation :: Histogram
@@ -84,7 +87,9 @@ data ScheduledTriggerMetrics = ScheduledTriggerMetrics
 
 data SubscriptionMetrics = SubscriptionMetrics
   { submActiveLiveQueryPollers :: Gauge,
-    submActiveStreamingPollers :: Gauge
+    submActiveStreamingPollers :: Gauge,
+    submActiveLiveQueryPollersInError :: Gauge,
+    submActiveStreamingPollersInError :: Gauge
   }
 
 -- | Create dummy mutable references without associating them to a metrics
@@ -101,6 +106,7 @@ makeDummyPrometheusMetrics = do
   pmActionBytesSent <- Counter.new
   pmScheduledTriggerMetrics <- makeDummyScheduledTriggerMetrics
   pmSubscriptionMetrics <- makeDummySubscriptionMetrics
+  pmWebsocketMsgQueueTimeSeconds <- Histogram.new []
   pure PrometheusMetrics {..}
 
 makeDummyGraphQLRequestMetrics :: IO GraphQLRequestMetrics
@@ -109,6 +115,8 @@ makeDummyGraphQLRequestMetrics = do
   gqlRequestsQueryFailure <- Counter.new
   gqlRequestsMutationSuccess <- Counter.new
   gqlRequestsMutationFailure <- Counter.new
+  gqlRequestsSubscriptionSuccess <- Counter.new
+  gqlRequestsSubscriptionFailure <- Counter.new
   gqlRequestsUnknownFailure <- Counter.new
   gqlExecutionTimeSecondsQuery <- Histogram.new []
   gqlExecutionTimeSecondsMutation <- Histogram.new []
@@ -147,6 +155,8 @@ makeDummySubscriptionMetrics :: IO SubscriptionMetrics
 makeDummySubscriptionMetrics = do
   submActiveLiveQueryPollers <- Gauge.new
   submActiveStreamingPollers <- Gauge.new
+  submActiveLiveQueryPollersInError <- Gauge.new
+  submActiveStreamingPollersInError <- Gauge.new
   pure SubscriptionMetrics {..}
 
 --------------------------------------------------------------------------------

@@ -61,12 +61,14 @@ module Hasura.Backends.MSSQL.Types.Internal
     Deleted (..),
     Output (..),
     Projection (..),
+    QueryWithDDL (..),
     Reselect (..),
     Root (..),
     ScalarType (..),
     SchemaName (..),
     Select (..),
     SetIdentityInsert (..),
+    TempTableDDL (..),
     TempTableName (..),
     SomeTableName (..),
     TempTable (..),
@@ -114,7 +116,7 @@ import Hasura.GraphQL.Parser.Name qualified as GName
 import Hasura.NativeQuery.Metadata (InterpolatedQuery)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (SupportedNamingCase (..))
-import Hasura.SQL.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.SQL.GeoJSON qualified as Geo
 import Hasura.SQL.WKT qualified as WKT
 import Language.GraphQL.Draft.Syntax qualified as G
@@ -386,6 +388,23 @@ data CTEBody
   = CTESelect Select
   | CTEUnsafeRawSQL (InterpolatedQuery Expression)
 
+-- | Extra query steps that can be emitted from the main
+-- query to do things like setup temp tables
+data TempTableDDL
+  = -- | create a temp table
+    CreateTemp
+      { stcTempTableName :: TempTableName,
+        stcColumns :: [UnifiedColumn]
+      }
+  | -- | insert output of a statement into a temp table
+    InsertTemp
+      { stiTempTableName :: TempTableName,
+        stiExpression :: InterpolatedQuery Expression
+      }
+  | -- | Drop a temp table
+    DropTemp
+      {stdTempTableName :: TempTableName}
+
 data Top
   = NoTop
   | Top Int
@@ -529,6 +548,13 @@ newtype ColumnName = ColumnName {columnNameText :: Text}
 newtype ConstraintName = ConstraintName {constraintNameText :: Text}
 
 newtype FunctionName = FunctionName {functionNameText :: Text}
+
+-- | type for a query generated from IR along with any DDL actions
+data QueryWithDDL a = QueryWithDDL
+  { qwdBeforeSteps :: [TempTableDDL],
+    qwdQuery :: a,
+    qwdAfterSteps :: [TempTableDDL]
+  }
 
 -- | Derived from the odbc package.
 data ScalarType

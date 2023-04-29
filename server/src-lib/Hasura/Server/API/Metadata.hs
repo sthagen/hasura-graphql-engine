@@ -16,14 +16,15 @@ import GHC.Generics.Extended (constrName)
 import Hasura.App.State
 import Hasura.Base.Error
 import Hasura.EncJSON
+import Hasura.Eventing.Backend
 import Hasura.Function.API qualified as Functions
-import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Logging qualified as L
 import Hasura.LogicalModel.API qualified as LogicalModel
 import Hasura.Metadata.Class
 import Hasura.NativeQuery.API qualified as NativeQueries
 import Hasura.Prelude hiding (first)
 import Hasura.RQL.DDL.Action
+import Hasura.RQL.DDL.Action.Lenses (caDefinition, uaDefinition)
 import Hasura.RQL.DDL.ApiLimit
 import Hasura.RQL.DDL.ComputedField
 import Hasura.RQL.DDL.ConnectionTemplate
@@ -52,11 +53,11 @@ import Hasura.RQL.DDL.SourceKinds
 import Hasura.RQL.DDL.Webhook.Transform.Validation
 import Hasura.RQL.Types.Action
 import Hasura.RQL.Types.Common
-import Hasura.RQL.Types.Eventing.Backend
 import Hasura.RQL.Types.Metadata (emptyMetadataDefaults)
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Permission
 import Hasura.RQL.Types.ScheduledTrigger
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.Source
@@ -70,6 +71,7 @@ import Hasura.Server.Logging (SchemaSyncLog (..), SchemaSyncThreadType (TTMetada
 import Hasura.Server.Types
 import Hasura.Services
 import Hasura.Session
+import Hasura.StoredProcedure.API qualified as StoredProcedures
 import Hasura.Tracing qualified as Tracing
 
 -- | The payload for the @/v1/metadata@ endpoint. See:
@@ -106,7 +108,7 @@ runMetadataQuery ::
   RQLMetadata ->
   m (EncJSON, RebuildableSchemaCache)
 runMetadataQuery appContext schemaCache RQLMetadata {..} = do
-  appEnv@AppEnv {..} <- askAppEnv
+  AppEnv {..} <- askAppEnv
   let logger = _lsLogger appEnvLoggers
   MetadataWithResourceVersion metadata currentResourceVersion <- Tracing.newSpan "fetchMetadata" $ liftEitherM fetchMetadata
   let exportsMetadata = \case
@@ -132,7 +134,7 @@ runMetadataQuery appContext schemaCache RQLMetadata {..} = do
         if (exportsMetadata _rqlMetadata || queryModifiesMetadata _rqlMetadata)
           then emptyMetadataDefaults
           else acMetadataDefaults appContext
-  dynamicConfig <- buildCacheDynamicConfig appEnv appContext
+  let dynamicConfig = buildCacheDynamicConfig appContext
   ((r, modMetadata), modSchemaCache, cacheInvalidations) <-
     runMetadataQueryM
       (acEnvironment appContext)
@@ -191,6 +193,9 @@ queryModifiesMetadata = \case
     case q of
       RMRedeliverEvent _ -> False
       RMInvokeEventTrigger _ -> False
+      RMGetEventLogs _ -> False
+      RMGetEventInvocationLogs _ -> False
+      RMGetEventById _ -> False
       RMGetInconsistentMetadata _ -> False
       RMIntrospectRemoteSchema _ -> False
       RMDumpInternalState _ -> False
@@ -212,6 +217,9 @@ queryModifiesMetadata = \case
       RMGetNativeQuery _ -> False
       RMTrackNativeQuery _ -> True
       RMUntrackNativeQuery _ -> True
+      RMGetStoredProcedure _ -> False
+      RMTrackStoredProcedure _ -> True
+      RMUntrackStoredProcedure _ -> True
       RMGetLogicalModel _ -> False
       RMTrackLogicalModel _ -> True
       RMUntrackLogicalModel _ -> True
@@ -409,6 +417,9 @@ runMetadataQueryV1M env checkFeatureFlag remoteSchemaPerms currentResourceVersio
   RMGetNativeQuery q -> dispatchMetadata NativeQueries.runGetNativeQuery q
   RMTrackNativeQuery q -> dispatchMetadata (NativeQueries.runTrackNativeQuery env) q
   RMUntrackNativeQuery q -> dispatchMetadata NativeQueries.runUntrackNativeQuery q
+  RMGetStoredProcedure q -> dispatchMetadata StoredProcedures.runGetStoredProcedure q
+  RMTrackStoredProcedure q -> dispatchMetadata (StoredProcedures.runTrackStoredProcedure env) q
+  RMUntrackStoredProcedure q -> dispatchMetadata StoredProcedures.runUntrackStoredProcedure q
   RMGetLogicalModel q -> dispatchMetadata LogicalModel.runGetLogicalModel q
   RMTrackLogicalModel q -> dispatchMetadata LogicalModel.runTrackLogicalModel q
   RMUntrackLogicalModel q -> dispatchMetadata LogicalModel.runUntrackLogicalModel q
@@ -428,6 +439,9 @@ runMetadataQueryV1M env checkFeatureFlag remoteSchemaPerms currentResourceVersio
   RMCleanupEventTriggerLog q -> runCleanupEventTriggerLog q
   RMResumeEventTriggerCleanup q -> runEventTriggerResumeCleanup q
   RMPauseEventTriggerCleanup q -> runEventTriggerPauseCleanup q
+  RMGetEventLogs q -> dispatchEventTrigger runGetEventLogs q
+  RMGetEventInvocationLogs q -> dispatchEventTrigger runGetEventInvocationLogs q
+  RMGetEventById q -> dispatchEventTrigger runGetEventById q
   RMAddRemoteSchema q -> runAddRemoteSchema env q
   RMUpdateRemoteSchema q -> runUpdateRemoteSchema env q
   RMRemoveRemoteSchema q -> runRemoveRemoteSchema q

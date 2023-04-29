@@ -44,6 +44,7 @@ module Hasura.GraphQL.Schema.Common
     partialSQLExpToUnpreparedValue,
     requiredFieldParser,
     takeValidNativeQueries,
+    takeValidStoredProcedures,
     takeValidFunctions,
     takeValidTables,
     textToName,
@@ -58,8 +59,8 @@ where
 
 import Data.Either (isRight)
 import Data.Has
-import Data.HashMap.Strict qualified as Map
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.List (uncons)
 import Data.Text qualified as T
 import Data.Text.Casing (GQLNameIdentifier)
@@ -71,8 +72,6 @@ import Hasura.Function.Cache
 import Hasura.GraphQL.Namespace (NamespacedField)
 import Hasura.GraphQL.Parser.Internal.TypeChecking qualified as P
 import Hasura.GraphQL.Schema.Node
-import Hasura.GraphQL.Schema.Options (SchemaOptions)
-import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.GraphQL.Schema.Parser qualified as P
 import Hasura.GraphQL.Schema.Typename
 import Hasura.LogicalModel.Cache (LogicalModelInfo (_lmiPermissions))
@@ -84,12 +83,15 @@ import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Relationships.Remote
+import Hasura.RQL.Types.Roles (RoleName, adminRoleName)
+import Hasura.RQL.Types.Schema.Options (SchemaOptions)
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.RemoteSchema.SchemaCache.Types
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.Session (RoleName, adminRoleName)
+import Hasura.StoredProcedure.Cache (StoredProcedureCache)
 import Language.GraphQL.Draft.Syntax qualified as G
 
 -------------------------------------------------------------------------------
@@ -327,12 +329,12 @@ data RemoteSchemaParser n = RemoteSchemaParser
 getTableRoles :: BackendSourceInfo -> [RoleName]
 getTableRoles bsi = AB.dispatchAnyBackend @Backend bsi go
   where
-    go si = Map.keys . _tiRolePermInfoMap =<< Map.elems (_siTables si)
+    go si = HashMap.keys . _tiRolePermInfoMap =<< HashMap.elems (_siTables si)
 
 getLogicalModelRoles :: BackendSourceInfo -> [RoleName]
 getLogicalModelRoles bsi = AB.dispatchAnyBackend @Backend bsi go
   where
-    go si = Map.keys . _lmiPermissions =<< Map.elems (_siLogicalModels si)
+    go si = HashMap.keys . _lmiPermissions =<< HashMap.elems (_siLogicalModels si)
 
 -- | Looks up table information for the given table name. This function
 -- should never fail, since the schema cache construction process is
@@ -345,7 +347,7 @@ askTableInfo ::
   m (TableInfo b)
 askTableInfo tableName = do
   SourceInfo {..} <- asks getter
-  Map.lookup tableName _siTables
+  HashMap.lookup tableName _siTables
     `onNothing` throw500 ("askTableInfo: no info for table " <> dquote tableName <> " in source " <> dquote _siName)
 
 -- | Looks up custom return type information for the given custom return type name. This function
@@ -359,7 +361,7 @@ askLogicalModelInfo ::
   m (LogicalModelInfo b)
 askLogicalModelInfo logicalModelName = do
   SourceInfo {..} <- asks getter
-  Map.lookup logicalModelName _siLogicalModels
+  HashMap.lookup logicalModelName _siLogicalModels
     `onNothing` throw500 ("askLogicalModelInfo: no info for logical model " <> dquote logicalModelName <> " in source " <> dquote _siName)
 
 -- | Whether the request is sent with `x-hasura-use-backend-only-permissions` set to `true`.
@@ -405,10 +407,10 @@ mapField fp f = fmap (fmap f) fp
 parsedSelectionsToFields ::
   -- | how to handle @__typename@ fields
   (Text -> a) ->
-  OMap.InsOrdHashMap G.Name (P.ParsedSelection a) ->
+  InsOrdHashMap.InsOrdHashMap G.Name (P.ParsedSelection a) ->
   Fields a
 parsedSelectionsToFields mkTypenameFromText =
-  OMap.toList
+  InsOrdHashMap.toList
     >>> map (FieldName . G.unName *** P.handleTypename (mkTypenameFromText . G.unName))
 
 numericAggOperators :: [C.GQLNameIdentifier]
@@ -442,7 +444,7 @@ mkDescriptionWith descM defaultTxt = G.Description $ case descM of
 --        got removed in PDV. OTOH, I’m not sure how prevalent this feature
 --        actually is
 takeValidTables :: forall b. Backend b => TableCache b -> TableCache b
-takeValidTables = Map.filterWithKey graphQLTableFilter
+takeValidTables = HashMap.filterWithKey graphQLTableFilter
   where
     graphQLTableFilter tableName tableInfo =
       -- either the table name should be GraphQL compliant
@@ -452,13 +454,17 @@ takeValidTables = Map.filterWithKey graphQLTableFilter
 
 -- TODO and what about graphql-compliant function names here too?
 takeValidFunctions :: forall b. FunctionCache b -> FunctionCache b
-takeValidFunctions = Map.filter functionFilter
+takeValidFunctions = HashMap.filter functionFilter
   where
     functionFilter = not . isSystemDefined . _fiSystemDefined
 
--- | Currently we do no validation on native queries in schema. Should we?
+-- | @TODO: Currently we do no validation on native queries in schema. Should we?
 takeValidNativeQueries :: forall b. NativeQueryCache b -> NativeQueryCache b
 takeValidNativeQueries = id
+
+-- | @TODO: Currently we do no validation on stored procedures in schema. Should we?
+takeValidStoredProcedures :: forall b. StoredProcedureCache b -> StoredProcedureCache b
+takeValidStoredProcedures = id
 
 -- root field builder helpers
 
@@ -512,4 +518,4 @@ getIntrospectionResult remoteSchemaPermsCtx role remoteSchemaContext =
           pure $ _rscIntroOriginal remoteSchemaContext
       | -- otherwise, look the role up in the map; if we find nothing, then the role doesn't have access
         otherwise ->
-          Map.lookup role (_rscPermissions remoteSchemaContext)
+          HashMap.lookup role (_rscPermissions remoteSchemaContext)

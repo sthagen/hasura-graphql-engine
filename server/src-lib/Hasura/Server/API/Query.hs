@@ -46,6 +46,7 @@ import Hasura.RQL.DML.Select
 import Hasura.RQL.DML.Types
 import Hasura.RQL.DML.Update
 import Hasura.RQL.Types.Allowlist
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.Endpoint
@@ -57,7 +58,6 @@ import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.Source
 import Hasura.RemoteSchema.MetadataAPI
-import Hasura.SQL.Backend
 import Hasura.Server.Types
 import Hasura.Server.Utils
 import Hasura.Services
@@ -197,7 +197,7 @@ runQuery ::
   RQLQuery ->
   m (EncJSON, RebuildableSchemaCache)
 runQuery appContext sc query = do
-  appEnv@AppEnv {..} <- askAppEnv
+  AppEnv {..} <- askAppEnv
   let logger = _lsLogger appEnvLoggers
   when ((appEnvEnableReadOnlyMode == ReadOnlyModeEnabled) && queryModifiesUserDB query) $
     throw400 NotSupported "Cannot run write queries when read-only mode is enabled"
@@ -209,7 +209,7 @@ runQuery appContext sc query = do
         if (exportsMetadata query)
           then emptyMetadataDefaults
           else acMetadataDefaults appContext
-  dynamicConfig <- buildCacheDynamicConfig appEnv appContext
+  let dynamicConfig = buildCacheDynamicConfig appContext
 
   MetadataWithResourceVersion metadata currentResourceVersion <- liftEitherM fetchMetadata
   ((result, updatedMetadata), updatedCache, invalidations) <-

@@ -17,7 +17,7 @@ where
 import Control.Lens hiding ((.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types
-import Data.HashMap.Strict qualified as M
+import Data.HashMap.Strict qualified as HashMap
 import Data.HashSet qualified as Set
 import Data.Sequence qualified as Seq
 import Data.Text qualified as T
@@ -33,11 +33,11 @@ import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Permission
 import Hasura.RQL.Types.Relationships.Local
+import Hasura.RQL.Types.Roles (RoleName)
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.SchemaCacheTypes
 import Hasura.RQL.Types.Table
 import Hasura.Server.Utils
-import Hasura.Session
 
 -- | Intrepet a 'PermColSpec' column specification, which can either refer to a
 -- list of named columns or all columns.
@@ -72,7 +72,7 @@ assertPermDefined role pt tableInfo =
         <> role
           <<> " does not exist"
   where
-    rpi = M.lookup role $ _tiRolePermInfoMap tableInfo
+    rpi = HashMap.lookup role $ _tiRolePermInfoMap tableInfo
 
 newtype CreatePerm a b = CreatePerm (WithTable b (PermDef b a))
 

@@ -28,8 +28,8 @@ import Data.ByteString.Lazy qualified as BL
 import Data.CaseInsensitive qualified as CI
 import Data.Environment qualified as Env
 import Data.Has (Has, getter)
-import Data.HashMap.Strict qualified as HM
-import Data.HashMap.Strict.InsOrd.Extended qualified as OMap
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd.Extended qualified as InsOrdHashMap
 import Data.HashSet qualified as HS
 import Data.List qualified as L
 import Data.List.Extended qualified as L
@@ -40,6 +40,7 @@ import Data.Text.Encoding qualified as TE
 import Data.Text.Extended (dquote, dquoteList, (<<>))
 import Hasura.Base.Error
 import Hasura.EncJSON
+import Hasura.Eventing.Backend (BackendEventTrigger (..))
 import Hasura.Function.API
 import Hasura.Logging qualified as HL
 import Hasura.LogicalModel.API
@@ -65,15 +66,14 @@ import Hasura.RQL.DDL.Webhook.Transform
 import Hasura.RQL.Types.Allowlist
 import Hasura.RQL.Types.ApiLimit
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType (BackendType (..))
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Endpoint
 import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.EventTrigger qualified as ET
-import Hasura.RQL.Types.Eventing.Backend (BackendEventTrigger (..))
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Metadata.Object
-import Hasura.RQL.Types.Network
 import Hasura.RQL.Types.OpenTelemetry
 import Hasura.RQL.Types.QueryCollection
 import Hasura.RQL.Types.ScheduledTrigger
@@ -82,10 +82,11 @@ import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.Source (unsafeSourceInfo)
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.SQL.Backend (BackendType (..))
 import Hasura.SQL.BackendMap qualified as BackendMap
 import Hasura.Server.Logging (MetadataLog (..))
+import Hasura.StoredProcedure.API (dropStoredProcedureInMetadata)
 import Network.HTTP.Client.Transformable qualified as HTTP
+import Network.Types.Extended
 
 -- | Helper function to run the post drop source hook
 postDropSourceHookHelper ::
@@ -103,18 +104,19 @@ postDropSourceHookHelper ::
 postDropSourceHookHelper oldSchemaCache sourceName sourceMetadataBackend = do
   logger :: (HL.Logger HL.Hasura) <- asks getter
 
-  AB.dispatchAnyBackend @BackendMetadata sourceMetadataBackend \(_ :: SourceMetadata b) -> do
-    let sourceInfoMaybe = unsafeSourceInfo @b =<< HM.lookup sourceName (scSources oldSchemaCache)
+  AB.dispatchAnyBackend @BackendMetadata sourceMetadataBackend \(oldSourceMetadata :: SourceMetadata b) -> do
+    let sourceInfoMaybe = unsafeSourceInfo @b =<< HashMap.lookup sourceName (scSources oldSchemaCache)
     case sourceInfoMaybe of
       Nothing -> do
-        let message =
-              "Could not cleanup the source '"
-                <> sourceName
-                  <<> "' while dropping it from the graphql-engine as it is inconsistent."
-                <> " Please consider cleaning the resources created by the graphql engine,"
-                <> " refer https://hasura.io/docs/latest/graphql/core/event-triggers/remove-event-triggers/#clean-footprints-manually"
-        HL.unLogger logger $ MetadataLog HL.LevelWarn message J.Null
-        warn $ MetadataWarning WCSourceCleanupFailed (MOSource sourceName) message
+        unless (null (getTriggersMap oldSourceMetadata)) do
+          let message =
+                "Could not cleanup the source '"
+                  <> sourceName
+                    <<> "' while dropping it from the graphql-engine as it is inconsistent."
+                  <> " Please consider cleaning the resources created by the graphql engine,"
+                  <> " refer https://hasura.io/docs/latest/graphql/core/event-triggers/remove-event-triggers/#clean-footprints-manually"
+          HL.unLogger logger $ MetadataLog HL.LevelWarn message J.Null
+          warn $ MetadataWarning WCSourceCleanupFailed (MOSource sourceName) message
       Just sourceInfo -> runPostDropSourceHook defaultSource sourceInfo
 
 runClearMetadata ::
@@ -158,12 +160,13 @@ runClearMetadata _ = do
                         mempty
                         mempty
                         mempty
+                        mempty
                         (_smConfiguration @b s)
                         Nothing
                         emptySourceCustomization
                         Nothing
            in emptyMetadata
-                & metaSources %~ OMap.insert defaultSource emptyDefaultSource
+                & metaSources %~ InsOrdHashMap.insert defaultSource emptyDefaultSource
 
   (_inconsistencies, replaceMetadataWarnings) <- runMetadataWarnings . runReplaceMetadataV2' . ReplaceMetadataV2 NoAllowInconsistentMetadata AllowWarnings $ RMWithSources emptyMetadata'
 
@@ -294,7 +297,7 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
                   }
       pure $
         Metadata
-          (OMap.singleton defaultSource newDefaultSourceMetadata)
+          (InsOrdHashMap.singleton defaultSource newDefaultSourceMetadata)
           _mnsRemoteSchemas
           _mnsQueryCollections
           _mnsAllowlist
@@ -313,16 +316,16 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
   let (oldSources, newSources) = (_metaSources oldMetadata, _metaSources metadata)
 
   -- Check for duplicate and illegal trigger names in the new source metadata
-  for_ (OMap.toList newSources) $ \(source, newBackendSourceMetadata) -> do
-    for_ (OMap.lookup source oldSources) $ \oldBackendSourceMetadata ->
+  for_ (InsOrdHashMap.toList newSources) $ \(source, newBackendSourceMetadata) -> do
+    for_ (InsOrdHashMap.lookup source oldSources) $ \oldBackendSourceMetadata ->
       AB.dispatchAnyBackend @BackendEventTrigger (unBackendSourceMetadata newBackendSourceMetadata) \(newSourceMetadata :: SourceMetadata b) -> do
-        let newTriggerNames = concatMap (OMap.keys . _tmEventTriggers) (OMap.elems $ _smTables newSourceMetadata)
+        let newTriggerNames = concatMap (InsOrdHashMap.keys . _tmEventTriggers) (InsOrdHashMap.elems $ _smTables newSourceMetadata)
             duplicateTriggerNamesInNewMetadata = newTriggerNames \\ (L.uniques newTriggerNames)
         unless (null duplicateTriggerNamesInNewMetadata) $ do
           throw400 NotSupported ("Event trigger with duplicate names not allowed: " <> dquoteList (map triggerNameToTxt duplicateTriggerNamesInNewMetadata))
         dispatch oldBackendSourceMetadata \oldSourceMetadata -> do
           let oldTriggersMap = getTriggersMap oldSourceMetadata
-              addedTriggerNames = filter (\(_, n) -> not (OMap.member n oldTriggersMap)) $ getSourceTableAndTriggers newSourceMetadata
+              addedTriggerNames = filter (\(_, n) -> not (InsOrdHashMap.member n oldTriggersMap)) $ getSourceTableAndTriggers newSourceMetadata
               newIllegalTriggerNamesInNewMetadata = filter (isIllegalTriggerName . snd) addedTriggerNames
               mkEventTriggerObjID tableName triggerName = MOSourceObjId source $ AB.mkAnyBackend $ SMOTableObj @b tableName $ MTOTrigger triggerName
               mkIllegalEventTriggerNameWarning (tableName, triggerName) =
@@ -346,7 +349,7 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
         CacheInvalidations
           { ciMetadata = False,
             ciRemoteSchemas = mempty,
-            ciSources = HS.fromList $ OMap.keys newSources,
+            ciSources = HS.fromList $ InsOrdHashMap.keys newSources,
             ciDataConnectors = mempty
           }
 
@@ -372,10 +375,10 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
   updateTriggerCleanupSchedules logger (_metaSources oldMetadata) (_metaSources metadata) newSchemaCache
     >>= (`onLeft` throwError)
 
-  let droppedSources = OMap.difference oldSources newSources
+  let droppedSources = InsOrdHashMap.difference oldSources newSources
 
   -- Clean up the sources that are not present in the new metadata
-  for_ (OMap.toList droppedSources) $ \(oldSource, oldSourceBackendMetadata) ->
+  for_ (InsOrdHashMap.toList droppedSources) $ \(oldSource, oldSourceBackendMetadata) ->
     postDropSourceHookHelper oldSchemaCache oldSource (unBackendSourceMetadata oldSourceBackendMetadata)
 
   pure . scInconsistentObjs $ newSchemaCache
@@ -403,33 +406,33 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
     -}
     processCronTriggers oldMetadata = do
       let (oldCronTriggersIncludedInMetadata, oldCronTriggersNotIncludedInMetadata) =
-            OMap.partition ctIncludeInMetadata (_metaCronTriggers oldMetadata)
+            InsOrdHashMap.partition ctIncludeInMetadata (_metaCronTriggers oldMetadata)
           allNewCronTriggers =
             case _rmv2Metadata of
               RMWithoutSources m -> _mnsCronTriggers m
               RMWithSources m -> _metaCronTriggers m
-          -- this function is intended to use with `HM.differenceWith`, it's used when two
+          -- this function is intended to use with `HashMap.differenceWith`, it's used when two
           -- equal keys are encountered, then the values are compared to calculate the diff.
           -- see https://hackage.haskell.org/package/unordered-containers-0.2.14.0/docs/Data-HashMap-Internal.html#v:differenceWith
           leftIfDifferent l r
             | l == r = Nothing
             | otherwise = Just l
           cronTriggersToBeAdded =
-            HM.differenceWith
+            HashMap.differenceWith
               leftIfDifferent
-              (OMap.toHashMap allNewCronTriggers)
-              (OMap.toHashMap oldCronTriggersIncludedInMetadata)
+              (InsOrdHashMap.toHashMap allNewCronTriggers)
+              (InsOrdHashMap.toHashMap oldCronTriggersIncludedInMetadata)
           cronTriggersToBeDropped =
-            HM.differenceWith
+            HashMap.differenceWith
               leftIfDifferent
-              (OMap.toHashMap oldCronTriggersIncludedInMetadata)
-              (OMap.toHashMap allNewCronTriggers)
-      liftEitherM $ dropFutureCronEvents $ MetadataCronTriggers $ HM.keys cronTriggersToBeDropped
+              (InsOrdHashMap.toHashMap oldCronTriggersIncludedInMetadata)
+              (InsOrdHashMap.toHashMap allNewCronTriggers)
+      liftEitherM $ dropFutureCronEvents $ MetadataCronTriggers $ HashMap.keys cronTriggersToBeDropped
       cronTriggers <- do
         -- traverse over the new cron triggers and check if any of them
         -- already exists as a cron trigger with "included_in_metadata: false"
         for_ allNewCronTriggers $ \ct ->
-          when (ctName ct `OMap.member` oldCronTriggersNotIncludedInMetadata) $
+          when (ctName ct `InsOrdHashMap.member` oldCronTriggersNotIncludedInMetadata) $
             throw400 AlreadyExists $
               "cron trigger with name "
                 <> ctName ct
@@ -452,14 +455,14 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
       -- SQL triggers of the dropped event triggers on the new database which doesn't exist.
       -- In the current implementation, this doesn't throw an error because the trigger is dropped
       -- using `DROP IF EXISTS..` meaning this silently fails without throwing an error.
-      for_ (OMap.toList newSources) $ \(source, newBackendSourceMetadata) -> do
-        for_ (OMap.lookup source oldSources) $ \oldBackendSourceMetadata ->
+      for_ (InsOrdHashMap.toList newSources) $ \(source, newBackendSourceMetadata) -> do
+        for_ (InsOrdHashMap.lookup source oldSources) $ \oldBackendSourceMetadata ->
           compose source (unBackendSourceMetadata newBackendSourceMetadata) (unBackendSourceMetadata oldBackendSourceMetadata) \(newSourceMetadata :: SourceMetadata b) -> do
             dispatch oldBackendSourceMetadata \oldSourceMetadata -> do
               let oldTriggersMap = getTriggersMap oldSourceMetadata
                   newTriggersMap = getTriggersMap newSourceMetadata
-                  droppedEventTriggers = OMap.keys $ oldTriggersMap `OMap.difference` newTriggersMap
-                  retainedNewTriggers = newTriggersMap `OMap.intersection` oldTriggersMap
+                  droppedEventTriggers = InsOrdHashMap.keys $ oldTriggersMap `InsOrdHashMap.difference` newTriggersMap
+                  retainedNewTriggers = newTriggersMap `InsOrdHashMap.intersection` oldTriggersMap
                   catcher e@QErr {qeCode}
                     | qeCode == Unexpected = pure () -- NOTE: This information should be returned by the inconsistent_metadata response, so doesn't need additional logging.
                     | otherwise = throwError e -- rethrow other errors
@@ -475,18 +478,18 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
                 flip catchError catcher do
                   sourceConfigMaybe <- askSourceConfigMaybe @b source
                   case sourceConfigMaybe of
-                    Nothing -> do
-                      -- TODO: Add user facing docs on how to drop triggers manually. Issue #7104
-                      let message =
-                            "Could not drop SQL triggers present in the source '"
-                              <> source
-                                <<> "' as it is inconsistent."
-                              <> " While creating an event trigger, Hasura creates SQL triggers on the table."
-                              <> " Please refer https://hasura.io/docs/latest/graphql/core/event-triggers/remove-event-triggers/#clean-up-event-trigger-footprints-manually "
-                              <> " to delete the sql triggers from the database manually."
-                              <> " For more details, please refer https://hasura.io/docs/latest/graphql/core/event-triggers/index.html "
-                      warn $ MetadataWarning WCSourceCleanupFailed sourceObjID message
-                      logger $ MetadataLog HL.LevelWarn message J.Null
+                    Nothing ->
+                      unless (null oldTriggersMap) do
+                        let message =
+                              "Could not drop SQL triggers present in the source '"
+                                <> source
+                                  <<> "' as it is inconsistent."
+                                <> " While creating an event trigger, Hasura creates SQL triggers on the table."
+                                <> " Please refer https://hasura.io/docs/latest/graphql/core/event-triggers/remove-event-triggers/#clean-up-event-trigger-footprints-manually "
+                                <> " to delete the sql triggers from the database manually."
+                                <> " For more details, please refer https://hasura.io/docs/latest/graphql/core/event-triggers/index.html "
+                        warn $ MetadataWarning WCSourceCleanupFailed sourceObjID message
+                        logger $ MetadataLog HL.LevelWarn message J.Null
                     Just sourceConfig -> do
                       for_ droppedEventTriggers \triggerName -> do
                         -- TODO: The `tableName` parameter could be computed while building
@@ -498,8 +501,8 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
                             logger $ MetadataLog HL.LevelWarn message J.Null
                           Just tableName ->
                             dropTriggerAndArchiveEvents @b sourceConfig triggerName tableName
-                      for_ (OMap.toList retainedNewTriggers) $ \(retainedNewTriggerName, retainedNewTriggerConf) ->
-                        case OMap.lookup retainedNewTriggerName oldTriggersMap of
+                      for_ (InsOrdHashMap.toList retainedNewTriggers) $ \(retainedNewTriggerName, retainedNewTriggerConf) ->
+                        case InsOrdHashMap.lookup retainedNewTriggerName oldTriggersMap of
                           Nothing -> do
                             let message = sqlTriggerError retainedNewTriggerName
                             warn $ MetadataWarning WCSourceCleanupFailed sourceObjID message
@@ -544,7 +547,7 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
 -- | Only includes the cron triggers with `included_in_metadata` set to `True`
 processCronTriggersMetadata :: Metadata -> Metadata
 processCronTriggersMetadata metadata =
-  let cronTriggersIncludedInMetadata = OMap.filter ctIncludeInMetadata $ _metaCronTriggers metadata
+  let cronTriggersIncludedInMetadata = InsOrdHashMap.filter ctIncludeInMetadata $ _metaCronTriggers metadata
    in metadata {_metaCronTriggers = cronTriggersIncludedInMetadata}
 
 runExportMetadata ::
@@ -573,8 +576,8 @@ runExportMetadataV2 currentResourceVersion ExportMetadata {} = do
 runReloadMetadata :: (QErrM m, CacheRWM m, MetadataM m) => ReloadMetadata -> m EncJSON
 runReloadMetadata (ReloadMetadata reloadRemoteSchemas reloadSources reloadRecreateEventTriggers reloadDataConnectors) = do
   metadata <- getMetadata
-  let allSources = HS.fromList $ OMap.keys $ _metaSources metadata
-      allRemoteSchemas = HS.fromList $ OMap.keys $ _metaRemoteSchemas metadata
+  let allSources = HS.fromList $ InsOrdHashMap.keys $ _metaSources metadata
+      allRemoteSchemas = HS.fromList $ InsOrdHashMap.keys $ _metaRemoteSchemas metadata
       allDataConnectors =
         maybe mempty (HS.fromList . Map.keys . unBackendConfigWrapper) $
           BackendMap.lookup @'DataConnector $
@@ -672,7 +675,7 @@ runDropInconsistentMetadata _ = do
 
 purgeMetadataObj :: MetadataObjId -> MetadataModifier
 purgeMetadataObj = \case
-  MOSource source -> MetadataModifier $ metaSources %~ OMap.delete source
+  MOSource source -> MetadataModifier $ metaSources %~ InsOrdHashMap.delete source
   MOSourceObjId source exists -> AB.dispatchAnyBackend @BackendMetadata exists $ handleSourceObj source
   MORemoteSchema rsn -> dropRemoteSchemaInMetadata rsn
   MORemoteSchemaPermissions rsName role -> dropRemoteSchemaPermissionInMetadata rsName role
@@ -703,12 +706,18 @@ purgeMetadataObj = \case
       SMOTable qt -> dropTableInMetadata @b source qt
       SMOFunction qf -> dropFunctionInMetadata @b source qf
       SMOFunctionPermission qf rn -> dropFunctionPermissionInMetadata @b source qf rn
-      SMONativeQuery lm -> dropNativeQueryInMetadata @b source lm
+      SMONativeQuery nq -> dropNativeQueryInMetadata @b source nq
       SMONativeQueryObj nativeQueryName nativeQueryMetadataObjId ->
         MetadataModifier $
           nativeQueryMetadataSetter @b source nativeQueryName
             %~ case nativeQueryMetadataObjId of
               NQMORel rn _ -> dropNativeQueryRelationshipInMetadata rn
+      SMOStoredProcedure sp -> dropStoredProcedureInMetadata @b source sp
+      SMOStoredProcedureObj storedProcedureName storedProcedureMetadataObjId ->
+        MetadataModifier $
+          storedProcedureMetadataSetter @b source storedProcedureName
+            %~ case storedProcedureMetadataObjId of
+              SPMORel rn _ -> dropStoredProcedureRelationshipInMetadata rn
       SMOLogicalModel lm -> dropLogicalModelInMetadata @b source lm
       SMOLogicalModelObj logicalModelName logicalModelMetadataObjId ->
         MetadataModifier $
@@ -732,7 +741,7 @@ purgeMetadataObj = \case
           let newQueryCollection = filteredCollection (_metaQueryCollections m)
               -- QueryCollections = InsOrdHashMap CollectionName CreateCollection
               filteredCollection :: QueryCollections -> QueryCollections
-              filteredCollection qc = OMap.filter (isNonEmptyCC) $ OMap.adjust (collectionModifier) (cName) qc
+              filteredCollection qc = InsOrdHashMap.filter (isNonEmptyCC) $ InsOrdHashMap.adjust (collectionModifier) (cName) qc
 
               collectionModifier :: CreateCollection -> CreateCollection
               collectionModifier cc@CreateCollection {..} =
@@ -748,10 +757,10 @@ purgeMetadataObj = \case
               isNonEmptyCC = not . null . _cdQueries . _ccDefinition
 
               cleanupAllowList :: MetadataAllowlist -> MetadataAllowlist
-              cleanupAllowList = OMap.filterWithKey (\_ _ -> OMap.member cName newQueryCollection)
+              cleanupAllowList = InsOrdHashMap.filterWithKey (\_ _ -> InsOrdHashMap.member cName newQueryCollection)
 
               cleanupRESTEndpoints :: Endpoints -> Endpoints
-              cleanupRESTEndpoints endpoints = OMap.filter (not . isFaultyQuery . _edQuery . _ceDefinition) endpoints
+              cleanupRESTEndpoints endpoints = InsOrdHashMap.filter (not . isFaultyQuery . _edQuery . _ceDefinition) endpoints
 
               isFaultyQuery :: QueryReference -> Bool
               isFaultyQuery QueryReference {..} = _qrCollectionName == cName && _qrQueryName == (_lqName lq)

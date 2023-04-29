@@ -288,6 +288,7 @@ common lib-depends
                      , hashable
                      , hasura-base
                      , hasura-extras
+                     , hasura-json-encoding
                      , hasura-prelude
                      , http-client-tls
                      , http-conduit
@@ -499,9 +500,6 @@ library
                      , Data.SqlCommenter
                      , Database.MSSQL.Transaction
                      , Database.MSSQL.Pool
-                     , GHC.AssertNF.CPP
-                     , GHC.Stats.Extended
-                     , GHC.Generics.Extended
 
                      , Hasura.App
                      , Hasura.Metadata.Class
@@ -717,14 +715,18 @@ library
                      , Hasura.LogicalModel.Cache
                      , Hasura.LogicalModel.Common
                      , Hasura.LogicalModel.IR
+                     , Hasura.LogicalModel.Lenses
                      , Hasura.LogicalModel.Metadata
+                     , Hasura.LogicalModel.NullableScalarType
                      , Hasura.LogicalModel.Schema
                      , Hasura.LogicalModel.Types
 
-                     , Hasura.EncJSON
+                     , Hasura.ClientCredentials
 
                      , Hasura.Function.API
                      , Hasura.Function.Cache
+                     , Hasura.Function.Common
+                     , Hasura.Function.Lenses
                      , Hasura.Function.Metadata
 
                      , Hasura.GraphQL.Execute.Query
@@ -745,10 +747,20 @@ library
 
                      , Hasura.NativeQuery.IR
                      , Hasura.NativeQuery.Cache
+                     , Hasura.NativeQuery.Lenses
                      , Hasura.NativeQuery.Metadata
                      , Hasura.NativeQuery.API
                      , Hasura.NativeQuery.Schema
                      , Hasura.NativeQuery.Types
+                     , Hasura.NativeQuery.InterpolatedQuery
+
+                     , Hasura.StoredProcedure.IR
+                     , Hasura.StoredProcedure.Cache
+                     , Hasura.StoredProcedure.Lenses
+                     , Hasura.StoredProcedure.Metadata
+                     , Hasura.StoredProcedure.API
+                     , Hasura.StoredProcedure.Schema
+                     , Hasura.StoredProcedure.Types
 
                      , Hasura.Tracing
                      , Hasura.Tracing.Class
@@ -790,17 +802,20 @@ library
                      , Hasura.RQL.Types.Allowlist
                      , Hasura.RQL.Types.ApiLimit
                      , Hasura.RQL.Types.Backend
+                     , Hasura.RQL.Types.BackendTag
+                     , Hasura.RQL.Types.BackendType
                      , Hasura.RQL.Types.BoolExp
                      , Hasura.RQL.Types.Column
                      , Hasura.RQL.Types.Common
                      , Hasura.RQL.Types.ComputedField
                      , Hasura.RQL.Types.CustomTypes
+                     , Hasura.RQL.Types.DataConnector
                      , Hasura.RQL.Types.EECredentials
                      , Hasura.RQL.Types.Endpoint
                      , Hasura.RQL.Types.Endpoint.Trie
                      , Hasura.RQL.Types.EventTrigger
                      , Hasura.RQL.Types.Eventing
-                     , Hasura.RQL.Types.Eventing.Backend
+                     , Hasura.RQL.Types.Headers
                      , Hasura.RQL.Types.HealthCheck
                      , Hasura.RQL.Types.HealthCheckImplementation
                      , Hasura.RQL.Types.GraphqlSchemaIntrospection
@@ -811,7 +826,6 @@ library
                      , Hasura.RQL.Types.Metadata.Instances
                      , Hasura.RQL.Types.Metadata.Object
                      , Hasura.RQL.Types.Metadata.Serialization
-                     , Hasura.RQL.Types.Network
                      , Hasura.RQL.Types.OpenTelemetry
                      , Hasura.RQL.Types.Permission
                      , Hasura.RQL.Types.QueryCollection
@@ -828,12 +842,26 @@ library
                      , Hasura.RQL.Types.SchemaCache.Build
                      , Hasura.RQL.Types.SchemaCache.Instances
                      , Hasura.RQL.Types.SchemaCacheTypes
+                     , Hasura.RQL.Types.Schema.Options
+                     , Hasura.RQL.Types.Session
                      , Hasura.RQL.Types.Source
                      , Hasura.RQL.Types.SourceConfiguration
                      , Hasura.RQL.Types.SourceCustomization
                      , Hasura.RQL.Types.Subscription
                      , Hasura.RQL.Types.Table
+
+                     , Hasura.RQL.Types.Webhook.Transform
+                     , Hasura.RQL.Types.Webhook.Transform.Body
+                     , Hasura.RQL.Types.Webhook.Transform.Class
+                     , Hasura.RQL.Types.Webhook.Transform.Headers
+                     , Hasura.RQL.Types.Webhook.Transform.Method
+                     , Hasura.RQL.Types.Webhook.Transform.QueryParams
+                     , Hasura.RQL.Types.Webhook.Transform.Request
+                     , Hasura.RQL.Types.Webhook.Transform.Url
+                     , Hasura.RQL.Types.Webhook.Transform.WithOptional
+
                      , Hasura.RQL.DDL.Action
+                     , Hasura.RQL.DDL.Action.Lenses
                      , Hasura.RQL.DDL.ApiLimit
                      , Hasura.RQL.DDL.ComputedField
                      , Hasura.RQL.DDL.ConnectionTemplate
@@ -866,7 +894,6 @@ library
                      , Hasura.RQL.DDL.Webhook.Transform.Request
                      , Hasura.RQL.DDL.Webhook.Transform.Validation
                      , Hasura.RQL.DDL.Webhook.Transform.Url
-                     , Hasura.RQL.DDL.Webhook.Transform.WithOptional
                      , Hasura.RQL.DDL.SourceKinds
                      , Hasura.RQL.DDL.Schema
                      , Hasura.RQL.DDL.Schema.Cache
@@ -894,6 +921,7 @@ library
                      , Hasura.RQL.IR.Action
                      , Hasura.RQL.IR.BoolExp
                      , Hasura.RQL.IR.BoolExp.AggregationPredicates
+                     , Hasura.RQL.IR.BoolExp.Lenses
                      , Hasura.RQL.IR.Conflict
                      , Hasura.RQL.IR.Delete
                      , Hasura.RQL.IR.Insert
@@ -959,7 +987,6 @@ library
                      , Hasura.GraphQL.Schema.NamingCase
                      , Hasura.GraphQL.Schema.Node
                      , Hasura.GraphQL.Schema.OrderBy
-                     , Hasura.GraphQL.Schema.Options
                      , Hasura.GraphQL.Schema.Parser
                      , Hasura.GraphQL.Schema.Postgres
                      , Hasura.GraphQL.Schema.Relay
@@ -987,8 +1014,8 @@ library
                      , Hasura.Metadata.DTO.MetadataV2
                      , Hasura.Metadata.DTO.MetadataV3
                      , Hasura.Metadata.DTO.Placeholder
-                     , Hasura.Metadata.DTO.Utils
 
+                     , Hasura.Eventing.Backend
                      , Hasura.Eventing.Common
                      , Hasura.Eventing.EventTrigger
                      , Hasura.Eventing.HTTP
@@ -996,9 +1023,7 @@ library
                      , Hasura.Eventing.ScheduledTrigger.Types
                      , Hasura.Name
                      , Hasura.SQL.AnyBackend
-                     , Hasura.SQL.Backend
                      , Hasura.SQL.BackendMap
-                     , Hasura.SQL.Tag
                      , Hasura.SQL.GeoJSON
                      , Hasura.SQL.Time
                      , Hasura.SQL.Types
@@ -1006,20 +1031,6 @@ library
                      , Hasura.SQL.WKT
                      , Hasura.QueryTags
                      , Hasura.QueryTags.Types
-                     , Network.HTTP.Client.Transformable
-                     , Network.HTTP.Client.DynamicTlsPermissions
-                     , Network.HTTP.Client.Restricted
-                     , Network.HTTP.Client.Blocklisting
-                     , Network.HTTP.Client.CreateManager
-                     , Network.URI.Extended
-                     , Network.Wai.Extended
-                     , Network.Wai.Handler.WebSockets.Custom
-
-                     -- Our vendored bits of the 'ip' package, to avoid dependencies and ease 9.2 migration
-                     -- We might see if maintainer is willing to split their package up so we can remove these:
-                     , Net.IPv4
-                     , Net.IPv6
-
 
 executable graphql-engine
   import: common-all, common-exe

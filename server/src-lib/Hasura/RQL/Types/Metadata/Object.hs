@@ -9,6 +9,7 @@ module Hasura.RQL.Types.Metadata.Object
     TableMetadataObjId (..),
     LogicalModelMetadataObjId (..),
     NativeQueryMetadataObjId (..),
+    StoredProcedureMetadataObjId (..),
     droppableInconsistentMetadata,
     getInconsistentRemoteSchemas,
     groupInconsistentMetadataById,
@@ -40,7 +41,7 @@ where
 
 import Control.Lens hiding (set, (.=))
 import Data.Aeson.Types
-import Data.HashMap.Strict.Extended qualified as M
+import Data.HashMap.Strict.Extended qualified as HashMap
 import Data.Text.Extended
 import Hasura.Backends.DataConnector.Adapter.Types (DataConnectorName)
 import Hasura.Base.ErrorMessage
@@ -58,9 +59,10 @@ import Hasura.RQL.Types.Instances ()
 import Hasura.RQL.Types.OpenTelemetry
 import Hasura.RQL.Types.Permission
 import Hasura.RQL.Types.QueryCollection (CollectionName, ListedQuery (_lqName))
+import Hasura.RQL.Types.Roles (RoleName)
 import Hasura.RemoteSchema.Metadata
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.Session
+import Hasura.StoredProcedure.Types
 import Language.GraphQL.Draft.Syntax qualified as G
 
 data TableMetadataObjId
@@ -80,12 +82,19 @@ data LogicalModelMetadataObjId
 
 instance Hashable LogicalModelMetadataObjId
 
--- | the logical model should probably also link to its logical model
+-- | the native query should probably also link to its logical model
 data NativeQueryMetadataObjId
   = NQMORel RelName RelType
   deriving (Show, Eq, Ord, Generic)
 
 instance Hashable NativeQueryMetadataObjId
+
+-- | the stored procedure should probably also link to its logical model
+data StoredProcedureMetadataObjId
+  = SPMORel RelName RelType
+  deriving (Show, Eq, Ord, Generic)
+
+instance Hashable StoredProcedureMetadataObjId
 
 data SourceMetadataObjId b
   = SMOTable (TableName b)
@@ -94,6 +103,8 @@ data SourceMetadataObjId b
   | SMOTableObj (TableName b) TableMetadataObjId
   | SMONativeQuery NativeQueryName
   | SMONativeQueryObj NativeQueryName NativeQueryMetadataObjId
+  | SMOStoredProcedure StoredProcedureName
+  | SMOStoredProcedureObj StoredProcedureName StoredProcedureMetadataObjId
   | SMOLogicalModel LogicalModelName
   | SMOLogicalModelObj LogicalModelName LogicalModelMetadataObjId
   deriving (Generic)
@@ -159,6 +170,9 @@ moiTypeName = \case
       SMONativeQuery _ -> "native_query"
       SMONativeQueryObj _ nativeQueryObjId -> case nativeQueryObjId of
         NQMORel _ relType -> relTypeToTxt relType <> "_relation"
+      SMOStoredProcedure _ -> "stored_procedure"
+      SMOStoredProcedureObj _ storedProcedureObjId -> case storedProcedureObjId of
+        SPMORel _ relType -> relTypeToTxt relType <> "_relation"
       SMOLogicalModel _ -> "custom_type"
       SMOLogicalModelObj _ logicalModelObjectId -> case logicalModelObjectId of
         LMMOPerm _ permType -> permTypeToCode permType <> "_permission"
@@ -217,6 +231,10 @@ moiName objectId =
       SMONativeQueryObj nativeQueryName nativeQueryObjId ->
         case nativeQueryObjId of
           NQMORel name _ -> toTxt name <> " in " <> toTxt nativeQueryName
+      SMOStoredProcedure name -> toTxt name <> " in source " <> toTxt source
+      SMOStoredProcedureObj storedProcedureName storedProcedureObjId ->
+        case storedProcedureObjId of
+          SPMORel name _ -> toTxt name <> " in " <> toTxt storedProcedureName
       SMOLogicalModel name -> toTxt name <> " in source " <> toTxt source
       SMOLogicalModelObj logicalModelName logicalModelObjectId -> do
         let objectName :: Text
@@ -352,7 +370,7 @@ imReason = \case
 groupInconsistentMetadataById ::
   [InconsistentMetadata] -> HashMap MetadataObjId (NonEmpty InconsistentMetadata)
 groupInconsistentMetadataById =
-  M.fromListWith (<>) . concatMap \metadata ->
+  HashMap.fromListWith (<>) . concatMap \metadata ->
     map (,metadata :| []) (imObjectIds metadata)
 
 instance ToJSON InconsistentMetadata where

@@ -19,8 +19,8 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Aeson qualified as J
 import Data.Containers.ListUtils (nubOrd)
 import Data.Environment qualified as Env
-import Data.HashMap.Strict qualified as Map
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.HashSet qualified as HS
 import Data.Tagged qualified as Tagged
 import Hasura.Backends.Postgres.Execute.Types
@@ -50,16 +50,17 @@ import Hasura.RQL.IR qualified as IR
 import Hasura.RQL.Types.Action
 import Hasura.RQL.Types.Allowlist
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.Roles (adminRoleName)
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.Subscription
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.SQL.Backend
 import Hasura.Server.Init qualified as Init
 import Hasura.Server.Prometheus (PrometheusMetrics)
 import Hasura.Server.Types (ReadOnlyMode (..), RequestId (..))
 import Hasura.Services
-import Hasura.Session
+import Hasura.Session (BackendOnlyFieldAccess (..), UserInfo (..))
 import Hasura.Tracing qualified as Tracing
 import Language.GraphQL.Draft.Syntax qualified as G
 import Network.HTTP.Types qualified as HTTP
@@ -71,7 +72,7 @@ makeGQLContext ::
   ET.GraphQLQueryType ->
   C.GQLContext
 makeGQLContext userInfo sc queryType =
-  case Map.lookup role contextMap of
+  case HashMap.lookup role contextMap of
     Nothing -> defaultContext
     Just (C.RoleContext frontend backend) ->
       case _uiBackendOnlyFieldAccess userInfo of
@@ -127,7 +128,7 @@ buildSubscriptionPlan ::
   Maybe G.Name ->
   m SubscriptionExecution
 buildSubscriptionPlan userInfo rootFields parameterizedQueryHash reqHeaders operationName = do
-  ((liveQueryOnSourceFields, noRelationActionFields), streamingFields) <- foldlM go ((mempty, mempty), mempty) (OMap.toList rootFields)
+  ((liveQueryOnSourceFields, noRelationActionFields), streamingFields) <- foldlM go ((mempty, mempty), mempty) (InsOrdHashMap.toList rootFields)
 
   if
       | null liveQueryOnSourceFields && null streamingFields ->
@@ -135,7 +136,7 @@ buildSubscriptionPlan userInfo rootFields parameterizedQueryHash reqHeaders oper
       | null noRelationActionFields -> do
           if
               | null liveQueryOnSourceFields -> do
-                  case OMap.toList streamingFields of
+                  case InsOrdHashMap.toList streamingFields of
                     [] -> throw500 "empty selset for subscription"
                     [(rootFieldName, (sourceName, exists))] -> do
                       subscriptionPlan <- AB.dispatchAnyBackend @EB.BackendExecute
@@ -169,7 +170,7 @@ buildSubscriptionPlan userInfo rootFields parameterizedQueryHash reqHeaders oper
                           Left (actionId, (srcConfig, dbExecution)) -> do
                             let sourceName = EA._aaqseSource dbExecution
                             actionLogResponse <-
-                              Map.lookup actionId actionLogMap
+                              HashMap.lookup actionId actionLogMap
                                 `onNothing` throw500 "unexpected: cannot lookup action_id in the map"
                             let selectAST = EA._aaqseSelectBuilder dbExecution $ actionLogResponse
                                 queryDB = case EA._aaqseJsonAggSelect dbExecution of
@@ -177,7 +178,7 @@ buildSubscriptionPlan userInfo rootFields parameterizedQueryHash reqHeaders oper
                                   JASSingleObject -> IR.QDBSingleRow selectAST
                             pure $ (sourceName, AB.mkAnyBackend $ IR.SourceConfigWith srcConfig Nothing (IR.QDBR queryDB))
 
-                        case OMap.toList sourceSubFields of
+                        case InsOrdHashMap.toList sourceSubFields of
                           [] -> throw500 "empty selset for subscription"
                           ((rootFieldName, sub) : _) -> buildAction sub sourceSubFields rootFieldName
               | otherwise -> throw400 NotSupported "streaming and livequery subscriptions cannot be executed in the same subscription"
@@ -226,8 +227,8 @@ buildSubscriptionPlan userInfo rootFields parameterizedQueryHash reqHeaders oper
             throw400 NotSupported "Remote relationships are not allowed in subscriptions"
           pure $ IR.SourceConfigWith srcConfig queryTagsConfig (IR.QDBR newQDB)
         case subscriptionType of
-          Streaming -> pure (accLiveQueryFields, OMap.insert gName (src, newQDB) accStreamingFields)
-          LiveQuery -> pure (first (OMap.insert gName (Right (src, newQDB))) accLiveQueryFields, accStreamingFields)
+          Streaming -> pure (accLiveQueryFields, InsOrdHashMap.insert gName (src, newQDB) accStreamingFields)
+          LiveQuery -> pure (first (InsOrdHashMap.insert gName (Right (src, newQDB))) accLiveQueryFields, accStreamingFields)
       IR.RFAction action -> do
         let (noRelsDBAST, remoteJoins) = RJ.getRemoteJoinsActionQuery action
         unless (isNothing remoteJoins) $
@@ -237,9 +238,9 @@ buildSubscriptionPlan userInfo rootFields parameterizedQueryHash reqHeaders oper
             let actionId = IR._aaaqActionId q
             case EA.resolveAsyncActionQuery userInfo q of
               EA.AAQENoRelationships respMaker ->
-                pure $ (second (OMap.insert gName (actionId, respMaker)) accLiveQueryFields, accStreamingFields)
+                pure $ (second (InsOrdHashMap.insert gName (actionId, respMaker)) accLiveQueryFields, accStreamingFields)
               EA.AAQEOnSourceDB srcConfig dbExecution ->
-                pure $ (first (OMap.insert gName (Left (actionId, (srcConfig, dbExecution)))) accLiveQueryFields, accStreamingFields)
+                pure $ (first (InsOrdHashMap.insert gName (Left (actionId, (srcConfig, dbExecution)))) accLiveQueryFields, accStreamingFields)
           IR.AQQuery _ -> throw400 NotSupported "query actions cannot be run as a subscription"
 
     buildAction ::
@@ -362,6 +363,7 @@ getResolvedExecPlan
               (scSetGraphqlIntrospectionOptions sc)
               reqId
               maybeOperationName
+          Tracing.attachMetadata [("parameterized_query_hash", bsToTxt $ unParamQueryHash parameterizedQueryHash)]
           pure (parameterizedQueryHash, QueryExecutionPlan executionPlan queryRootFields dirMap)
         G.TypedOperationDefinition G.OperationTypeMutation _ varDefs directives inlinedSelSet -> do
           when (readOnlyMode == ReadOnlyModeEnabled) $
@@ -421,6 +423,6 @@ getResolvedExecPlan
 -- the bytestring response we get back from the DB.
 isSingleNamespace :: RootFieldMap a -> Bool
 isSingleNamespace fieldMap =
-  case nubOrd (_rfaNamespace <$> OMap.keys fieldMap) of
+  case nubOrd (_rfaNamespace <$> InsOrdHashMap.keys fieldMap) of
     [_] -> True
     _ -> False

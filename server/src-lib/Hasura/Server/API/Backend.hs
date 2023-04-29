@@ -23,6 +23,7 @@ module Hasura.Server.API.Backend
     computedFieldCommands,
     connectionTemplateCommands,
     nativeQueriesCommands,
+    storedProceduresCommands,
     logicalModelsCommands,
   )
 where
@@ -34,8 +35,8 @@ import Data.Aeson.Types qualified as J
 import Data.Text qualified as T
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.SQL.AnyBackend
-import Hasura.SQL.Backend
 import Hasura.Server.API.Metadata.Types
 
 -- API class
@@ -155,7 +156,10 @@ eventTriggerCommands =
   [ commandParser "invoke_event_trigger" $ RMInvokeEventTrigger . mkAnyBackend @b,
     commandParser "create_event_trigger" $ RMCreateEventTrigger . mkAnyBackend @b,
     commandParser "delete_event_trigger" $ RMDeleteEventTrigger . mkAnyBackend @b,
-    commandParser "redeliver_event" $ RMRedeliverEvent . mkAnyBackend @b
+    commandParser "redeliver_event" $ RMRedeliverEvent . mkAnyBackend @b,
+    commandParser "get_event_logs" $ RMGetEventLogs . mkAnyBackend @b,
+    commandParser "get_event_invocation_logs" $ RMGetEventInvocationLogs . mkAnyBackend @b,
+    commandParser "get_event_by_id" $ RMGetEventById . mkAnyBackend @b
   ]
 
 computedFieldCommands :: forall (b :: BackendType). Backend b => [CommandParser b]
@@ -174,6 +178,13 @@ nativeQueriesCommands =
   [ commandParser "get_native_query" $ RMGetNativeQuery . mkAnyBackend @b,
     commandParser "track_native_query" $ RMTrackNativeQuery . mkAnyBackend @b,
     commandParser "untrack_native_query" $ RMUntrackNativeQuery . mkAnyBackend @b
+  ]
+
+storedProceduresCommands :: forall (b :: BackendType). Backend b => [CommandParser b]
+storedProceduresCommands =
+  [ commandParser "get_stored_procedure" $ RMGetStoredProcedure . mkAnyBackend @b,
+    commandParser "track_stored_procedure" $ RMTrackStoredProcedure . mkAnyBackend @b,
+    commandParser "untrack_stored_procedure" $ RMUntrackStoredProcedure . mkAnyBackend @b
   ]
 
 logicalModelsCommands :: forall (b :: BackendType). Backend b => [CommandParser b]

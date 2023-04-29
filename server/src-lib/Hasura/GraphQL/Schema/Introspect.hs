@@ -8,8 +8,8 @@ module Hasura.GraphQL.Schema.Introspect
 where
 
 import Data.Aeson.Ordered qualified as J
-import Data.HashMap.Strict qualified as Map
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Data.Vector qualified as V
@@ -246,7 +246,7 @@ typeIntrospection = do
   -- introspection-free GraphQL schema.  See Note [What introspection exposes].
   pure $ \partialSchema -> fromMaybe J.Null $ do
     name <- G.mkName nameText
-    P.SomeDefinitionTypeInfo def <- Map.lookup name $ sTypes partialSchema
+    P.SomeDefinitionTypeInfo def <- HashMap.lookup name $ sTypes partialSchema
     Just $ printer $ SomeType $ P.TNamed P.Nullable def
 
 -- | Generate a __schema introspection parser.
@@ -672,7 +672,7 @@ schemaSet =
               V.fromList $
                 map (printer . schemaTypeToSomeType) $
                   sortOn P.getName $
-                    Map.elems $
+                    HashMap.elems $
                       sTypes partialSchema
         where
           schemaTypeToSomeType :: P.SomeDefinitionTypeInfo -> SomeType
@@ -711,12 +711,12 @@ schemaSet =
           ]
 
 selectionSetToJSON ::
-  OMap.InsOrdHashMap G.Name J.Value ->
+  InsOrdHashMap.InsOrdHashMap G.Name J.Value ->
   J.Value
-selectionSetToJSON = J.object . map (first G.unName) . OMap.toList
+selectionSetToJSON = J.object . map (first G.unName) . InsOrdHashMap.toList
 
 applyPrinter ::
-  OMap.InsOrdHashMap G.Name (P.ParsedSelection (a -> J.Value)) ->
+  InsOrdHashMap.InsOrdHashMap G.Name (P.ParsedSelection (a -> J.Value)) ->
   a ->
   J.Value
 applyPrinter = flip (\x -> selectionSetToJSON . fmap (($ x) . P.handleTypename (const . nameAsJSON)))

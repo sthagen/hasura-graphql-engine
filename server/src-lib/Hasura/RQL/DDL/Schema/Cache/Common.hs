@@ -49,8 +49,8 @@ import Control.Arrow.Interpret
 import Control.Lens
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Aeson.Extended
-import Data.HashMap.Strict.Extended qualified as M
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict.Extended qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.Sequence qualified as Seq
 import Data.Text.Extended
 import Hasura.Base.Error
@@ -60,6 +60,7 @@ import Hasura.LogicalModel.Types (LogicalModelName)
 import Hasura.Prelude
 import Hasura.RQL.DDL.Schema.Cache.Config
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
@@ -76,11 +77,9 @@ import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.Source
 import Hasura.RemoteSchema.Metadata
 import Hasura.SQL.AnyBackend
-import Hasura.SQL.Backend
 import Hasura.SQL.BackendMap (BackendMap)
 import Hasura.SQL.BackendMap qualified as BackendMap
 import Hasura.Services
-import Hasura.Session
 import Network.HTTP.Client.Transformable qualified as HTTP
 
 newtype BackendInvalidationKeysWrapper (b :: BackendType) = BackendInvalidationKeysWrapper
@@ -129,7 +128,7 @@ invalidateKeys CacheInvalidations {..} InvalidationKeys {..} =
       a ->
       HashMap a Inc.InvalidationKey ->
       HashMap a Inc.InvalidationKey
-    invalidate = M.alter $ Just . maybe Inc.initialInvalidationKey Inc.invalidate
+    invalidate = HashMap.alter $ Just . maybe Inc.initialInvalidationKey Inc.invalidate
 
     invalidateDataConnectors :: BackendInvalidationKeysWrapper 'DataConnector -> BackendInvalidationKeysWrapper 'DataConnector
     invalidateDataConnectors (BackendInvalidationKeysWrapper invalidationKeys) =
@@ -145,7 +144,7 @@ instance Backend b => FromJSON (BackendIntrospection b) where
   parseJSON = withObject "BackendIntrospection" \o -> do
     metadata <- o .: "metadata"
     enumValues <- o .: "enum_values"
-    pure $ BackendIntrospection metadata (M.fromList enumValues)
+    pure $ BackendIntrospection metadata (HashMap.fromList enumValues)
 
 deriving stock instance BackendMetadata b => Eq (BackendIntrospection b)
 
@@ -221,17 +220,17 @@ mkTableInputs TableMetadata {..} =
     nonColumns =
       NonColumnTableInputs
         _tmTable
-        (OMap.elems _tmObjectRelationships)
-        (OMap.elems _tmArrayRelationships)
-        (OMap.elems _tmComputedFields)
-        (OMap.elems _tmRemoteRelationships)
+        (InsOrdHashMap.elems _tmObjectRelationships)
+        (InsOrdHashMap.elems _tmArrayRelationships)
+        (InsOrdHashMap.elems _tmComputedFields)
+        (InsOrdHashMap.elems _tmRemoteRelationships)
     permissions =
       TablePermissionInputs
         _tmTable
-        (OMap.elems _tmInsertPermissions)
-        (OMap.elems _tmSelectPermissions)
-        (OMap.elems _tmUpdatePermissions)
-        (OMap.elems _tmDeletePermissions)
+        (InsOrdHashMap.elems _tmInsertPermissions)
+        (InsOrdHashMap.elems _tmSelectPermissions)
+        (InsOrdHashMap.elems _tmUpdatePermissions)
+        (InsOrdHashMap.elems _tmDeletePermissions)
 
 -- | The direct output of 'buildSchemaCacheRule'. Contains most of the things necessary to build a
 -- schema cache, but dependencies and inconsistent metadata objects are collected via a separate
@@ -354,7 +353,7 @@ buildInfoMap ::
   (e, a) `arr` Maybe b ->
   (e, [a]) `arr` HashMap k b
 buildInfoMap extractKey mkMetadataObject buildInfo = proc (e, infos) -> do
-  let groupedInfos = M.groupOn extractKey infos
+  let groupedInfos = HashMap.groupOn extractKey infos
   infoMapMaybes <-
     (|
       Inc.keyed
@@ -378,7 +377,7 @@ buildInfoMapM ::
   [a] ->
   m (HashMap k b)
 buildInfoMapM extractKey mkMetadataObject buildInfo infos = do
-  let groupedInfos = M.groupOn extractKey infos
+  let groupedInfos = HashMap.groupOn extractKey infos
   infoMapMaybes <- for groupedInfos \duplicateInfos -> do
     infoMaybe <- noDuplicates mkMetadataObject duplicateInfos
     case infoMaybe of

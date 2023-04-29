@@ -15,6 +15,7 @@ module Hasura.RQL.Types.Metadata
     dropLogicalModelPermissionInMetadata,
     dropRelationshipInMetadata,
     dropNativeQueryRelationshipInMetadata,
+    dropStoredProcedureRelationshipInMetadata,
     dropRemoteRelationshipInMetadata,
     dropTableInMetadata,
     dropRemoteSchemaInMetadata,
@@ -25,6 +26,7 @@ module Hasura.RQL.Types.Metadata
     functionMetadataSetter,
     logicalModelMetadataSetter,
     nativeQueryMetadataSetter,
+    storedProcedureMetadataSetter,
     metaActions,
     metaAllowlist,
     metaApiLimits,
@@ -54,7 +56,7 @@ import Data.Aeson.KeyMap (singleton)
 import Data.Aeson.Ordered qualified as AO
 import Data.Aeson.TH
 import Data.Aeson.Types
-import Data.HashMap.Strict.InsOrd.Extended qualified as OM
+import Data.HashMap.Strict.InsOrd.Extended qualified as InsOrdHashMap
 import Data.Monoid (Dual (..), Endo (..))
 import Hasura.Function.Cache
 import Hasura.Function.Metadata (FunctionMetadata (..))
@@ -66,6 +68,7 @@ import Hasura.Prelude
 import Hasura.RQL.Types.Allowlist
 import Hasura.RQL.Types.ApiLimit
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.ComputedField
 import Hasura.RQL.Types.CustomTypes
@@ -74,17 +77,17 @@ import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.GraphqlSchemaIntrospection
 import Hasura.RQL.Types.Metadata.Common
 import Hasura.RQL.Types.Metadata.Serialization
-import Hasura.RQL.Types.Network
 import Hasura.RQL.Types.OpenTelemetry
 import Hasura.RQL.Types.Permission
+import Hasura.RQL.Types.Roles (RoleName)
 import Hasura.RemoteSchema.Metadata
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.SQL.Backend
 import Hasura.SQL.BackendMap (BackendMap)
 import Hasura.SQL.BackendMap qualified as BackendMap
-import Hasura.Session
+import Hasura.StoredProcedure.Metadata (StoredProcedureMetadata, StoredProcedureName, spmArrayRelationships)
 import Hasura.Tracing (TraceT)
 import Language.GraphQL.Draft.Syntax qualified as G
+import Network.Types.Extended
 
 -- | Versioning the @'Metadata' JSON structure to track backwards incompatible changes.
 -- This value is included in the metadata JSON object at top level 'version' key.
@@ -300,6 +303,16 @@ nativeQueryMetadataSetter ::
 nativeQueryMetadataSetter source nativeQueryName =
   metaSources . ix source . toSourceMetadata . smNativeQueries . ix nativeQueryName
 
+-- | A lens setter for the metadata of a stored procedure as identified by the
+-- source name and root field name.
+storedProcedureMetadataSetter ::
+  (Backend b) =>
+  SourceName ->
+  StoredProcedureName ->
+  ASetter' Metadata (StoredProcedureMetadata b)
+storedProcedureMetadataSetter source storedProcedureName =
+  metaSources . ix source . toSourceMetadata . smStoredProcedures . ix storedProcedureName
+
 -- | A simple monad class which enables fetching and setting @'Metadata'
 -- in the state.
 class (Monad m) => MetadataM m where
@@ -340,7 +353,7 @@ instance FromJSON MetadataNoSources where
         MVVersion1 -> do
           tables <- oMapFromL _tmTable <$> o .: "tables"
           functionList <- o .:? "functions" .!= []
-          let functions = OM.fromList $
+          let functions = InsOrdHashMap.fromList $
                 flip map functionList $
                   \function -> (function, FunctionMetadata function emptyFunctionConfig mempty Nothing)
           pure (tables, functions)
@@ -378,7 +391,7 @@ newtype MetadataModifier = MetadataModifier {runMetadataModifier :: Metadata -> 
 dropTableInMetadata ::
   forall b. (Backend b) => SourceName -> TableName b -> MetadataModifier
 dropTableInMetadata source table =
-  MetadataModifier $ metaSources . ix source . (toSourceMetadata @b) . smTables %~ OM.delete table
+  MetadataModifier $ metaSources . ix source . (toSourceMetadata @b) . smTables %~ InsOrdHashMap.delete table
 
 dropRelationshipInMetadata ::
   RelName -> TableMetadata b -> TableMetadata b
@@ -386,25 +399,29 @@ dropRelationshipInMetadata relName =
   -- Since the name of a relationship is unique in a table, the relationship
   -- with given name may present in either array or object relationships but
   -- not in both.
-  (tmObjectRelationships %~ OM.delete relName)
-    . (tmArrayRelationships %~ OM.delete relName)
+  (tmObjectRelationships %~ InsOrdHashMap.delete relName)
+    . (tmArrayRelationships %~ InsOrdHashMap.delete relName)
 
 dropNativeQueryRelationshipInMetadata :: RelName -> NativeQueryMetadata b -> NativeQueryMetadata b
 dropNativeQueryRelationshipInMetadata relName =
-  nqmArrayRelationships %~ OM.delete relName
+  nqmArrayRelationships %~ InsOrdHashMap.delete relName
+
+dropStoredProcedureRelationshipInMetadata :: RelName -> StoredProcedureMetadata b -> StoredProcedureMetadata b
+dropStoredProcedureRelationshipInMetadata relName =
+  spmArrayRelationships %~ InsOrdHashMap.delete relName
 
 dropPermissionInMetadata ::
   RoleName -> PermType -> TableMetadata b -> TableMetadata b
 dropPermissionInMetadata rn = \case
-  PTInsert -> tmInsertPermissions %~ OM.delete rn
-  PTSelect -> tmSelectPermissions %~ OM.delete rn
-  PTDelete -> tmDeletePermissions %~ OM.delete rn
-  PTUpdate -> tmUpdatePermissions %~ OM.delete rn
+  PTInsert -> tmInsertPermissions %~ InsOrdHashMap.delete rn
+  PTSelect -> tmSelectPermissions %~ InsOrdHashMap.delete rn
+  PTDelete -> tmDeletePermissions %~ InsOrdHashMap.delete rn
+  PTUpdate -> tmUpdatePermissions %~ InsOrdHashMap.delete rn
 
 dropLogicalModelPermissionInMetadata ::
   RoleName -> PermType -> LogicalModelMetadata b -> LogicalModelMetadata b
 dropLogicalModelPermissionInMetadata rn = \case
-  PTSelect -> lmmSelectPermissions %~ OM.delete rn
+  PTSelect -> lmmSelectPermissions %~ InsOrdHashMap.delete rn
   PTInsert -> error "Not implemented yet"
   PTDelete -> error "Not implemented yet"
   PTUpdate -> error "Not implemented yet"
@@ -412,26 +429,26 @@ dropLogicalModelPermissionInMetadata rn = \case
 dropComputedFieldInMetadata ::
   ComputedFieldName -> TableMetadata b -> TableMetadata b
 dropComputedFieldInMetadata name =
-  tmComputedFields %~ OM.delete name
+  tmComputedFields %~ InsOrdHashMap.delete name
 
 dropEventTriggerInMetadata :: TriggerName -> TableMetadata b -> TableMetadata b
 dropEventTriggerInMetadata name =
-  tmEventTriggers %~ OM.delete name
+  tmEventTriggers %~ InsOrdHashMap.delete name
 
 dropRemoteRelationshipInMetadata ::
   RelName -> TableMetadata b -> TableMetadata b
 dropRemoteRelationshipInMetadata name =
-  tmRemoteRelationships %~ OM.delete name
+  tmRemoteRelationships %~ InsOrdHashMap.delete name
 
 dropFunctionInMetadata ::
   forall b. (Backend b) => SourceName -> FunctionName b -> MetadataModifier
 dropFunctionInMetadata source function =
   MetadataModifier $
-    metaSources . ix source . toSourceMetadata . (smFunctions @b) %~ OM.delete function
+    metaSources . ix source . toSourceMetadata . (smFunctions @b) %~ InsOrdHashMap.delete function
 
 dropRemoteSchemaInMetadata :: RemoteSchemaName -> MetadataModifier
 dropRemoteSchemaInMetadata name =
-  MetadataModifier $ metaRemoteSchemas %~ OM.delete name
+  MetadataModifier $ metaRemoteSchemas %~ InsOrdHashMap.delete name
 
 dropRemoteSchemaPermissionInMetadata :: RemoteSchemaName -> RoleName -> MetadataModifier
 dropRemoteSchemaPermissionInMetadata remoteSchemaName roleName =
@@ -445,7 +462,7 @@ dropRemoteSchemaRemoteRelationshipInMetadata remoteSchemaName typeName relations
       . rsmRemoteRelationships
       . ix typeName
       . rstrsRelationships
-      %~ OM.delete relationshipName
+      %~ InsOrdHashMap.delete relationshipName
 
 -- | Encode 'Metadata' to JSON with deterministic ordering (e.g. "version" being at the top).
 -- The CLI system stores metadata in files and has option to show changes in git diff style.

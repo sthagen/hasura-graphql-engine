@@ -35,13 +35,14 @@ import Hasura.RQL.Types.Endpoint
 import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.GraphqlSchemaIntrospection
 import Hasura.RQL.Types.Metadata (GetCatalogState, SetCatalogState)
-import Hasura.RQL.Types.Network
 import Hasura.RQL.Types.OpenTelemetry
 import Hasura.RQL.Types.QueryCollection
 import Hasura.RQL.Types.Roles
 import Hasura.RQL.Types.ScheduledTrigger
 import Hasura.RemoteSchema.MetadataAPI
 import Hasura.SQL.AnyBackend
+import Hasura.StoredProcedure.API qualified as StoredProcedures
+import Network.Types.Extended
 
 data RQLMetadataV1
   = -- Sources
@@ -96,6 +97,10 @@ data RQLMetadataV1
     RMGetNativeQuery !(AnyBackend NativeQueries.GetNativeQuery)
   | RMTrackNativeQuery !(AnyBackend NativeQueries.TrackNativeQuery)
   | RMUntrackNativeQuery !(AnyBackend NativeQueries.UntrackNativeQuery)
+  | -- Stored Procedures
+    RMGetStoredProcedure !(AnyBackend StoredProcedures.GetStoredProcedure)
+  | RMTrackStoredProcedure !(AnyBackend StoredProcedures.TrackStoredProcedure)
+  | RMUntrackStoredProcedure !(AnyBackend StoredProcedures.UntrackStoredProcedure)
   | -- Custom types
     RMGetLogicalModel !(AnyBackend LogicalModel.GetLogicalModel)
   | RMTrackLogicalModel !(AnyBackend LogicalModel.TrackLogicalModel)
@@ -110,6 +115,9 @@ data RQLMetadataV1
   | RMCleanupEventTriggerLog !TriggerLogCleanupConfig
   | RMResumeEventTriggerCleanup !TriggerLogCleanupToggleConfig
   | RMPauseEventTriggerCleanup !TriggerLogCleanupToggleConfig
+  | RMGetEventLogs !(AnyBackend GetEventLogs)
+  | RMGetEventInvocationLogs !(AnyBackend GetEventInvocations)
+  | RMGetEventById !(AnyBackend GetEventById)
   | -- Remote schemas
     RMAddRemoteSchema !AddRemoteSchemaQuery
   | RMUpdateRemoteSchema !AddRemoteSchemaQuery

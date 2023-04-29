@@ -4,6 +4,9 @@
 
 module Hasura.Prelude
   ( module M,
+    HashMap,
+    InsOrdHashMap,
+    mapKeys,
 
     -- * Maybe
     catMaybes,
@@ -112,10 +115,10 @@ import Data.Foldable as M
 import Data.Function as M (on, (&))
 import Data.Functor as M (($>), (<&>))
 import Data.Functor.Const as M (Const)
-import Data.HashMap.Strict as M (HashMap, mapKeys)
-import Data.HashMap.Strict qualified as Map
-import Data.HashMap.Strict.InsOrd as M (InsOrdHashMap)
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict as HashMap (HashMap, mapKeys)
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd (InsOrdHashMap)
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.HashSet as M (HashSet)
 import Data.Hashable as M (Hashable)
 import Data.List as M
@@ -332,18 +335,18 @@ traceToFileM filepath x =
 --------------------------------------------------------------------------------
 -- Map-related utilities
 
--- | Construct a 'Map.HashMap' from a '[]' given a key builder
+-- | Construct a 'HashMap.HashMap' from a '[]' given a key builder
 -- function @a -> k@.
 --
 -- TODO (from main): Move to 'Data.HashMap.Strict.Extended'; rename to
 -- fromListWith?
-mapFromL :: (Hashable k) => (a -> k) -> [a] -> Map.HashMap k a
-mapFromL f = Map.fromList . map (\v -> (f v, v))
+mapFromL :: (Hashable k) => (a -> k) -> [a] -> HashMap.HashMap k a
+mapFromL f = HashMap.fromList . map (\v -> (f v, v))
 
 -- | Construct an 'InsOrdHashMap' from a '[]' given a key builder
 -- function @a -> k@.
 oMapFromL :: (Hashable k) => (a -> k) -> [a] -> InsOrdHashMap k a
-oMapFromL f = OMap.fromList . map (\v -> (f v, v))
+oMapFromL f = InsOrdHashMap.fromList . map (\v -> (f v, v))
 
 --------------------------------------------------------------------------------
 -- Measuring and working with moments and durations

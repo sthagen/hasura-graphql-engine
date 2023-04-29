@@ -1,5 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 module Hasura.RQL.DML.Types
   ( OrderByExp (..),
     DMLQuery (..),
@@ -26,18 +24,17 @@ where
 
 import Data.Aeson
 import Data.Aeson.Casing
-import Data.Aeson.TH
 import Data.Attoparsec.Text qualified as AT
-import Data.HashMap.Strict qualified as M
+import Data.HashMap.Strict qualified as HashMap
 import Hasura.Backends.Postgres.Instances.Types ()
 import Hasura.Backends.Postgres.SQL.DML qualified as Postgres
 import Hasura.Backends.Postgres.SQL.Types
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.IR.OrderBy
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
-import Hasura.SQL.Backend
 
 newtype OrderByExp = OrderByExp {getOrderByItems :: [OrderByItem ('Postgres 'Vanilla)]}
   deriving (Show, Eq)
@@ -95,9 +92,10 @@ data SelectG a b c = SelectG
     sqLimit :: Maybe c, -- Limit
     sqOffset :: Maybe c -- Offset
   }
-  deriving (Show, Eq)
+  deriving (Show, Generic, Eq)
 
-$(deriveFromJSON hasuraJSON {omitNothingFields = True} ''SelectG)
+instance (FromJSON a, FromJSON b, FromJSON c) => FromJSON (SelectG a b c) where
+  parseJSON = genericParseJSON hasuraJSON {omitNothingFields = True}
 
 data Wildcard
   = Star
@@ -172,9 +170,10 @@ data OnConflict = OnConflict
     ocConstraint :: Maybe ConstraintName,
     ocAction :: ConflictAction
   }
-  deriving (Show, Eq)
+  deriving (Show, Generic, Eq)
 
-$(deriveFromJSON hasuraJSON {omitNothingFields = True} ''OnConflict)
+instance FromJSON OnConflict where
+  parseJSON = genericParseJSON hasuraJSON {omitNothingFields = True}
 
 data InsertQuery = InsertQuery
   { iqTable :: QualifiedTable,
@@ -214,9 +213,9 @@ instance FromJSON UpdateQuery where
       <$> o .: "table"
       <*> o .:? "source" .!= defaultSource
       <*> o .: "where"
-      <*> ((o .: "$set" <|> o .:? "values") .!= M.empty)
-      <*> (o .:? "$inc" .!= M.empty)
-      <*> (o .:? "$mul" .!= M.empty)
+      <*> ((o .: "$set" <|> o .:? "values") .!= HashMap.empty)
+      <*> (o .:? "$inc" .!= HashMap.empty)
+      <*> (o .:? "$mul" .!= HashMap.empty)
       <*> o .:? "$default" .!= []
       <*> o .:? "returning"
 
@@ -259,12 +258,12 @@ data QueryT
   | QTDelete DeleteQuery
   | QTCount CountQuery
   | QTBulk [QueryT]
-  deriving (Show, Eq)
+  deriving (Show, Generic, Eq)
 
-$( deriveFromJSON
-     defaultOptions
-       { constructorTagModifier = snakeCase . drop 2,
-         sumEncoding = TaggedObject "type" "args"
-       }
-     ''QueryT
- )
+instance FromJSON QueryT where
+  parseJSON =
+    genericParseJSON
+      defaultOptions
+        { constructorTagModifier = snakeCase . drop 2,
+          sumEncoding = TaggedObject "type" "args"
+        }

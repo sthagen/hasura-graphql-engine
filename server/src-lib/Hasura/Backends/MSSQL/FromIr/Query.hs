@@ -13,7 +13,8 @@ where
 import Control.Applicative (getConst)
 import Control.Monad.Validate
 import Data.Aeson.Extended qualified as J
-import Data.HashMap.Strict qualified as HM
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -26,20 +27,27 @@ import Hasura.Backends.MSSQL.FromIr
     FromIr,
     NameTemplate (..),
     generateAlias,
+    tellAfter,
+    tellBefore,
     tellCTE,
   )
 import Hasura.Backends.MSSQL.FromIr.Constants
 import Hasura.Backends.MSSQL.FromIr.Expression
 import Hasura.Backends.MSSQL.Instances.Types ()
 import Hasura.Backends.MSSQL.Types.Internal as TSQL
+import Hasura.LogicalModel.Common (columnsFromFields)
+import Hasura.LogicalModel.IR (LogicalModel (..))
+import Hasura.LogicalModel.NullableScalarType (NullableScalarType (..))
 import Hasura.NativeQuery.IR qualified as IR
 import Hasura.NativeQuery.Types (NativeQueryName (..))
 import Hasura.Prelude
 import Hasura.RQL.IR qualified as IR
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Column qualified as IR
 import Hasura.RQL.Types.Common qualified as IR
 import Hasura.RQL.Types.Relationships.Local qualified as IR
-import Hasura.SQL.Backend
+import Hasura.StoredProcedure.IR qualified as IR
+import Hasura.StoredProcedure.Types (StoredProcedureName (..))
 
 -- | This is the top-level entry point for translation of Query root fields.
 fromQueryRootField :: IR.QueryDB 'MSSQL Void Expression -> FromIr Select
@@ -87,7 +95,7 @@ fromSourceRelationship ::
   -- | List of json objects, each of which becomes a row of the table
   NE.NonEmpty J.Object ->
   -- | The above objects have this schema
-  HM.HashMap IR.FieldName (ColumnName, ScalarType) ->
+  HashMap.HashMap IR.FieldName (ColumnName, ScalarType) ->
   IR.FieldName ->
   (IR.FieldName, IR.SourceRelationshipSelection 'MSSQL Void (Const Expression)) ->
   FromIr TSQL.Select
@@ -132,7 +140,7 @@ fromSourceRelationship lhs lhsSchema argumentId relationshipField = do
                   openJsonWith =
                     Just $
                       toJsonFieldSpec argumentId IntegerType
-                        NE.:| map (uncurry toJsonFieldSpec . second snd) (HM.toList lhsSchema)
+                        NE.:| map (uncurry toJsonFieldSpec . second snd) (HashMap.toList lhsSchema)
                 },
             aliasedAlias = "lhs"
           }
@@ -148,7 +156,7 @@ fromSourceRelationship lhs lhsSchema argumentId relationshipField = do
 -- an object, array, or aggregate relationship.
 fromRemoteRelationFieldsG ::
   Map TableName EntityAlias ->
-  HM.HashMap ColumnName ColumnName ->
+  HashMap.HashMap ColumnName ColumnName ->
   (IR.FieldName, IR.SourceRelationshipSelection 'MSSQL Void (Const Expression)) ->
   ReaderT EntityAlias FromIr FieldSource
 fromRemoteRelationFieldsG existingJoins joinColumns (IR.FieldName name, field) =
@@ -207,6 +215,7 @@ fromSelectRows annSelectG = do
       IR.FromIdentifier identifier -> pure $ FromIdentifier $ IR.unFIIdentifier identifier
       IR.FromFunction {} -> refute $ pure FunctionNotSupported
       IR.FromNativeQuery nativeQuery -> fromNativeQuery nativeQuery
+      IR.FromStoredProcedure storedProcedure -> fromStoredProcedure storedProcedure
   Args
     { argsOrderBy,
       argsWhere,
@@ -333,10 +342,36 @@ fromNativeQuery nativeQuery = do
   let nativeQueryName = IR.nqRootFieldName nativeQuery
       nativeQuerySql = IR.nqInterpolatedQuery nativeQuery
       cteName = T.toTxt (getNativeQueryName nativeQueryName)
-
   tellCTE (Aliased nativeQuerySql cteName)
-
   pure $ TSQL.FromIdentifier cteName
+
+fromStoredProcedure :: IR.StoredProcedure 'MSSQL Expression -> FromIr TSQL.From
+fromStoredProcedure storedProcedure = do
+  let storedProcedureName = IR.spRootFieldName storedProcedure
+      sql = IR.spInterpolatedQuery storedProcedure
+      storedProcedureReturnType = IR.spLogicalModel storedProcedure
+      rawTempTableName = T.toTxt (getStoredProcedureName storedProcedureName)
+      aliasedTempTableName = Aliased (TempTableName rawTempTableName) rawTempTableName
+
+  let columns =
+        ( \(name, ty) ->
+            UnifiedColumn
+              { name = name,
+                type' = (nstType ty)
+              }
+        )
+          <$> InsOrdHashMap.toList (columnsFromFields $ lmFields storedProcedureReturnType)
+
+  -- \| add create temp table to "the environment"
+  tellBefore (CreateTemp (TempTableName rawTempTableName) columns)
+
+  -- \| add insert into temp table
+  tellBefore (InsertTemp (TempTableName rawTempTableName) sql)
+
+  -- \| when we're done, drop the temp table
+  tellAfter (DropTemp (TempTableName rawTempTableName))
+
+  pure $ TSQL.FromTempTable aliasedTempTableName
 
 fromSelectAggregate ::
   Maybe (EntityAlias, HashMap ColumnName ColumnName) ->
@@ -357,6 +392,7 @@ fromSelectAggregate
         IR.FromIdentifier identifier -> pure $ FromIdentifier $ IR.unFIIdentifier identifier
         IR.FromFunction {} -> refute $ pure FunctionNotSupported
         IR.FromNativeQuery nativeQuery -> fromNativeQuery nativeQuery
+        IR.FromStoredProcedure {} -> error "fromSelectAggregate: FromStoredProcedure"
       -- Below: When we're actually a RHS of a query (of CROSS APPLY),
       -- then we'll have a LHS table that we're joining on. So we get the
       -- conditions expressions from the field mappings. The LHS table is
@@ -828,7 +864,7 @@ fromMapping localFrom =
               (ColumnExpression remoteFieldName)
           )
     )
-    . HM.toList
+    . HashMap.toList
 
 selectFromMapping ::
   Select ->

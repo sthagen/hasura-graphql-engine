@@ -16,8 +16,8 @@ where
 import Control.Lens hiding ((.=))
 import Data.Aeson
 import Data.FileEmbed (makeRelativeToProject)
-import Data.HashMap.Strict qualified as HM
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.Text.Extended ((<<>))
 import Data.Text.NonEmpty
 import Data.Time.Clock qualified as C
@@ -36,6 +36,7 @@ import Hasura.RQL.DDL.RemoteRelationship
 import Hasura.RQL.Types.Action
 import Hasura.RQL.Types.Allowlist
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.EventTrigger
@@ -47,7 +48,6 @@ import Hasura.RQL.Types.Relationships.Remote
 import Hasura.RQL.Types.ScheduledTrigger
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RemoteSchema.Metadata
-import Hasura.SQL.Backend
 
 saveMetadataToHdbTables ::
   (MonadTx m, MonadReader SystemDefined m) => MetadataNoSources -> m ()
@@ -401,7 +401,7 @@ parseLegacyRemoteRelationshipDefinition =
 fetchMetadataFromHdbTables :: MonadTx m => m MetadataNoSources
 fetchMetadataFromHdbTables = liftTx do
   tables <- fetchTables
-  let tableMetaMap = OMap.fromList . flip map tables $
+  let tableMetaMap = InsOrdHashMap.fromList . flip map tables $
         \(schema, name, isEnum, maybeConfig) ->
           let qualifiedName = QualifiedObject schema name
               configuration = maybe emptyTableConfig PG.getViaJSON maybeConfig
@@ -467,7 +467,7 @@ fetchMetadataFromHdbTables = liftTx do
   where
     modMetaMap l f xs = do
       st <- get
-      put $ foldl' (\b (qt, dfn) -> b & at qt . _Just . l %~ OMap.insert (f dfn) dfn) st xs
+      put $ foldl' (\b (qt, dfn) -> b & at qt . _Just . l %~ InsOrdHashMap.insert (f dfn) dfn) st xs
 
     mkPermDefs pt = mapM permRowToDef . filter (\pr -> pr ^. _4 == pt)
 
@@ -902,4 +902,4 @@ recreateSystemMetadata = do
     objectRel name using = Left $ RelDef (RelName name) using Nothing
     arrayRel name using = Right $ RelDef (RelName name) using Nothing
     manualConfig schemaName tableName columns =
-      RUManual $ RelManualConfig (QualifiedObject schemaName tableName) (HM.fromList columns) Nothing
+      RUManual $ RelManualConfig (QualifiedObject schemaName tableName) (HashMap.fromList columns) Nothing

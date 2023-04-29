@@ -38,6 +38,7 @@ module Harness.GraphqlEngine
 
     -- * Server Setup
     startServerThread,
+    runApp,
 
     -- * Re-exports
     serverUrl,
@@ -133,7 +134,7 @@ postWithHeadersStatus statusCode testEnv@(getServer -> Server {urlPrefix, port})
         NonAdmin _ -> "test-role"
 
       headers' :: Http.RequestHeaders
-      headers' = ("X-Hasura-Role", role) : headers
+      headers' = ("X-Hasura-Admin-Secret", adminSecret) : ("X-Hasura-Role", role) : headers
 
   responseBody <- withFrozenCallStack case requestProtocol (globalEnvironment testEnv) of
     WebSocket connection -> postWithHeadersStatusViaWebSocket connection headers' requestBody
@@ -238,9 +239,10 @@ postGraphqlWithHeaders testEnvironment headers value =
 postExplain :: HasCallStack => TestEnvironment -> Value -> IO Value
 postExplain testEnvironment value =
   withFrozenCallStack $
-    post
+    postWithHeaders
       testEnvironment
       "/v1/graphql/explain"
+      mempty
       [yaml|
           query:
             query: *value
@@ -378,6 +380,7 @@ startServerThread = do
   thread <-
     Async.async
       ( runApp
+          Constants.postgresqlMetadataConnectionString
           Constants.serveOptions
             { soPort = unsafePort port,
               soMetadataDefaults = backendConfigs
@@ -390,17 +393,16 @@ startServerThread = do
 -------------------------------------------------------------------------------
 
 -- | Run the graphql-engine server.
-runApp :: ServeOptions Hasura.Logging.Hasura -> IO ()
-runApp serveOptions = do
+runApp :: String -> ServeOptions Hasura.Logging.Hasura -> IO ()
+runApp metadataDbUrl serveOptions = do
   let rci =
         PostgresConnInfo
           { _pciDatabaseConn = Nothing,
             _pciRetries = Nothing
           }
-      metadataDbUrl = Just Constants.postgresqlMetadataConnectionString
   env <- Env.getEnvironment
   initTime <- liftIO getCurrentTime
-  metadataConnectionInfo <- App.initMetadataConnectionInfo env metadataDbUrl rci
+  metadataConnectionInfo <- App.initMetadataConnectionInfo env (Just metadataDbUrl) rci
   let defaultConnInfo = App.BasicConnectionInfo metadataConnectionInfo Nothing
   (ekgStore, serverMetrics) <-
     liftIO $ do

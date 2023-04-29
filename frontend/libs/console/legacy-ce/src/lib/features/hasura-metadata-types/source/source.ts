@@ -6,6 +6,8 @@ import {
   PostgresConfiguration,
 } from './configuration';
 import { MetadataTable } from './table';
+import { LogicalModel } from './logicalModel';
+import { NativeQuery } from './nativeQuery';
 
 export type NativeDrivers =
   | 'postgres'
@@ -16,11 +18,7 @@ export type NativeDrivers =
   | 'citus'
   | 'cockroach';
 
-export type SuperConnectorDrivers =
-  | 'snowflake'
-  | 'athena'
-  | 'mysqlgdc'
-  | string;
+export type SuperConnectorDrivers = 'snowflake' | 'athena' | 'mysql8' | string;
 
 export type SupportedDrivers = Driver | SuperConnectorDrivers;
 
@@ -57,6 +55,8 @@ export type Source = {
   tables: MetadataTable[];
   customization?: SourceCustomization;
   functions?: MetadataFunction[];
+  logical_models?: LogicalModel[];
+  native_queries?: NativeQuery[];
 } & (
   | {
       kind: 'postgres';
@@ -81,10 +81,14 @@ export type Source = {
        */
       kind: Exclude<SupportedDrivers, NativeDrivers>;
       configuration: unknown;
+      logical_models?: never;
+      native_queries?: never;
     }
 );
 
 export type QualifiedFunction = unknown;
+export type { LogicalModel, LogicalModelField } from './logicalModel';
+export type { NativeQuery, NativeQueryArgument } from './nativeQuery';
 
 export type BulkKeepGoingResponse = [
   | {

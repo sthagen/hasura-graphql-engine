@@ -22,14 +22,14 @@ import Control.Lens.TH (makeLenses)
 import Data.Bifoldable
 import Data.Kind (Type)
 import Hasura.GraphQL.Schema.NamingCase (NamingCase)
-import Hasura.GraphQL.Schema.Options (StringifyNumbers)
 import Hasura.Prelude
 import Hasura.RQL.IR.Select.Args
 import Hasura.RQL.IR.Select.From
 import Hasura.RQL.IR.Select.TablePerm
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
-import Hasura.SQL.Backend
+import Hasura.RQL.Types.Schema.Options (StringifyNumbers)
 
 -- Select
 

@@ -41,12 +41,12 @@ import Hasura.RQL.DML.Types
     UpdateQuery,
   )
 import Hasura.RQL.DML.Update
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.SchemaCache (MetadataWithResourceVersion (MetadataWithResourceVersion))
 import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.Source
-import Hasura.SQL.Backend
 import Hasura.Server.Types
 import Hasura.Services
 import Hasura.Session
@@ -121,11 +121,11 @@ runQuery ::
   RQLQuery ->
   m (EncJSON, RebuildableSchemaCache)
 runQuery appContext schemaCache rqlQuery = do
-  appEnv@AppEnv {..} <- askAppEnv
+  AppEnv {..} <- askAppEnv
   when ((appEnvEnableReadOnlyMode == ReadOnlyModeEnabled) && queryModifiesUserDB rqlQuery) $
     throw400 NotSupported "Cannot run write queries when read-only mode is enabled"
 
-  dynamicConfig <- buildCacheDynamicConfig appEnv appContext
+  let dynamicConfig = buildCacheDynamicConfig appContext
   MetadataWithResourceVersion metadata currentResourceVersion <- Tracing.newSpan "fetchMetadata" $ liftEitherM fetchMetadata
   ((result, updatedMetadata), updatedCache, invalidations) <-
     runQueryM (acSQLGenCtx appContext) rqlQuery

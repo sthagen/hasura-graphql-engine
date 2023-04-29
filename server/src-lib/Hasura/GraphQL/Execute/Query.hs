@@ -6,8 +6,8 @@ where
 
 import Data.Aeson qualified as J
 import Data.Environment qualified as Env
-import Data.HashMap.Strict qualified as Map
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.Tagged qualified as Tagged
 import Hasura.Base.Error
 import Hasura.GraphQL.Context
@@ -52,7 +52,7 @@ parseGraphQLQuery ::
       G.SelectionSet G.NoFragments Variable
     )
 parseGraphQLQuery gqlContext varDefs varValsM directives fields = do
-  (resolvedDirectives, resolvedSelSet) <- resolveVariables varDefs (fromMaybe Map.empty varValsM) directives fields
+  (resolvedDirectives, resolvedSelSet) <- resolveVariables varDefs (fromMaybe HashMap.empty varValsM) directives fields
   parsedQuery <- liftEither $ gqlQueryParser gqlContext resolvedSelSet
   pure (parsedQuery, resolvedDirectives, resolvedSelSet)
 
@@ -146,5 +146,5 @@ convertQuerySelSet
               pure $ ExecStepAction actionExecution (ActionsInfo actionName fch) remoteJoins
             RFRaw r -> flip onLeft throwError =<< executeIntrospection userInfo r introspectionDisabledRoles
     -- 3. Transform the 'RootFieldMap' into an execution plan
-    executionPlan <- flip OMap.traverseWithKey unpreparedQueries $ resolveExecutionSteps
-    pure (executionPlan, OMap.elems unpreparedQueries, dirMap, parameterizedQueryHash)
+    executionPlan <- flip InsOrdHashMap.traverseWithKey unpreparedQueries $ resolveExecutionSteps
+    pure (executionPlan, InsOrdHashMap.elems unpreparedQueries, dirMap, parameterizedQueryHash)
