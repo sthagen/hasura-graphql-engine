@@ -1,14 +1,10 @@
-{-# LANGUAGE QuasiQuotes #-}
-
 -- | Schema parsers for stored procedures.
 module Hasura.StoredProcedure.Schema (defaultBuildStoredProcedureRootFields) where
 
 import Data.Has (Has (getter))
 import Data.HashMap.Strict qualified as HashMap
-import Data.Monoid (Ap (Ap, getAp))
 import Hasura.GraphQL.Schema.Backend
   ( BackendLogicalModelSelectSchema (..),
-    BackendSchema (columnParser),
     MonadBuildSchema,
   )
 import Hasura.GraphQL.Schema.Common
@@ -17,11 +13,12 @@ import Hasura.GraphQL.Schema.Common
   )
 import Hasura.GraphQL.Schema.Parser qualified as P
 import Hasura.LogicalModel.Schema
+import Hasura.LogicalModelResolver.Schema (argumentsSchema)
 import Hasura.Prelude
 import Hasura.RQL.IR.Root (RemoteRelationshipField)
 import Hasura.RQL.IR.Select (QueryDB (QDBMultipleRows))
 import Hasura.RQL.IR.Select qualified as IR
-import Hasura.RQL.IR.Value (Provenance (FromInternal), UnpreparedValue (UVParameter), openValueOrigin)
+import Hasura.RQL.IR.Value (Provenance (FromInternal), UnpreparedValue (UVParameter))
 import Hasura.RQL.Types.Column qualified as Column
 import Hasura.RQL.Types.Metadata.Object qualified as MO
 import Hasura.RQL.Types.Schema.Options qualified as Options
@@ -34,10 +31,9 @@ import Hasura.RQL.Types.SourceCustomization
 import Hasura.SQL.AnyBackend (mkAnyBackend)
 import Hasura.StoredProcedure.Cache (StoredProcedureInfo (..))
 import Hasura.StoredProcedure.IR (StoredProcedure (..))
-import Hasura.StoredProcedure.Metadata (InterpolatedQuery (..), NativeQueryArgumentName (..))
-import Hasura.StoredProcedure.Types (NullableScalarType (..), getStoredProcedureName)
+import Hasura.StoredProcedure.Metadata (ArgumentName (..))
+import Hasura.StoredProcedure.Types (NullableScalarType (..))
 import Language.GraphQL.Draft.Syntax qualified as G
-import Language.GraphQL.Draft.Syntax.QQ qualified as G
 
 defaultBuildStoredProcedureRootFields ::
   forall b r m n.
@@ -50,7 +46,7 @@ defaultBuildStoredProcedureRootFields ::
     m
     (Maybe (P.FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))))
 defaultBuildStoredProcedureRootFields StoredProcedureInfo {..} = runMaybeT $ do
-  let fieldName = getStoredProcedureName _spiRootFieldName
+  let fieldName = _spiGraphqlName
 
   storedProcedureArgsParser <-
     storedProcedureArgumentsSchema @b @r @m @n fieldName _spiArguments
@@ -70,23 +66,22 @@ defaultBuildStoredProcedureRootFields StoredProcedureInfo {..} = runMaybeT $ do
   (selectionSetParser, logicalModelsArgsParser) <-
     MaybeT $ buildLogicalModelFields _spiArrayRelationships _spiReturns
 
-  let interpolatedQuery spArgs =
-        InterpolatedQuery $
-          (fmap . fmap)
-            ( \var@(NativeQueryArgumentName name) -> case HashMap.lookup var spArgs of
-                Just arg -> UVParameter (FromInternal name) arg
-                Nothing ->
-                  -- the `storedProcedureArgsParser` will already have checked
-                  -- we have all the args the query needs so this _should
-                  -- not_ happen
-                  error $ "No stored procedure arg passed for " <> show var
-            )
-            (getInterpolatedQuery _spiCode)
+  let arguments spArgs =
+        HashMap.mapWithKey
+          ( \(ArgumentName name) val ->
+              case Column.cvType val of
+                Column.ColumnScalar st ->
+                  (st, UVParameter (FromInternal name) val)
+                Column.ColumnEnumReference {} ->
+                  -- should not happen
+                  error "Enums are unsupported in stored procedures."
+          )
+          spArgs
 
   let sourceObj =
         MO.MOSourceObjId
           sourceName
-          (mkAnyBackend $ MO.SMOStoredProcedure @b _spiRootFieldName)
+          (mkAnyBackend $ MO.SMOStoredProcedure @b _spiStoredProcedure)
 
   pure $
     P.setFieldParserOrigin sourceObj $
@@ -105,9 +100,9 @@ defaultBuildStoredProcedureRootFields StoredProcedureInfo {..} = runMaybeT $ do
                 IR._asnFrom =
                   IR.FromStoredProcedure
                     StoredProcedure
-                      { spRootFieldName = _spiRootFieldName,
-                        spArgs,
-                        spInterpolatedQuery = interpolatedQuery spArgs,
+                      { spStoredProcedure = _spiStoredProcedure,
+                        spGraphqlName = _spiGraphqlName,
+                        spArgs = arguments spArgs,
                         spLogicalModel = buildLogicalModelIR _spiReturns
                       },
                 IR._asnPerm = logicalModelPermissions,
@@ -120,40 +115,6 @@ storedProcedureArgumentsSchema ::
   forall b r m n.
   MonadBuildSchema b r m n =>
   G.Name ->
-  HashMap NativeQueryArgumentName (NullableScalarType b) ->
-  MaybeT (SchemaT r m) (P.InputFieldsParser n (HashMap NativeQueryArgumentName (Column.ColumnValue b)))
-storedProcedureArgumentsSchema storedProcedureName argsSignature = do
-  -- Lift 'SchemaT r m (InputFieldsParser ..)' into a monoid using Applicative.
-  -- This lets us use 'foldMap' + monoid structure of hashmaps to avoid awkwardly
-  -- traversing the arguments and building the resulting parser.
-  argsParser <-
-    getAp $
-      foldMap
-        ( \(name, NullableScalarType {nstType, nstNullable, nstDescription}) -> Ap do
-            argValueParser <-
-              fmap (HashMap.singleton name . openValueOrigin)
-                <$> lift (columnParser (Column.ColumnScalar nstType) (G.Nullability nstNullable))
-            -- TODO: Naming conventions?
-            -- TODO: Custom fields? (Probably not)
-            argName <- hoistMaybe (G.mkName (getNativeQueryArgumentName name))
-            let description = case nstDescription of
-                  Just desc -> G.Description desc
-                  Nothing -> G.Description ("Stored procedure argument " <> getNativeQueryArgumentName name)
-            pure $
-              P.field
-                argName
-                (Just description)
-                argValueParser
-        )
-        (HashMap.toList argsSignature)
-
-  let desc = Just $ G.Description $ G.unName storedProcedureName <> " Stored Procedure Arguments"
-
-  pure $
-    if null argsSignature
-      then mempty
-      else
-        P.field
-          [G.name|args|]
-          desc
-          (P.object (storedProcedureName <> [G.name|_arguments|]) desc argsParser)
+  HashMap ArgumentName (NullableScalarType b) ->
+  MaybeT (SchemaT r m) (P.InputFieldsParser n (HashMap ArgumentName (Column.ColumnValue b)))
+storedProcedureArgumentsSchema = argumentsSchema "Stored Procedure"

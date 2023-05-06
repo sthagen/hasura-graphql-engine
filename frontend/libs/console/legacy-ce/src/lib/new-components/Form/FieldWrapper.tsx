@@ -36,6 +36,10 @@ export type FieldWrapperPassThroughProps = {
    */
   dataTest?: string;
   /**
+   * The field data test id for testing
+   */
+  dataTestId?: string;
+  /**
    * Flag indicating whether the field is loading
    */
   loading?: boolean;
@@ -87,6 +91,10 @@ type FieldWrapperProps = FieldWrapperPassThroughProps & {
    */
   error?: FieldError | undefined;
 };
+
+export const fieldLabelStyles = clsx(
+  'block pt-1 text-gray-600 mb-xs font-semibold'
+);
 
 export const ErrorComponentTemplate = (props: {
   label: React.ReactNode;
@@ -164,7 +172,7 @@ export const FieldWrapper = (props: FieldWrapperProps) => {
 
   if (label) {
     FieldLabel = () => (
-      <label htmlFor={id} className={clsx('block pt-1 text-gray-600 mb-xs')}>
+      <label htmlFor={id} className={fieldLabelStyles}>
         <span className={clsx('flex items-center')}>
           <span className={clsx('font-semibold', { relative: !!loading })}>
             <FieldLabelIcon />

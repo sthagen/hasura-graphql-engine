@@ -104,6 +104,7 @@ data AppEnv = AppEnv
   { appEnvPort :: Port,
     appEnvHost :: HostPreference,
     appEnvMetadataDbPool :: PG.PGPool,
+    appEnvIntrospectionDbPool :: Maybe PG.PGPool,
     appEnvManager :: HTTP.Manager,
     appEnvLoggers :: Loggers,
     appEnvMetadataVersionRef :: STM.TMVar MetadataResourceVersion,
@@ -325,7 +326,8 @@ buildCacheStaticConfig AppEnv {..} =
     { _cscMaintenanceMode = appEnvEnableMaintenanceMode,
       _cscEventingMode = appEnvEventingMode,
       _cscReadOnlyMode = appEnvEnableReadOnlyMode,
-      _cscAreNativeQueriesEnabled = False
+      _cscAreNativeQueriesEnabled = False,
+      _cscAreStoredProceduresEnabled = False
     }
 
 buildCacheDynamicConfig :: AppContext -> CacheDynamicConfig

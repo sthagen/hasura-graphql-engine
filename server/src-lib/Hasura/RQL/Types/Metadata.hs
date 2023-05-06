@@ -54,7 +54,6 @@ import Control.Lens hiding (set, (.=))
 import Data.Aeson.Extended (FromJSONWithContext (..), mapWithJSONPath)
 import Data.Aeson.KeyMap (singleton)
 import Data.Aeson.Ordered qualified as AO
-import Data.Aeson.TH
 import Data.Aeson.Types
 import Data.HashMap.Strict.InsOrd.Extended qualified as InsOrdHashMap
 import Data.Monoid (Dual (..), Endo (..))
@@ -84,7 +83,7 @@ import Hasura.RemoteSchema.Metadata
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.BackendMap (BackendMap)
 import Hasura.SQL.BackendMap qualified as BackendMap
-import Hasura.StoredProcedure.Metadata (StoredProcedureMetadata, StoredProcedureName, spmArrayRelationships)
+import Hasura.StoredProcedure.Metadata (StoredProcedureMetadata, spmArrayRelationships)
 import Hasura.Tracing (TraceT)
 import Language.GraphQL.Draft.Syntax qualified as G
 import Network.Types.Extended
@@ -308,7 +307,7 @@ nativeQueryMetadataSetter source nativeQueryName =
 storedProcedureMetadataSetter ::
   (Backend b) =>
   SourceName ->
-  StoredProcedureName ->
+  FunctionName b ->
   ASetter' Metadata (StoredProcedureMetadata b)
 storedProcedureMetadataSetter source storedProcedureName =
   metaSources . ix source . toSourceMetadata . smStoredProcedures . ix storedProcedureName
@@ -341,9 +340,10 @@ data MetadataNoSources = MetadataNoSources
     _mnsActions :: Actions,
     _mnsCronTriggers :: CronTriggers
   }
-  deriving (Eq)
+  deriving stock (Eq, Generic)
 
-$(deriveToJSON hasuraJSON ''MetadataNoSources)
+instance ToJSON MetadataNoSources where
+  toJSON = genericToJSON hasuraJSON
 
 instance FromJSON MetadataNoSources where
   parseJSON = withObject "MetadataNoSources" $ \o -> do

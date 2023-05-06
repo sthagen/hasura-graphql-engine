@@ -27,7 +27,7 @@ spec = do
 
     it "Parses only a variable" $ do
       let rawSQL = "{{dogs}}"
-      parseInterpolatedQuery rawSQL `shouldBe` Right (InterpolatedQuery [IIVariable (NativeQueryArgumentName "dogs")])
+      parseInterpolatedQuery rawSQL `shouldBe` Right (InterpolatedQuery [IIVariable (ArgumentName "dogs")])
 
     it "Parses SQL with one parameter in it" $ do
       let rawSQL = "SELECT * FROM dogs WHERE name = {{name}}"
@@ -35,7 +35,7 @@ spec = do
         `shouldBe` Right
           ( InterpolatedQuery
               [ IIText "SELECT * FROM dogs WHERE name = ",
-                IIVariable (NativeQueryArgumentName "name")
+                IIVariable (ArgumentName "name")
               ]
           )
 
@@ -45,7 +45,7 @@ spec = do
         `shouldBe` Right
           ( InterpolatedQuery
               [ IIText "SELECT * FROM dogs WHERE ",
-                IIVariable (NativeQueryArgumentName "name"),
+                IIVariable (ArgumentName "name"),
                 IIText " = name"
               ]
           )
@@ -56,7 +56,7 @@ spec = do
         `shouldBe` Right
           ( InterpolatedQuery
               [ IIText "SELECT * FROM dogs WHERE ",
-                IIVariable (NativeQueryArgumentName "name"),
+                IIVariable (ArgumentName "name"),
                 IIText " = '{doggy friend}'"
               ]
           )
@@ -81,6 +81,7 @@ spec = do
               _nqmReturns = LogicalModelName (G.unsafeMkName "logical_model_name"),
               _nqmArguments = mempty,
               _nqmArrayRelationships = mempty,
+              _nqmObjectRelationships = mempty,
               _nqmDescription = mempty
             }
 
@@ -103,7 +104,7 @@ spec = do
                     { _nqmCode = code,
                       _nqmArguments =
                         HashMap.fromList
-                          [ (NativeQueryArgumentName "hey", NullableScalarType PGVarchar False Nothing)
+                          [ (ArgumentName "hey", NullableScalarType PGVarchar False Nothing)
                           ]
                     }
 
@@ -123,8 +124,8 @@ spec = do
                     { _nqmCode = code,
                       _nqmArguments =
                         HashMap.fromList
-                          [ (NativeQueryArgumentName "hey", NullableScalarType PGVarchar False Nothing),
-                            (NativeQueryArgumentName "ho", NullableScalarType PGInteger False Nothing)
+                          [ (ArgumentName "hey", NullableScalarType PGVarchar False Nothing),
+                            (ArgumentName "ho", NullableScalarType PGInteger False Nothing)
                           ]
                     }
 
