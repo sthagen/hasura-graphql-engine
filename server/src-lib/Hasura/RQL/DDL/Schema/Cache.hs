@@ -54,7 +54,6 @@ import Hasura.NativeQuery.Metadata (NativeQueryMetadata (..))
 import Hasura.Prelude
 import Hasura.QueryTags
 import Hasura.RQL.DDL.Action
-import Hasura.RQL.DDL.ApiLimit (MonadGetApiTimeLimit (..))
 import Hasura.RQL.DDL.CustomTypes
 import Hasura.RQL.DDL.EventTrigger (MonadEventLogCleanup (..), buildEventTriggerInfo)
 import Hasura.RQL.DDL.InheritedRoles (resolveInheritedRole)
@@ -206,8 +205,9 @@ instance (MonadEventLogCleanup m) => MonadEventLogCleanup (CacheRWT m) where
   generateCleanupSchedules sourceInfo triggerName cleanupConfig = lift $ generateCleanupSchedules sourceInfo triggerName cleanupConfig
   updateTriggerCleanupSchedules logger oldSources newSources schemaCache = lift $ updateTriggerCleanupSchedules logger oldSources newSources schemaCache
 
-instance (MonadGetApiTimeLimit m) => MonadGetApiTimeLimit (CacheRWT m) where
+instance (MonadGetPolicies m) => MonadGetPolicies (CacheRWT m) where
   runGetApiTimeLimit = lift $ runGetApiTimeLimit
+  runGetPrometheusMetricsGranularity = lift $ runGetPrometheusMetricsGranularity
 
 runCacheRWT ::
   Monad m =>
@@ -828,15 +828,24 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
 
                 arrayRelationships <-
                   traverse
-                    (nativeQueryArrayRelationshipSetup sourceName _nqmRootFieldName)
+                    (nativeQueryRelationshipSetup sourceName _nqmRootFieldName ArrRel)
                     _nqmArrayRelationships
+
+                objectRelationships <-
+                  traverse
+                    (nativeQueryRelationshipSetup sourceName _nqmRootFieldName ObjRel)
+                    _nqmObjectRelationships
 
                 let sourceObject =
                       SOSourceObj sourceName $
                         AB.mkAnyBackend $
                           SOINativeQuery @b _nqmRootFieldName
 
-                recordDependenciesM metadataObject sourceObject (mconcat $ snd <$> InsOrdHashMap.elems arrayRelationships)
+                let dependencies =
+                      mconcat (snd <$> InsOrdHashMap.elems arrayRelationships)
+                        <> mconcat (snd <$> InsOrdHashMap.elems objectRelationships)
+
+                recordDependenciesM metadataObject sourceObject dependencies
 
                 pure
                   NativeQueryInfo
@@ -844,7 +853,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
                       _nqiCode = _nqmCode,
                       _nqiReturns = logicalModel,
                       _nqiArguments = _nqmArguments,
-                      _nqiArrayRelationships = fst <$> arrayRelationships,
+                      _nqiRelationships = fst <$> (arrayRelationships <> objectRelationships),
                       _nqiDescription = _nqmDescription
                     }
 

@@ -1,6 +1,5 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | This modules defines the tree of Select types: how we represent a query internally, from its top
@@ -76,37 +75,10 @@ module Hasura.RQL.IR.Select
     TableAggregateFields,
     TableAggregateFieldsG,
     CountDistinct (..),
-    anosSupportsNestedObjects,
-    anosColumn,
-    anosFields,
-    aosFields,
-    aosTableFrom,
-    aosTableFilter,
-    csXRelay,
-    csPrimaryKeyColumns,
-    csSplit,
-    csSlice,
-    csSelect,
     insertFunctionArg,
     mkAnnColumnField,
     mkAnnColumnFieldAsText,
     traverseSourceRelationshipSelection,
-    _AFArrayRelation,
-    _AFColumn,
-    _AFComputedField,
-    _AFExpression,
-    _AFNodeId,
-    _AFObjectRelation,
-    _AFRemote,
-    _TAFAgg,
-    _TAFNodes,
-    _TAFExp,
-    _ConnectionTypename,
-    _ConnectionPageInfo,
-    _ConnectionEdges,
-    _EdgeTypename,
-    _EdgeCursor,
-    _EdgeNode,
     module Hasura.RQL.IR.Select.AnnSelectG,
     module Hasura.RQL.IR.Select.Args,
     module Hasura.RQL.IR.Select.From,
@@ -116,7 +88,6 @@ module Hasura.RQL.IR.Select
   )
 where
 
-import Control.Lens.TH (makeLenses, makePrisms)
 import Data.Bifoldable
 import Data.HashMap.Strict qualified as HashMap
 import Data.Kind (Type)
@@ -557,13 +528,14 @@ type ArrayAggregateSelect b = ArrayAggregateSelectG b Void (SQLExpression b)
 
 data AnnObjectSelectG (b :: BackendType) (r :: Type) v = AnnObjectSelectG
   { _aosFields :: AnnFieldsG b r v,
-    _aosTableFrom :: TableName b,
-    _aosTableFilter :: (AnnBoolExp b v)
+    _aosTarget :: SelectFromG b v,
+    _aosTargetFilter :: (AnnBoolExp b v)
   }
   deriving stock (Functor, Foldable, Traversable)
 
 deriving stock instance
   ( Backend b,
+    Eq (SelectFromG b v),
     Eq (AnnBoolExp b v),
     Eq (AnnFieldsG b r v)
   ) =>
@@ -571,6 +543,7 @@ deriving stock instance
 
 deriving stock instance
   ( Backend b,
+    Show (SelectFromG b v),
     Show (AnnBoolExp b v),
     Show (AnnFieldsG b r v)
   ) =>
@@ -578,7 +551,7 @@ deriving stock instance
 
 instance Backend b => Bifoldable (AnnObjectSelectG b) where
   bifoldMap f g AnnObjectSelectG {..} =
-    foldMap (foldMap $ bifoldMap f g) _aosFields <> foldMap (foldMap g) _aosTableFilter
+    foldMap (foldMap $ bifoldMap f g) _aosFields <> foldMap (foldMap g) _aosTargetFilter
 
 type AnnObjectSelect b r = AnnObjectSelectG b r (SQLExpression b)
 
@@ -730,13 +703,3 @@ insertFunctionArg argName idx value (FunctionArgsExp positional named) =
 data CountDistinct
   = SelectCountDistinct
   | SelectCountNonDistinct
-
--- Lenses
-
-$(makeLenses ''AnnObjectSelectG)
-$(makeLenses ''AnnNestedObjectSelectG)
-$(makeLenses ''ConnectionSelect)
-$(makePrisms ''AnnFieldG)
-$(makePrisms ''TableAggregateFieldG)
-$(makePrisms ''ConnectionField)
-$(makePrisms ''EdgeField)

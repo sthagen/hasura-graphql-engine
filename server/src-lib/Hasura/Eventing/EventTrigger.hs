@@ -65,8 +65,8 @@ import Data.String
 import Data.Text qualified as T
 import Data.Text.Extended
 import Data.Text.NonEmpty
+import Data.Time qualified as Time
 import Data.Time.Clock
-import Data.Time.Clock qualified as Time
 import Hasura.Backends.Postgres.SQL.Types hiding (TableName)
 import Hasura.Base.Error
 import Hasura.Eventing.Backend
@@ -84,7 +84,7 @@ import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.Source
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.Server.Metrics (ServerMetrics (..))
-import Hasura.Server.Prometheus (EventTriggerMetrics (..))
+import Hasura.Server.Prometheus
 import Hasura.Server.Types
 import Hasura.Tracing qualified as Tracing
 import Network.HTTP.Client.Transformable qualified as HTTP
@@ -163,7 +163,7 @@ data EventPayload (b :: BackendType) = EventPayload
     epTrigger :: TriggerMetadata,
     epEvent :: J.Value,
     epDeliveryInfo :: DeliveryInfo,
-    epCreatedAt :: Time.UTCTime
+    epCreatedAt :: Time.LocalTime
   }
   deriving (Generic)
 
@@ -291,7 +291,8 @@ processEventQueue ::
     MonadBaseControl IO m,
     LA.Forall (LA.Pure m),
     MonadMask m,
-    Tracing.MonadTrace m
+    Tracing.MonadTrace m,
+    MonadGetPolicies m
   ) =>
   L.Logger L.Hasura ->
   FetchedEventsStatsLogger ->
@@ -455,11 +456,14 @@ processEventQueue logger statsLogger httpMgr getSchemaCache getEventEngineCtx ac
         Has (L.Logger L.Hasura) r,
         MonadMask io,
         BackendEventTrigger b,
-        Tracing.MonadTrace io
+        Tracing.MonadTrace io,
+        MonadGetPolicies io
       ) =>
       EventWithSource b ->
       io ()
     processEvent (EventWithSource e sourceConfig sourceName eventFetchedTime) = do
+      -- IO action for fetching the configured metrics granularity
+      getPrometheusMetricsGranularity <- runGetPrometheusMetricsGranularity
       -- Track Queue Time of Event (in seconds). See `smEventQueueTime`
       -- Queue Time = Time when the event was fetched from DB - Time when the event is being processed
       eventProcessTime <- liftIO getCurrentTime
@@ -552,17 +556,18 @@ processEventQueue logger statsLogger httpMgr getSchemaCache getEventEngineCtx ac
                         eventExecutionFinishTime <- liftIO getCurrentTime
                         let eventWebhookProcessingTime' = realToFrac $ diffUTCTime eventExecutionFinishTime eventExecutionStartTime
                             -- For event_processing_time, the start time is defined as the expected delivery time for an event, i.e.:
-                            --  - For event with no retries: created_at time
-                            --  - For event with retries: next_retry_at time
-                            eventStartTime = fromMaybe (eCreatedAt e) (eRetryAt e)
+                            --  - For event with no retries: created_at (at UTC) time
+                            --  - For event with retries: next_retry_at (at UTC) time
+
                             -- The timestamps in the DB are supposed to be UTC time, so the timestamps (`eventExecutionFinishTime` and
                             -- `eventStartTime`) used here in calculation are all UTC time.
+                            eventStartTime = fromMaybe (eCreatedAtUTC e) (eRetryAtUTC e)
                             eventProcessingTime' = realToFrac $ diffUTCTime eventExecutionFinishTime eventStartTime
+                        observeHistogramWithLabel getPrometheusMetricsGranularity True (eventProcessingTime eventTriggerMetrics) (TriggerNameLabel (etiName eti)) eventProcessingTime'
                         liftIO $ do
                           EKG.Distribution.add (smEventWebhookProcessingTime serverMetrics) eventWebhookProcessingTime'
                           Prometheus.Histogram.observe (eventWebhookProcessingTime eventTriggerMetrics) eventWebhookProcessingTime'
                           EKG.Distribution.add (smEventProcessingTime serverMetrics) eventProcessingTime'
-                          Prometheus.Histogram.observe (eventProcessingTime eventTriggerMetrics) eventProcessingTime'
                           Prometheus.Counter.inc (eventProcessedTotalSuccess eventTriggerMetrics)
                           Prometheus.Counter.inc (eventInvocationTotalSuccess eventTriggerMetrics)
                       Left eventError -> do

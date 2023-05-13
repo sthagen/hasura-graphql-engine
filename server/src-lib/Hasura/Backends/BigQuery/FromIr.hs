@@ -624,7 +624,9 @@ unfurlAnnotatedOrderByElement ::
 unfurlAnnotatedOrderByElement =
   \case
     Ir.AOCColumn columnInfo -> lift (fromColumnInfo columnInfo)
-    Ir.AOCObjectRelation Rql.RelInfo {riMapping = mapping, riRTable = tableName} annBoolExp annOrderByElementG -> do
+    Ir.AOCObjectRelation Rql.RelInfo {riTarget = Rql.RelTargetNativeQuery _} _annBoolExp _annOrderByElementG ->
+      error "unfurlAnnotatedOrderByElement RelTargetNativeQuery"
+    Ir.AOCObjectRelation Rql.RelInfo {riMapping = mapping, riTarget = Rql.RelTargetTable tableName} annBoolExp annOrderByElementG -> do
       selectFrom <- lift (lift (fromQualifiedTable tableName))
       joinAliasEntity <-
         lift (lift (generateEntityAlias (ForOrderAlias (tableNameText tableName))))
@@ -663,7 +665,9 @@ unfurlAnnotatedOrderByElement =
               }
         )
       local (const joinAliasEntity) (unfurlAnnotatedOrderByElement annOrderByElementG)
-    Ir.AOCArrayAggregation Rql.RelInfo {riMapping = mapping, riRTable = tableName} annBoolExp annAggregateOrderBy -> do
+    Ir.AOCArrayAggregation Rql.RelInfo {riTarget = Rql.RelTargetNativeQuery _} _annBoolExp _annAggregateOrderBy ->
+      error "unfurlAnnotatedOrderByElement RelTargetNativeQuery"
+    Ir.AOCArrayAggregation Rql.RelInfo {riMapping = mapping, riTarget = Rql.RelTargetTable tableName} annBoolExp annAggregateOrderBy -> do
       selectFrom <- lift (lift (fromQualifiedTable tableName))
       let alias = aggFieldName
       joinAlias <-
@@ -814,7 +818,9 @@ fromAnnBoolExpFld =
       expression <- fmap ColumnExpression (fromColumnInfo columnInfo)
       expressions <- traverse (lift . fromOpExpG expression) opExpGs
       pure (AndExpression expressions)
-    Ir.AVRelationship Rql.RelInfo {riMapping = mapping, riRTable = table} (Ir.RelationshipFilters tablePerms annBoolExp) -> do
+    Ir.AVRelationship Rql.RelInfo {riTarget = Rql.RelTargetNativeQuery _} _ ->
+      error "fromAnnBoolExpFld RelTargetNativeQuery"
+    Ir.AVRelationship Rql.RelInfo {riMapping = mapping, riTarget = Rql.RelTargetTable table} (Ir.RelationshipFilters tablePerms annBoolExp) -> do
       selectFrom <- lift (fromQualifiedTable table)
       foreignKeyConditions <- fromMapping selectFrom mapping
       whereExpression <-
@@ -1218,6 +1224,9 @@ fromObjectRelationSelectG ::
 -- We're not using existingJoins at the moment, which was used to
 -- avoid re-joining on the same table twice.
 fromObjectRelationSelectG _existingJoins annRelationSelectG = do
+  let tableFrom = case target of
+        Ir.FromTable t -> t
+        other -> error $ "fromObjectRelationSelectG: " <> show other
   selectFrom <- lift (fromQualifiedTable tableFrom)
   let entityAlias :: EntityAlias = fromAlias selectFrom
   fieldSources <-
@@ -1282,8 +1291,8 @@ fromObjectRelationSelectG _existingJoins annRelationSelectG = do
   where
     Ir.AnnObjectSelectG
       { _aosFields = fields :: Ir.AnnFieldsG 'BigQuery Void Expression,
-        _aosTableFrom = tableFrom :: TableName,
-        _aosTableFilter = tableFilter :: Ir.AnnBoolExp 'BigQuery Expression
+        _aosTarget = target :: Ir.SelectFromG 'BigQuery Expression,
+        _aosTargetFilter = tableFilter :: Ir.AnnBoolExp 'BigQuery Expression
       } = annObjectSelectG
     Ir.AnnRelationSelectG
       { _aarRelationshipName,

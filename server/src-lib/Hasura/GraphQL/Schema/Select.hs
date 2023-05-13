@@ -69,6 +69,7 @@ import Hasura.Name qualified as Name
 import Hasura.Prelude
 import Hasura.RQL.IR qualified as IR
 import Hasura.RQL.IR.BoolExp
+import Hasura.RQL.IR.Select.Lenses qualified as IR
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
@@ -497,7 +498,8 @@ columnToRelName column =
 defaultLogicalModelSelectionSet ::
   forall b r m n.
   ( MonadBuildSchema b r m n,
-    BackendTableSelectSchema b
+    BackendTableSelectSchema b,
+    BackendNativeQuerySelectSchema b
   ) =>
   InsOrdHashMap RelName (RelInfo b) ->
   LogicalModelInfo b ->
@@ -1468,7 +1470,10 @@ relationshipField table ri = runMaybeT do
   roleName <- retrieve scRole
   optimizePermissionFilters <- retrieve Options.soOptimizePermissionFilters
   tableInfo <- lift $ askTableInfo @b table
-  otherTableInfo <- lift $ askTableInfo $ riRTable ri
+  otherTableName <- case riTarget ri of
+    RelTargetNativeQuery _ -> error "relationshipField RelTargetNativeQuery"
+    RelTargetTable tn -> pure tn
+  otherTableInfo <- lift $ askTableInfo otherTableName
   tablePerms <- hoistMaybe $ tableSelectPermissions roleName tableInfo
   remotePerms <- hoistMaybe $ tableSelectPermissions roleName otherTableInfo
   relFieldName <- lift $ textToName $ relNameToTxt $ riName ri
@@ -1494,11 +1499,14 @@ relationshipField table ri = runMaybeT do
               -- "backwards" joining condition from the related table back to
               -- `table`.  If it is, then we can optimize the row-level permission
               -- filters by dropping them here.
-              if (riRTable remoteRI == table)
-                && (riMapping remoteRI `HashMap.isInverseOf` riMapping ri)
-                && (thisTablePerm == rfTargetTablePermissions)
-                then rfFilter
-                else x
+              let remoteTableName = case riTarget remoteRI of
+                    RelTargetTable tn -> Just tn
+                    _ -> Nothing
+               in if (remoteTableName == Just table)
+                    && (riMapping remoteRI `HashMap.isInverseOf` riMapping ri)
+                    && (thisTablePerm == rfTargetTablePermissions)
+                    then rfFilter
+                    else x
           _ -> x
       deduplicatePermissions' :: SelectExp b -> SelectExp b
       deduplicatePermissions' expr =
@@ -1563,7 +1571,7 @@ relationshipField table ri = runMaybeT do
               <&> \fields ->
                 IR.AFObjectRelation $
                   IR.AnnRelationSelectG (riName ri) (riMapping ri) $
-                    IR.AnnObjectSelectG fields (riRTable ri) $
+                    IR.AnnObjectSelectG fields (IR.FromTable otherTableName) $
                       deduplicatePermissions $
                         IR._tpFilter $
                           tablePermissionsInfo remotePerms
@@ -1608,23 +1616,44 @@ tablePermissionsInfo selectPermissions =
 logicalModelRelationshipField ::
   forall b r m n.
   ( BackendTableSelectSchema b,
+    BackendNativeQuerySelectSchema b,
     MonadBuildSchema b r m n
   ) =>
   LogicalModelReferenceType ->
   RelInfo b ->
   MaybeT (SchemaT r m) (FieldParser n (AnnotatedField b))
-logicalModelRelationshipField relationshipType ri = do
-  otherTableInfo <- lift $ askTableInfo $ riRTable ri
-  relFieldName <- lift $ textToName $ relNameToTxt $ riName ri
+logicalModelRelationshipField relationshipType ri =
   case (relationshipType, riType ri) of
-    (ObjectReference, ObjRel) -> do
-      throw500 "Object relationships on logical models are not implemented"
-    (ArrayReference, ArrRel) -> do
-      let arrayRelDesc = Just $ G.Description "An array relationship"
-      otherTableParser <- MaybeT $ selectTable otherTableInfo relFieldName arrayRelDesc
-      pure $
-        otherTableParser <&> \selectExp ->
-          IR.AFArrayRelation $
-            IR.ASSimple $
-              IR.AnnRelationSelectG (riName ri) (riMapping ri) selectExp
+    (ObjectReference, ObjRel) ->
+      case riTarget ri of
+        RelTargetNativeQuery nativeQueryName -> do
+          -- this should really be moved into Hasura.NativeQuery.Schema
+          --
+          nativeQueryInfo <- lift $ askNativeQueryInfo nativeQueryName
+          relFieldName <- lift $ textToName $ relNameToTxt $ riName ri
+
+          let objectRelDesc = Just $ G.Description "An object relationship"
+
+          nativeQueryParser <- MaybeT $ selectNativeQueryObject nativeQueryInfo relFieldName objectRelDesc
+
+          pure $
+            nativeQueryParser <&> \selectExp ->
+              IR.AFObjectRelation (IR.AnnRelationSelectG (riName ri) (riMapping ri) selectExp)
+        RelTargetTable _otherTableName -> do
+          throw500 "Object relationships from logical models to tables are not implemented"
+    (ArrayReference, ArrRel) ->
+      case riTarget ri of
+        RelTargetNativeQuery _ ->
+          throw500 "Array relationships from logical models to native queries are not implemented"
+        RelTargetTable otherTableName -> do
+          otherTableInfo <- lift $ askTableInfo otherTableName
+          relFieldName <- lift $ textToName $ relNameToTxt $ riName ri
+
+          let arrayRelDesc = Just $ G.Description "An array relationship"
+          otherTableParser <- MaybeT $ selectTable otherTableInfo relFieldName arrayRelDesc
+          pure $
+            otherTableParser <&> \selectExp ->
+              IR.AFArrayRelation $
+                IR.ASSimple $
+                  IR.AnnRelationSelectG (riName ri) (riMapping ri) selectExp
     _ -> hoistMaybe Nothing -- mismatch between relationship type expected on Logical Model, and in the source of data

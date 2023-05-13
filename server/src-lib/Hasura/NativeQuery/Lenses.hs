@@ -2,7 +2,7 @@
 
 module Hasura.NativeQuery.Lenses
   ( nqiRootFieldName,
-    nqiArrayRelationships,
+    nqiRelationships,
     nqiCode,
     nqiReturns,
     nqiArguments,

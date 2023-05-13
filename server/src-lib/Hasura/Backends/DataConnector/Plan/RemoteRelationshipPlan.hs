@@ -13,6 +13,7 @@ import Data.Aeson.Key qualified as K
 import Data.Aeson.KeyMap qualified as KM
 import Data.HashMap.Strict qualified as HashMap
 import Data.List.NonEmpty qualified as NE
+import Data.Set qualified as Set
 import Data.Text qualified as Text
 import Data.Text.Extended (toTxt)
 import Hasura.Backends.DataConnector.API qualified as API
@@ -75,12 +76,14 @@ mkRemoteRelationshipPlan sessionVariables _sourceConfig joinIds joinIdsSchema ar
       AnnObjectSelectG 'DataConnector Void (UnpreparedValue 'DataConnector) ->
       m API.QueryRequest
     translateAnnObjectSelectToQueryRequest foreachRowFilter AnnObjectSelectG {..} = do
-      let tableName = Witch.from _aosTableFrom
+      let tableName = case _aosTarget of
+            FromTable table -> Witch.from table
+            other -> error $ "translateAnnObjectSelectToQueryRequest: " <> show other
       ((fields, whereClause), (TableRelationships tableRelationships)) <- CPS.runWriterT $ do
         fields <- QueryPlan.translateAnnFields sessionVariables noPrefix tableName _aosFields
-        whereClause <- translateBoolExpToExpression sessionVariables tableName _aosTableFilter
+        whereClause <- translateBoolExpToExpression sessionVariables tableName _aosTargetFilter
         pure (fields, whereClause)
-      let apiTableRelationships = uncurry API.TableRelationships <$> HashMap.toList tableRelationships
+      let apiTableRelationships = Set.fromList $ uncurry API.TableRelationships <$> HashMap.toList tableRelationships
       pure $
         API.QueryRequest
           { _qrTable = tableName,

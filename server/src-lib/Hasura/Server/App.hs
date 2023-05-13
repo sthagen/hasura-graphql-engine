@@ -71,7 +71,6 @@ import Hasura.Logging qualified as L
 import Hasura.Metadata.Class
 import Hasura.Prelude hiding (get, put)
 import Hasura.QueryTags
-import Hasura.RQL.DDL.ApiLimit (MonadGetApiTimeLimit)
 import Hasura.RQL.DDL.EventTrigger (MonadEventLogCleanup)
 import Hasura.RQL.DDL.Schema
 import Hasura.RQL.DDL.Schema.Cache.Config
@@ -156,7 +155,7 @@ newtype Handler m a = Handler (ReaderT HandlerCtx (ExceptT QErr m) a)
       MonadMetadataApiAuthorization,
       MonadMetadataStorage,
       ProvidesNetwork,
-      MonadGetApiTimeLimit
+      MonadGetPolicies
     )
 
 instance MonadTrans Handler where
@@ -451,7 +450,7 @@ v1QueryHandler ::
     MonadQueryTags m,
     MonadEventLogCleanup m,
     ProvidesNetwork m,
-    MonadGetApiTimeLimit m,
+    MonadGetPolicies m,
     UserInfoM m
   ) =>
   ((RebuildableSchemaCache -> m (EncJSON, RebuildableSchemaCache)) -> m EncJSON) ->
@@ -485,7 +484,7 @@ v1MetadataHandler ::
     HasCacheStaticConfig m,
     HasFeatureFlagChecker m,
     ProvidesNetwork m,
-    MonadGetApiTimeLimit m,
+    MonadGetPolicies m,
     UserInfoM m
   ) =>
   ((RebuildableSchemaCache -> m (EncJSON, RebuildableSchemaCache)) -> m EncJSON) ->
@@ -727,6 +726,11 @@ configApiGetHandler appStateRef = do
     onlyWhenApiEnabled isConfigEnabled appStateRef $ do
       AppEnv {..} <- lift askAppEnv
       AppContext {..} <- liftIO $ getAppContext appStateRef
+      let (CheckFeatureFlag checkFeatureFlag) = appEnvCheckFeatureFlag
+      featureFlagSettings <-
+        traverse
+          (\ff -> (,) ff <$> liftIO (checkFeatureFlag ff))
+          (HashMap.elems (getFeatureFlags featureFlags))
       mkSpockAction appStateRef encodeQErr id $
         mkGetHandler $ do
           onlyAdmin
@@ -742,6 +746,7 @@ configApiGetHandler appStateRef = do
                   acExperimentalFeatures
                   acEnabledAPIs
                   acDefaultNamingConvention
+                  featureFlagSettings
           return (emptyHttpLogGraphQLInfo, JSONResp $ HttpResponse (encJFromJValue res) [])
 
 data HasuraApp = HasuraApp
@@ -777,7 +782,7 @@ mkWaiApp ::
     MonadQueryTags m,
     MonadEventLogCleanup m,
     ProvidesNetwork m,
-    MonadGetApiTimeLimit m
+    MonadGetPolicies m
   ) =>
   (AppStateRef impl -> Spock.SpockT m ()) ->
   AppStateRef impl ->
@@ -825,7 +830,7 @@ httpApp ::
     MonadQueryTags m,
     MonadEventLogCleanup m,
     ProvidesNetwork m,
-    MonadGetApiTimeLimit m
+    MonadGetPolicies m
   ) =>
   (AppStateRef impl -> Spock.SpockT m ()) ->
   AppStateRef impl ->

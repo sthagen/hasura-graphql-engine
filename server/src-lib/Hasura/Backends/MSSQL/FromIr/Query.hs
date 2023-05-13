@@ -719,6 +719,9 @@ fromObjectRelationSelectG ::
   IR.ObjectRelationSelectG 'MSSQL Void Expression ->
   ReaderT EntityAlias FromIr Join
 fromObjectRelationSelectG existingJoins annRelationSelectG = do
+  let tableFrom = case target of
+        IR.FromTable t -> t
+        other -> error $ "fromObjectRelationSelectG: " <> show other
   eitherAliasOrFrom <- lift (lookupTableFrom existingJoins tableFrom)
   let entityAlias :: EntityAlias = either id fromAlias eitherAliasOrFrom
   fieldSources <-
@@ -773,8 +776,8 @@ fromObjectRelationSelectG existingJoins annRelationSelectG = do
   where
     IR.AnnObjectSelectG
       { _aosFields = fields :: IR.AnnFieldsG 'MSSQL Void Expression,
-        _aosTableFrom = tableFrom :: TableName,
-        _aosTableFilter = tableFilter :: IR.AnnBoolExp 'MSSQL Expression
+        _aosTarget = target :: IR.SelectFromG 'MSSQL Expression,
+        _aosTargetFilter = tableFilter :: IR.AnnBoolExp 'MSSQL Expression
       } = annObjectSelectG
     IR.AnnRelationSelectG
       { _aarRelationshipName,
@@ -938,7 +941,9 @@ unfurlAnnotatedOrderByElement =
             -- text/ntext/image. See ToQuery for more explanation.
             _ -> Nothing
         )
-    IR.AOCObjectRelation IR.RelInfo {riMapping = mapping, riRTable = table} annBoolExp annOrderByElementG -> do
+    IR.AOCObjectRelation IR.RelInfo {riTarget = IR.RelTargetNativeQuery _} _annBoolExp _annOrderByElementG ->
+      error "unfurlAnnotatedOrderByElement RelTargetNativeQuery"
+    IR.AOCObjectRelation IR.RelInfo {riMapping = mapping, riTarget = IR.RelTargetTable table} annBoolExp annOrderByElementG -> do
       selectFrom <- lift (lift (fromQualifiedTable table))
       joinAliasEntity <-
         lift (lift (generateAlias (ForOrderAlias (tableNameText table))))
@@ -980,7 +985,9 @@ unfurlAnnotatedOrderByElement =
       local
         (const (EntityAlias joinAliasEntity))
         (unfurlAnnotatedOrderByElement annOrderByElementG)
-    IR.AOCArrayAggregation IR.RelInfo {riMapping = mapping, riRTable = tableName} annBoolExp annAggregateOrderBy -> do
+    IR.AOCArrayAggregation IR.RelInfo {riTarget = IR.RelTargetNativeQuery _} _annBoolExp _annAggregateOrderBy ->
+      error "unfurlAnnotatedOrderByElement RelTargetNativeQuery"
+    IR.AOCArrayAggregation IR.RelInfo {riMapping = mapping, riTarget = IR.RelTargetTable tableName} annBoolExp annAggregateOrderBy -> do
       selectFrom <- lift (lift (fromQualifiedTable tableName))
       let alias = aggFieldName
       joinAliasEntity <-
