@@ -6,6 +6,7 @@
 -- stored in the @hdb_catalog@ schema in Postgres.
 module Hasura.RQL.Types.SchemaCache.Build
   ( MetadataDependency (..),
+    recordInconsistencies,
     recordInconsistencyM,
     recordInconsistenciesM,
     recordDependencies,
@@ -14,13 +15,18 @@ module Hasura.RQL.Types.SchemaCache.Build
     withRecordInconsistencyM,
     withRecordInconsistencies,
     CacheRWM (..),
+    buildSchemaCacheWithOptions,
     BuildReason (..),
     CacheInvalidations (..),
+    ValidateNewSchemaCache,
+    ValidateNewSchemaCacheResult (..),
     MetadataM (..),
     MetadataT (..),
     runMetadataT,
     buildSchemaCacheWithInvalidations,
     buildSchemaCache,
+    tryBuildSchemaCache,
+    tryBuildSchemaCacheAndWarnOnFailingObjects,
     buildSchemaCacheFor,
     throwOnInconsistencies,
     withNewInconsistentObjsCheck,
@@ -49,6 +55,7 @@ import Hasura.GraphQL.Analyse
 import Hasura.GraphQL.Transport.HTTP.Protocol
 import Hasura.Prelude
 import Hasura.QueryTags
+import Hasura.RQL.DDL.Warnings
 import Hasura.RQL.Types.Allowlist (NormalizedQuery, unNormalizedQuery)
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Endpoint
@@ -184,8 +191,11 @@ withRecordInconsistencies = recordInconsistenciesWith recordInconsistencies
 -- operations for triggering a schema cache rebuild
 
 class (CacheRM m) => CacheRWM m where
-  buildSchemaCacheWithOptions :: BuildReason -> CacheInvalidations -> Metadata -> m ()
+  tryBuildSchemaCacheWithOptions :: BuildReason -> CacheInvalidations -> Metadata -> (ValidateNewSchemaCache a) -> m a
   setMetadataResourceVersionInSchemaCache :: MetadataResourceVersion -> m ()
+
+buildSchemaCacheWithOptions :: CacheRWM m => BuildReason -> CacheInvalidations -> Metadata -> m ()
+buildSchemaCacheWithOptions buildReason cacheInvalidation metadata = tryBuildSchemaCacheWithOptions buildReason cacheInvalidation metadata (\_ _ -> (KeepNewSchemaCache, ()))
 
 data BuildReason
   = -- | The build was triggered by an update this instance made to the catalog (in the
@@ -227,20 +237,32 @@ instance Semigroup CacheInvalidations where
 instance Monoid CacheInvalidations where
   mempty = CacheInvalidations False mempty mempty mempty
 
+-- | Function that validates the new schema cache (usually involves checking for any metadata inconsistencies)
+-- and can decide whether or not to keep or discard the new schema cache ('ValidateNewSchemaCacheResult'). It
+-- can also return some arbitrary extra information that will be returned from 'tryBuildSchemaCacheWithOptions'.
+--
+-- First parameter is the old schema cache, the second is the new schema cache.
+type ValidateNewSchemaCache a = SchemaCache -> SchemaCache -> (ValidateNewSchemaCacheResult, a)
+
+data ValidateNewSchemaCacheResult
+  = KeepNewSchemaCache
+  | DiscardNewSchemaCache
+  deriving stock (Eq, Show, Ord)
+
 instance (CacheRWM m) => CacheRWM (ReaderT r m) where
-  buildSchemaCacheWithOptions a b c = lift $ buildSchemaCacheWithOptions a b c
+  tryBuildSchemaCacheWithOptions a b c d = lift $ tryBuildSchemaCacheWithOptions a b c d
   setMetadataResourceVersionInSchemaCache = lift . setMetadataResourceVersionInSchemaCache
 
 instance (CacheRWM m) => CacheRWM (StateT s m) where
-  buildSchemaCacheWithOptions a b c = lift $ buildSchemaCacheWithOptions a b c
+  tryBuildSchemaCacheWithOptions a b c d = lift $ tryBuildSchemaCacheWithOptions a b c d
   setMetadataResourceVersionInSchemaCache = lift . setMetadataResourceVersionInSchemaCache
 
 instance (CacheRWM m) => CacheRWM (TraceT m) where
-  buildSchemaCacheWithOptions a b c = lift $ buildSchemaCacheWithOptions a b c
+  tryBuildSchemaCacheWithOptions a b c d = lift $ tryBuildSchemaCacheWithOptions a b c d
   setMetadataResourceVersionInSchemaCache = lift . setMetadataResourceVersionInSchemaCache
 
 instance (CacheRWM m) => CacheRWM (PG.TxET QErr m) where
-  buildSchemaCacheWithOptions a b c = lift $ buildSchemaCacheWithOptions a b c
+  tryBuildSchemaCacheWithOptions a b c d = lift $ tryBuildSchemaCacheWithOptions a b c d
   setMetadataResourceVersionInSchemaCache = lift . setMetadataResourceVersionInSchemaCache
 
 newtype MetadataT m a = MetadataT {unMetadataT :: StateT Metadata m a}
@@ -292,6 +314,72 @@ buildSchemaCacheWithInvalidations cacheInvalidations MetadataModifier {..} = do
 buildSchemaCache :: (MetadataM m, CacheRWM m) => MetadataModifier -> m ()
 buildSchemaCache = buildSchemaCacheWithInvalidations mempty
 
+-- | Rebuilds the schema cache after modifying metadata and returns any _new_ metadata inconsistencies.
+-- If there are any new inconsistencies, the changes to the metadata and the schema cache are abandoned.
+tryBuildSchemaCache ::
+  (CacheRWM m, MetadataM m) =>
+  MetadataModifier ->
+  m (HashMap MetadataObjId (NonEmpty InconsistentMetadata))
+tryBuildSchemaCache MetadataModifier {..} = do
+  modifiedMetadata <- runMetadataModifier <$> getMetadata
+  newInconsistentObjects <- tryBuildSchemaCacheWithOptions (CatalogUpdate mempty) mempty modifiedMetadata validateNewSchemaCache
+  when (newInconsistentObjects == mempty) $
+    putMetadata modifiedMetadata
+  pure $ newInconsistentObjects
+  where
+    validateNewSchemaCache :: SchemaCache -> SchemaCache -> (ValidateNewSchemaCacheResult, HashMap MetadataObjId (NonEmpty InconsistentMetadata))
+    validateNewSchemaCache oldSchemaCache newSchemaCache =
+      let diffInconsistentObjects = HashMap.difference `on` (groupInconsistentMetadataById . scInconsistentObjs)
+          newInconsistentObjects = newSchemaCache `diffInconsistentObjects` oldSchemaCache
+       in if newInconsistentObjects == mempty
+            then (KeepNewSchemaCache, newInconsistentObjects)
+            else (DiscardNewSchemaCache, newInconsistentObjects)
+
+-- | Tries to modify the metadata for all the specified metadata objects. If the modification fails,
+-- any objects that directly caused a new metadata inconsistency are removed and the modification
+-- is attempted again without those failing objects. The failing objects are raised as warnings
+-- in 'MonadWarnings' and the successful objects are returned. If there are metadata inconsistencies
+-- that are not directly related to the specified metadata objects, an error is thrown.
+tryBuildSchemaCacheAndWarnOnFailingObjects ::
+  forall m a.
+  (CacheRWM m, MonadWarnings m, QErrM m, MetadataM m) =>
+  -- | Function makes a metadata modifier for a metadata object
+  (a -> m MetadataModifier) ->
+  -- | Warning code to use for failed metadata objects
+  WarningCode ->
+  -- | Map of metadata objects to apply to metadata using the 'mkMetadataModifier' function
+  HashMap MetadataObjId a ->
+  -- | Successfully applied metadata objects
+  m (HashMap MetadataObjId a)
+tryBuildSchemaCacheAndWarnOnFailingObjects mkMetadataModifier warningCode metadataObjects = do
+  metadataModifier <- fmap mconcat . traverse mkMetadataModifier $ HashMap.elems metadataObjects
+  metadataInconsistencies <- tryBuildSchemaCache metadataModifier
+
+  let inconsistentObjects = HashMap.intersectionWith (,) metadataInconsistencies metadataObjects
+  let successfulObjects = HashMap.difference metadataObjects inconsistentObjects
+
+  finalMetadataInconsistencies <-
+    if not $ null inconsistentObjects
+      then do
+        -- Raise warnings for objects that failed to track
+        for_ (HashMap.toList inconsistentObjects) $ \(metadataObjId, (inconsistencies, _)) -> do
+          let errorReasons = commaSeparated $ imReason <$> inconsistencies
+          warn $ MetadataWarning warningCode metadataObjId errorReasons
+
+        -- Try again, this time only with objects that were previously successful
+        withoutFailedObjectsMetadataModifier <- fmap mconcat . traverse mkMetadataModifier $ HashMap.elems successfulObjects
+        tryBuildSchemaCache withoutFailedObjectsMetadataModifier
+      else -- Otherwise just look at the rest of the errors, if any
+        pure metadataInconsistencies
+
+  unless (null finalMetadataInconsistencies) $
+    throwError
+      (err400 Unexpected "cannot continue due to newly found inconsistent metadata")
+        { qeInternal = Just $ ExtraInternal $ toJSON (L.nub . concatMap toList $ HashMap.elems finalMetadataInconsistencies)
+        }
+
+  pure successfulObjects
+
 -- | Rebuilds the schema cache after modifying metadata. If an object with the given object id became newly inconsistent,
 -- raises an error about it specifically. Otherwise, raises a generic metadata inconsistency error.
 buildSchemaCacheFor ::
@@ -300,12 +388,7 @@ buildSchemaCacheFor ::
   MetadataModifier ->
   m ()
 buildSchemaCacheFor objectId metadataModifier = do
-  oldSchemaCache <- askSchemaCache
-  buildSchemaCache metadataModifier
-  newSchemaCache <- askSchemaCache
-
-  let diffInconsistentObjects = HashMap.difference `on` (groupInconsistentMetadataById . scInconsistentObjs)
-      newInconsistentObjects = newSchemaCache `diffInconsistentObjects` oldSchemaCache
+  newInconsistentObjects <- tryBuildSchemaCache metadataModifier
 
   for_ (HashMap.lookup objectId newInconsistentObjects) $ \matchingObjects -> do
     let reasons = commaSeparated $ imReason <$> matchingObjects

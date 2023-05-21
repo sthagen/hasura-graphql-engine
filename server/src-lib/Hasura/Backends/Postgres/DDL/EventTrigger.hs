@@ -64,13 +64,13 @@ import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.Eventing
 import Hasura.RQL.Types.ScheduledTrigger (formatTime')
 import Hasura.RQL.Types.Source
-import Hasura.RQL.Types.Table (PrimaryKey)
 import Hasura.SQL.Types
 import Hasura.Server.Migrate.Internal
 import Hasura.Server.Migrate.LatestVersion
 import Hasura.Server.Migrate.Version
 import Hasura.Server.Types
 import Hasura.Session
+import Hasura.Table.Cache (PrimaryKey)
 import Hasura.Tracing qualified as Tracing
 import Text.Builder qualified as TB
 import Text.Shakespeare.Text qualified as ST
@@ -305,7 +305,7 @@ updateColumnInEventTrigger table oCol nCol refTable = rewriteEventTriggerConf
       if table == refTable && oCol == col then nCol else col
 
 unlockEventsInSource ::
-  MonadIO m =>
+  (MonadIO m) =>
   SourceConfig ('Postgres pgKind) ->
   NE.NESet EventId ->
   m (Either QErr Int)
@@ -1191,7 +1191,7 @@ fetchEventLogsTxE GetEventLogs {..} = do
         <$> PG.withQE
           defaultTxErrorHandler
           [PG.sql|
-            SELECT *
+            SELECT id, schema_name, table_name, trigger_name, payload, delivered, error, tries, created_at, locked, next_retry_at, archived
               FROM hdb_catalog.event_log
               WHERE trigger_name = $1 
               AND delivered=false AND error=false AND archived=false ORDER BY created_at DESC LIMIT $2 OFFSET $3;
@@ -1203,7 +1203,7 @@ fetchEventLogsTxE GetEventLogs {..} = do
         <$> PG.withQE
           defaultTxErrorHandler
           [PG.sql|
-            SELECT *
+            SELECT id, schema_name, table_name, trigger_name, payload, delivered, error, tries, created_at, locked, next_retry_at, archived
               FROM hdb_catalog.event_log
               WHERE trigger_name = $1 
               AND (delivered=true OR error=true) AND archived=false ORDER BY created_at DESC LIMIT $2 OFFSET $3;
@@ -1215,7 +1215,7 @@ fetchEventLogsTxE GetEventLogs {..} = do
         <$> PG.withQE
           defaultTxErrorHandler
           [PG.sql|
-            SELECT *
+            SELECT id, schema_name, table_name, trigger_name, payload, delivered, error, tries, created_at, locked, next_retry_at, archived
               FROM hdb_catalog.event_log
               WHERE trigger_name = $1 
               ORDER BY created_at DESC LIMIT $2 OFFSET $3;
@@ -1243,7 +1243,7 @@ fetchEventInvocationLogsTxE GetEventInvocations {..} = do
     <$> PG.withQE
       defaultTxErrorHandler
       [PG.sql|
-        SELECT *
+        SELECT id, trigger_name, event_id, status, request, response, created_at
           FROM hdb_catalog.event_invocation_logs
           WHERE trigger_name = $1 
           ORDER BY created_at DESC LIMIT $2 OFFSET $3;
@@ -1281,7 +1281,7 @@ fetchEventByIdTxE GetEventById {..} = do
       <$> PG.withQE
         defaultTxErrorHandler
         [PG.sql|
-          SELECT *
+          SELECT id, schema_name, table_name, trigger_name, payload, delivered, error, tries, created_at, locked, next_retry_at, archived
             FROM hdb_catalog.event_log
             WHERE id = $1;
           |]
@@ -1295,7 +1295,7 @@ fetchEventByIdTxE GetEventById {..} = do
           <$> PG.withQE
             defaultTxErrorHandler
             [PG.sql|
-              SELECT *
+              SELECT id, trigger_name, event_id, status, request, response, created_at
                 FROM hdb_catalog.event_invocation_logs
                 WHERE event_id = $1
                 ORDER BY created_at DESC LIMIT $2 OFFSET $3;

@@ -33,9 +33,22 @@ import Hasura.RQL.Types.Relationships.ToSource
 import Hasura.RQL.Types.Roles (RoleName)
 import Hasura.RQL.Types.SchemaCache
 import Hasura.RQL.Types.SchemaCacheTypes
-import Hasura.RQL.Types.Table
 import Hasura.RemoteSchema.Metadata
 import Hasura.SQL.AnyBackend qualified as AB
+import Hasura.Table.Cache
+import Hasura.Table.Metadata
+  ( Relationships,
+    TableMetadata (..),
+    tmArrayRelationships,
+    tmConfiguration,
+    tmDeletePermissions,
+    tmEventTriggers,
+    tmInsertPermissions,
+    tmObjectRelationships,
+    tmRemoteRelationships,
+    tmSelectPermissions,
+    tmUpdatePermissions,
+  )
 import Language.GraphQL.Draft.Syntax qualified as G
 
 data RenameItem (b :: BackendType) a = RenameItem
@@ -56,7 +69,7 @@ data Rename b
   = RTable (RenameTable b)
   | RField (RenameField b)
 
-otherDeps :: QErrM m => Text -> SchemaObjId -> m ()
+otherDeps :: (QErrM m) => Text -> SchemaObjId -> m ()
 otherDeps errMsg d =
   throw500 $
     "unexpected dependency "
@@ -280,11 +293,9 @@ updateRelDefs source qt rn renameTable = do
     updateObjRelDef (oldQT, newQT) =
       rdUsing %~ \case
         RUFKeyOn fk -> RUFKeyOn fk
-        RUManual (RelManualTableConfig (RelManualTableConfigC origQT (RelManualCommon rmCols rmIO))) ->
+        RUManual (RelManualTableConfig origQT (RelManualCommon rmCols rmIO)) ->
           let updQT = bool origQT newQT $ oldQT == origQT
-           in RUManual $ RelManualTableConfig (RelManualTableConfigC updQT (RelManualCommon rmCols rmIO))
-        RUManual (RelManualNativeQueryConfig (RelManualNativeQueryConfigC nqn (RelManualCommon rmCols rmIO))) ->
-          RUManual (RelManualNativeQueryConfig (RelManualNativeQueryConfigC nqn (RelManualCommon rmCols rmIO)))
+           in RUManual $ RelManualTableConfig updQT (RelManualCommon rmCols rmIO)
 
     updateArrRelDef :: RenameTable b -> ArrRelDef b -> ArrRelDef b
     updateArrRelDef (oldQT, newQT) =
@@ -292,11 +303,9 @@ updateRelDefs source qt rn renameTable = do
         RUFKeyOn (ArrRelUsingFKeyOn origQT c) ->
           let updQT = getUpdQT origQT
            in RUFKeyOn $ ArrRelUsingFKeyOn updQT c
-        RUManual (RelManualTableConfig (RelManualTableConfigC origQT (RelManualCommon rmCols rmIO))) ->
+        RUManual (RelManualTableConfig origQT (RelManualCommon rmCols rmIO)) ->
           let updQT = getUpdQT origQT
-           in RUManual $ RelManualTableConfig (RelManualTableConfigC updQT (RelManualCommon rmCols rmIO))
-        RUManual (RelManualNativeQueryConfig (RelManualNativeQueryConfigC nqn (RelManualCommon rmCols rmIO))) ->
-          RUManual (RelManualNativeQueryConfig (RelManualNativeQueryConfigC nqn (RelManualCommon rmCols rmIO)))
+           in RUManual $ RelManualTableConfig updQT (RelManualCommon rmCols rmIO)
       where
         getUpdQT origQT = bool origQT newQT $ oldQT == origQT
 
@@ -666,7 +675,7 @@ updateColInObjRel fromQT toQT rnCol = \case
     RUManual $ updateRelManualConfig fromQT toQT rnCol manConfig
 
 updateRelChoice ::
-  Backend b =>
+  (Backend b) =>
   TableName b ->
   TableName b ->
   RenameCol b ->
@@ -694,8 +703,8 @@ type ColMap b = HashMap (Column b) (Column b)
 
 getNewCol ::
   forall b f.
-  Backend b =>
-  Functor f =>
+  (Backend b) =>
+  (Functor f) =>
   RenameCol b ->
   TableName b ->
   f (Column b) ->
@@ -717,14 +726,10 @@ updateRelManualConfig ::
   TableName b ->
   TableName b ->
   RenameCol b ->
-  RelManualConfig b ->
-  RelManualConfig b
-updateRelManualConfig fromQT toQT rnCol manConfig =
-  case manConfig of
-    (RelManualTableConfig (RelManualTableConfigC tn (RelManualCommon colMap io))) ->
-      RelManualTableConfig (RelManualTableConfigC tn (RelManualCommon (updateColMap fromQT toQT rnCol colMap) io))
-    (RelManualNativeQueryConfig (RelManualNativeQueryConfigC nqn (RelManualCommon colMap io))) ->
-      RelManualNativeQueryConfig (RelManualNativeQueryConfigC nqn (RelManualCommon (updateColMap fromQT toQT rnCol colMap) io))
+  RelManualTableConfig b ->
+  RelManualTableConfig b
+updateRelManualConfig fromQT toQT rnCol (RelManualTableConfig tn (RelManualCommon colMap io)) =
+  RelManualTableConfig tn (RelManualCommon (updateColMap fromQT toQT rnCol colMap) io)
 
 updateColMap ::
   forall b.

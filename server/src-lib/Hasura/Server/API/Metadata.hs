@@ -211,6 +211,7 @@ queryModifiesMetadata = \case
       RMGetSourceKindCapabilities _ -> False
       RMListSourceKinds _ -> False
       RMGetSourceTables _ -> False
+      RMGetSourceTrackables _ -> False
       RMGetTableInfo _ -> False
       RMTestConnectionTemplate _ -> False
       RMSuggestRelationships _ -> False
@@ -234,7 +235,9 @@ queryModifiesMetadata = \case
       RMRenameSource _ -> True
       RMUpdateSource _ -> True
       RMTrackTable _ -> True
+      RMTrackTables _ -> True
       RMUntrackTable _ -> True
+      RMUntrackTables _ -> True
       RMSetTableCustomization _ -> True
       RMSetApolloFederationConfig _ -> True
       RMPgSetTableIsEnum _ -> True
@@ -382,9 +385,12 @@ runMetadataQueryV1M env checkFeatureFlag remoteSchemaPerms currentResourceVersio
   RMListSourceKinds q -> runListSourceKinds q
   RMGetSourceKindCapabilities q -> runGetSourceKindCapabilities q
   RMGetSourceTables q -> dispatchMetadata runGetSourceTables q
-  RMGetTableInfo q -> runGetTableInfo q
+  RMGetSourceTrackables q -> dispatchMetadata runGetSourceTrackables q
+  RMGetTableInfo q -> dispatchMetadata runGetTableInfo q
   RMTrackTable q -> dispatchMetadata runTrackTableV2Q q
+  RMTrackTables q -> dispatchMetadata runTrackTablesQ q
   RMUntrackTable q -> dispatchMetadataAndEventTrigger runUntrackTableQ q
+  RMUntrackTables q -> dispatchMetadataAndEventTrigger runUntrackTablesQ q
   RMSetFunctionCustomization q -> dispatchMetadata Functions.runSetFunctionCustomization q
   RMSetTableCustomization q -> dispatchMetadata runSetTableCustomization q
   RMSetApolloFederationConfig q -> dispatchMetadata runSetApolloFederationConfig q
@@ -525,6 +531,9 @@ runMetadataQueryV1M env checkFeatureFlag remoteSchemaPerms currentResourceVersio
     results <-
       commands & indexedMapM \command ->
         runMetadataQueryM env checkFeatureFlag remoteSchemaPerms currentResourceVersion command
+          -- Because changes to the metadata are maintained in MetadataT, which is a state monad
+          -- that is layered above the QErr error monad, this catchError causes any changes to
+          -- the metadata made during running the failed API function to be rolled back
           `catchError` \qerr -> pure (encJFromJValue qerr)
 
     pure (encJFromList results)

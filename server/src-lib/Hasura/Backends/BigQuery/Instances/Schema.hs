@@ -21,7 +21,6 @@ import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.BoolExp
 import Hasura.GraphQL.Schema.Build qualified as GSB
 import Hasura.GraphQL.Schema.Common
-import Hasura.GraphQL.Schema.NamingCase
 import Hasura.GraphQL.Schema.Parser
   ( FieldParser,
     InputFieldsParser,
@@ -35,6 +34,7 @@ import Hasura.GraphQL.Schema.Table
 import Hasura.GraphQL.Schema.Typename
 import Hasura.Name qualified as Name
 import Hasura.NativeQuery.Schema (defaultBuildNativeQueryRootFields)
+import Hasura.NativeQuery.Schema qualified as NativeQueries
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.IR.Select qualified as IR
@@ -44,10 +44,11 @@ import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.ComputedField
+import Hasura.RQL.Types.NamingCase
 import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization
-import Hasura.RQL.Types.Table
+import Hasura.Table.Cache
 import Language.GraphQL.Draft.Syntax qualified as G
 
 ----------------------------------------------------------------
@@ -88,7 +89,8 @@ instance BackendTableSelectSchema 'BigQuery where
   selectTableAggregate = defaultSelectTableAggregate
   tableSelectionSet = defaultTableSelectionSet
 
-instance BackendNativeQuerySelectSchema 'BigQuery
+instance BackendNativeQuerySelectSchema 'BigQuery where
+  selectNativeQuery = NativeQueries.defaultSelectNativeQuery
 
 instance BackendLogicalModelSelectSchema 'BigQuery where
   logicalModelArguments = defaultLogicalModelArgs
@@ -98,7 +100,7 @@ instance BackendLogicalModelSelectSchema 'BigQuery where
 -- Individual components
 
 bqColumnParser ::
-  MonadBuildSchema 'BigQuery r m n =>
+  (MonadBuildSchema 'BigQuery r m n) =>
   ColumnType 'BigQuery ->
   G.Nullability ->
   SchemaT r m (Parser 'Both n (IR.ValueWithOrigin (ColumnValue 'BigQuery)))
@@ -165,12 +167,12 @@ bqColumnParser columnType nullability = case columnType of
                 P.valueToJSON (P.toGraphQLType schemaType)
                   >=> either (P.parseErrorWith P.ParseFailed . toErrorMessage . qeError) pure . runAesonParser J.parseJSON
             }
-    stringBased :: MonadParse m => G.Name -> Parser 'Both m Text
+    stringBased :: (MonadParse m) => G.Name -> Parser 'Both m Text
     stringBased scalarName =
       P.string {P.pType = P.TNamed P.NonNullable $ P.Definition scalarName Nothing Nothing [] P.TIScalar}
 
 bqEnumParser ::
-  MonadBuildSchema 'BigQuery r m n =>
+  (MonadBuildSchema 'BigQuery r m n) =>
   TableName 'BigQuery ->
   NonEmpty (EnumValue, EnumValueInfo) ->
   Maybe G.Name ->
@@ -187,7 +189,7 @@ bqEnumParser tableName enumValues customTableName nullability = do
       )
 
 bqPossiblyNullable ::
-  MonadParse m =>
+  (MonadParse m) =>
   G.Nullability ->
   Parser 'Both m (ScalarValue 'BigQuery) ->
   Parser 'Both m (ScalarValue 'BigQuery)
@@ -343,7 +345,7 @@ bqComparisonExps = P.memoize 'comparisonExps $ \columnType -> do
             ]
 
 bqCountTypeInput ::
-  MonadParse n =>
+  (MonadParse n) =>
   Maybe (Parser 'Both n (Column 'BigQuery)) ->
   InputFieldsParser n (IR.CountDistinct -> CountType 'BigQuery)
 bqCountTypeInput = \case
@@ -361,7 +363,7 @@ bqCountTypeInput = \case
 
 geographyWithinDistanceInput ::
   forall m n r.
-  MonadBuildSchema 'BigQuery r m n =>
+  (MonadBuildSchema 'BigQuery r m n) =>
   SchemaT r m (Parser 'Input n (DWithinGeogOp (IR.UnpreparedValue 'BigQuery)))
 geographyWithinDistanceInput = do
   geographyParser <- columnParser (ColumnScalar BigQuery.GeographyScalarType) (G.Nullability False)
@@ -378,7 +380,7 @@ geographyWithinDistanceInput = do
 -- | Computed field parser.
 bqComputedField ::
   forall r m n.
-  MonadBuildSchema 'BigQuery r m n =>
+  (MonadBuildSchema 'BigQuery r m n) =>
   ComputedFieldInfo 'BigQuery ->
   TableName 'BigQuery ->
   TableInfo 'BigQuery ->

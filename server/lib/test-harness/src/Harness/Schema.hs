@@ -19,7 +19,11 @@ module Harness.Schema
     StoredProcedureColumn (..),
     resolveTableSchema,
     trackTable,
+    trackTables,
+    trackTablesWithStatus,
     untrackTable,
+    untrackTables,
+    untrackTablesWithStatus,
     mkTableField,
     trackObjectRelationships,
     trackArrayRelationships,
@@ -68,6 +72,7 @@ import Harness.Test.BackendType (BackendTypeConfig)
 import Harness.Test.BackendType qualified as BackendType
 import Harness.TestEnvironment (TestEnvironment (..), getBackendTypeConfig, getSchemaName)
 import Hasura.Prelude
+import Hasura.RQL.DDL.Warnings (AllowWarnings)
 
 -- | we assume we are using the default schema unless a table tells us
 -- otherwise
@@ -78,27 +83,30 @@ resolveTableSchema testEnv tbl =
     Nothing -> getSchemaName testEnv
     Just schemaName -> schemaName
 
--- | Native Backend track table
---
--- Data Connector backends expect an @[String]@ for the table name.
+-- | track_table API call
 trackTable :: HasCallStack => String -> Table -> TestEnvironment -> IO ()
-trackTable source tbl@(Table {tableName}) testEnvironment = do
+trackTable source tbl testEnvironment = do
   let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
       backendType = BackendType.backendTypeString backendTypeMetadata
-      schema = resolveTableSchema testEnvironment tbl
       requestType = backendType <> "_track_table"
-      column_config = columnsConfig (tableColumns tbl)
+      trackTableArgs = mkTrackTableV2ApiObject testEnvironment backendTypeMetadata source tbl
   GraphqlEngine.postMetadata_
     testEnvironment
     [yaml|
       type: *requestType
-      args:
-        source: *source
-        table:
-          schema: *schema
-          name: *tableName
-        configuration:
-          column_config: *column_config
+      args: *trackTableArgs
+    |]
+
+mkTrackTableV2ApiObject :: HasCallStack => TestEnvironment -> BackendTypeConfig -> String -> Table -> Value
+mkTrackTableV2ApiObject testEnvironment backendTypeConfig source tbl@(Table {tableName}) = do
+  let schema = resolveTableSchema testEnvironment tbl
+      tableField = mkTableField backendTypeConfig schema tableName
+      column_config = columnsConfig (tableColumns tbl)
+  [yaml|
+    source: *source
+    table: *tableField
+    configuration:
+      column_config: *column_config
     |]
   where
     columnsConfig :: [Column] -> Value
@@ -114,25 +122,95 @@ trackTable source tbl@(Table {tableName}) testEnvironment = do
         |]
         )
 
--- | Native Backend track table
---
--- Data Connector backends expect an @[String]@ for the table name.
-untrackTable :: HasCallStack => String -> Table -> TestEnvironment -> IO ()
-untrackTable source Table {tableName} testEnvironment = do
+-- | track_tables API call
+trackTables :: HasCallStack => String -> [Table] -> TestEnvironment -> IO Value
+trackTables source tables testEnvironment = do
   let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
       backendType = BackendType.backendTypeString backendTypeMetadata
-      schema = getSchemaName testEnvironment
+      requestType = backendType <> "_track_tables"
+      trackTablesArgs = mkTrackTableV2ApiObject testEnvironment backendTypeMetadata source <$> tables
+  GraphqlEngine.postMetadata
+    testEnvironment
+    [yaml|
+      type: *requestType
+      args:
+        tables: *trackTablesArgs
+    |]
+
+-- | track_tables API call, with the allow_warnings setting and expecting a specific http response status code
+trackTablesWithStatus :: HasCallStack => String -> [Table] -> AllowWarnings -> Int -> TestEnvironment -> IO Value
+trackTablesWithStatus source tables allowWarnings expectedHttpStatus testEnvironment = do
+  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+      backendType = BackendType.backendTypeString backendTypeMetadata
+      requestType = backendType <> "_track_tables"
+      trackTablesArgs = mkTrackTableV2ApiObject testEnvironment backendTypeMetadata source <$> tables
+  GraphqlEngine.postMetadataWithStatus
+    expectedHttpStatus
+    testEnvironment
+    [yaml|
+      type: *requestType
+      args:
+        tables: *trackTablesArgs
+        allow_warnings: *allowWarnings
+    |]
+
+-- | untrack_table API call
+untrackTable :: HasCallStack => String -> Table -> TestEnvironment -> IO ()
+untrackTable source tbl testEnvironment = do
+  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+      backendType = BackendType.backendTypeString backendTypeMetadata
       requestType = backendType <> "_untrack_table"
+      untrackTableArgs = mkUntrackTableApiObject testEnvironment backendTypeMetadata source tbl False
   GraphqlEngine.postMetadata_
     testEnvironment
     [yaml|
-type: *requestType
-args:
-  source: *source
-  table:
-    schema: *schema
-    name: *tableName
-|]
+      type: *requestType
+      args: *untrackTableArgs
+    |]
+
+mkUntrackTableApiObject :: HasCallStack => TestEnvironment -> BackendTypeConfig -> String -> Table -> Bool -> Value
+mkUntrackTableApiObject testEnvironment backendTypeConfig source tbl@(Table {tableName}) cascade = do
+  let schema = resolveTableSchema testEnvironment tbl
+      tableField = mkTableField backendTypeConfig schema tableName
+   in [yaml|
+        source: *source
+        table: *tableField
+        cascade: *cascade
+      |]
+
+-- | untrack_tables API call
+untrackTables :: HasCallStack => String -> [(Table, Bool)] -> TestEnvironment -> IO Value
+untrackTables source tablesWithCascade testEnvironment = do
+  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+      backendType = BackendType.backendTypeString backendTypeMetadata
+      requestType = backendType <> "_untrack_tables"
+      untrackTablesArgs = uncurry (mkUntrackTableApiObject testEnvironment backendTypeMetadata source) <$> tablesWithCascade
+  GraphqlEngine.postMetadata
+    testEnvironment
+    [yaml|
+      type: *requestType
+      args:
+        source: *source
+        tables: *untrackTablesArgs
+    |]
+
+-- | untrack_tables API call, with the allow_warnings setting and expecting a specific http response status code
+untrackTablesWithStatus :: HasCallStack => String -> [(Table, Bool)] -> AllowWarnings -> Int -> TestEnvironment -> IO Value
+untrackTablesWithStatus source tablesWithCascade allowWarnings expectedHttpStatus testEnvironment = do
+  let backendTypeMetadata = fromMaybe (error "Unknown backend") $ getBackendTypeConfig testEnvironment
+      backendType = BackendType.backendTypeString backendTypeMetadata
+      requestType = backendType <> "_untrack_tables"
+      untrackTablesArgs = uncurry (mkUntrackTableApiObject testEnvironment backendTypeMetadata source) <$> tablesWithCascade
+  GraphqlEngine.postMetadataWithStatus
+    expectedHttpStatus
+    testEnvironment
+    [yaml|
+      type: *requestType
+      args:
+        source: *source
+        tables: *untrackTablesArgs
+        allow_warnings: *allowWarnings
+    |]
 
 trackFunction :: HasCallStack => String -> String -> TestEnvironment -> IO ()
 trackFunction source functionName testEnvironment = do

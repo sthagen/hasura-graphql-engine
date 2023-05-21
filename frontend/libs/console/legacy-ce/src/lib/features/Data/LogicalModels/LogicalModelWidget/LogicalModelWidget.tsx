@@ -1,28 +1,30 @@
-import { useConsoleForm } from '../../../../new-components/Form';
-import { IndicatorCard } from '../../../../new-components/IndicatorCard';
-import { Feature } from '../../../DataSource';
-import { MetadataSelectors, useMetadata } from '../../../hasura-metadata-api';
-import { useSupportedDataTypes } from '../../hooks/useSupportedDataTypes';
-import {
-  AddLogicalModelFormData,
-  addLogicalModelValidationSchema,
-} from './validationSchema';
-import { Dialog } from '../../../../new-components/Dialog';
-import { LogicalModelFormInputs } from './parts/LogicalModelFormInputs';
 import Skeleton from 'react-loading-skeleton';
 import { CreateBooleanMap } from '../../../../components/Common/utils/tsUtils';
+import { Driver, drivers } from '../../../../dataSources';
 import { Button } from '../../../../new-components/Button';
-import { useTrackLogicalModel } from '../../hooks/useTrackLogicalModel';
+import { Dialog } from '../../../../new-components/Dialog';
+import { useConsoleForm } from '../../../../new-components/Form';
+import { IndicatorCard } from '../../../../new-components/IndicatorCard';
 import { hasuraToast } from '../../../../new-components/Toasts';
+import { Feature } from '../../../DataSource';
+import { useMetadata } from '../../../hasura-metadata-api';
+import { DisplayToastErrorMessage } from '../../components/DisplayErrorMessage';
+import { useSupportedDataTypes } from '../../hooks/useSupportedDataTypes';
+import { useTrackLogicalModel } from '../../hooks/useTrackLogicalModel';
 import {
   LOGICAL_MODEL_CREATE_ERROR,
   LOGICAL_MODEL_CREATE_SUCCESS,
 } from '../constants';
-import { DisplayToastErrorMessage } from '../../components/DisplayErrorMessage';
+import { LogicalModelFormInputs } from './parts/LogicalModelFormInputs';
+import {
+  AddLogicalModelFormData,
+  addLogicalModelValidationSchema,
+} from './validationSchema';
 
 export type AddLogicalModelDialogProps = {
   defaultValues?: AddLogicalModelFormData;
   onCancel?: () => void;
+  onSubmit?: () => void;
   disabled?: CreateBooleanMap<AddLogicalModelFormData>;
   asDialog?: boolean;
 };
@@ -45,6 +47,8 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
     },
   });
 
+  const selectedDataSource = watch('dataSourceName');
+
   /**
    * Options for the data sources
    */
@@ -53,10 +57,12 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
     error: sourceOptionError,
     isLoading: isMetadataLoading,
   } = useMetadata(m =>
-    MetadataSelectors.getSources()(m).map(source => ({
-      value: source.name,
-      label: source.name,
-    }))
+    m.metadata.sources
+      .filter(s => drivers.includes(s.kind as Driver))
+      .map(source => ({
+        value: source.name,
+        label: source.name,
+      }))
   );
 
   /**
@@ -67,13 +73,13 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
     error: typeOptionError,
     isLoading: isIntrospectionLoading,
   } = useSupportedDataTypes({
-    dataSourceName: watch('dataSourceName'),
+    dataSourceName: selectedDataSource,
     select: values => {
       if (values === Feature.NotImplemented) return [];
       return Object.values(values).flat();
     },
     options: {
-      enabled: !!watch('dataSourceName'),
+      enabled: !!selectedDataSource,
     },
   });
 
@@ -85,6 +91,7 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
           type: 'success',
           title: LOGICAL_MODEL_CREATE_SUCCESS,
         });
+        props.onSubmit?.();
       },
       onError: err => {
         hasuraToast({

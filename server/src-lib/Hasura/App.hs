@@ -106,7 +106,7 @@ import Hasura.GraphQL.Execute.Subscription.Poll qualified as ES
 import Hasura.GraphQL.Execute.Subscription.State qualified as ES
 import Hasura.GraphQL.Logging (MonadExecutionLog (..), MonadQueryLog (..))
 import Hasura.GraphQL.Transport.HTTP
-  ( CacheStoreSuccess (CacheStoreSkipped),
+  ( CacheResult (..),
     MonadExecuteQuery (..),
   )
 import Hasura.GraphQL.Transport.HTTP.Protocol (toParsed)
@@ -697,8 +697,7 @@ instance HttpLog AppM where
         mkHttpAccessLogContext userInfoM loggingSettings reqId waiReq reqBody (BL.length response) compressedResponse qTime cType headers rb batchQueryOpLogs
 
 instance MonadExecuteQuery AppM where
-  cacheLookup _ _ _ _ = pure $ Right ([], Nothing)
-  cacheStore _ _ _ = pure $ Right (Right CacheStoreSkipped)
+  cacheLookup _ _ _ _ _ _ = pure $ Right ([], ResponseUncached Nothing)
 
 instance UserAuthentication AppM where
   resolveUserInfo logger manager headers authMode reqs =
@@ -782,6 +781,10 @@ instance MonadMetadataStorage AppM where
   notifySchemaCacheSync a b c = runInSeparateTx $ notifySchemaCacheSyncTx a b c
   getCatalogState = runInSeparateTx getCatalogStateTx
   setCatalogState a b = runInSeparateTx $ setCatalogStateTx a b
+
+  -- stored source introspection is not available in this distribution
+  fetchSourceIntrospection _ = pure $ Right Nothing
+  storeSourceIntrospection _ _ = pure $ Right ()
 
   getMetadataDbUid = runInSeparateTx getDbId
   checkMetadataStorageHealth = runInSeparateTx $ checkDbConnection

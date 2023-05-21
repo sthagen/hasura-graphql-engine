@@ -30,7 +30,7 @@ import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache (askSourceConfig)
-import Hasura.RQL.Types.Table
+import Hasura.Table.Cache
 
 --------------------------------------------------------------------------------
 -- PostgresMetadata
@@ -41,7 +41,7 @@ import Hasura.RQL.Types.Table
 class PostgresMetadata (pgKind :: PostgresKind) where
   -- TODO: find a better name
   validateRel ::
-    MonadError QErr m =>
+    (MonadError QErr m) =>
     TableCache ('Postgres pgKind) ->
     QualifiedTable ->
     Either (ObjRelDef ('Postgres pgKind)) (ArrRelDef ('Postgres pgKind)) ->
@@ -126,7 +126,7 @@ instance PostgresMetadata 'Vanilla where
 instance PostgresMetadata 'Citus where
   validateRel ::
     forall m.
-    MonadError QErr m =>
+    (MonadError QErr m) =>
     TableCache ('Postgres 'Citus) ->
     QualifiedTable ->
     Either (ObjRelDef ('Postgres 'Citus)) (ArrRelDef ('Postgres 'Citus)) ->
@@ -139,12 +139,10 @@ instance PostgresMetadata 'Citus where
           RUFKeyOn (SameTable _) -> pure ()
           RUFKeyOn (RemoteTable targetTable _) -> checkObjectRelationship sourceTableInfo targetTable
           RUManual RelManualTableConfig {} -> pure ()
-          RUManual RelManualNativeQueryConfig {} -> pure ()
       Right (RelDef _ obj _) ->
         case obj of
           RUFKeyOn (ArrRelUsingFKeyOn targetTable _col) -> checkArrayRelationship sourceTableInfo targetTable
           RUManual RelManualTableConfig {} -> pure ()
-          RUManual RelManualNativeQueryConfig {} -> pure ()
     where
       lookupTableInfo tableName =
         HashMap.lookup tableName tableCache
@@ -277,6 +275,7 @@ instance
   buildComputedFieldBooleanExp = Postgres.buildComputedFieldBooleanExp
   validateNativeQuery = Postgres.validateNativeQuery (pgTypeOidMapping @pgKind)
   supportsBeingRemoteRelationshipTarget _ = True
+  getTableInfo _ _ = throw400 UnexpectedPayload "get_table_info not yet supported in Postgres!"
 
   listAllTables sourceName = do
     sourceConfig <- askSourceConfig @('Postgres pgKind) sourceName
@@ -286,3 +285,5 @@ instance
         `onLeftM` \err -> throwError (prefixQErr "failed to fetch source tables: " err)
 
     pure [QualifiedObject {..} | (qSchema, qName) <- results]
+
+  listAllTrackables _ = throw500 "listAllTrackables not supported by Postgres"

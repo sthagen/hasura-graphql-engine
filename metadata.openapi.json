@@ -771,6 +771,28 @@
                 ],
                 "type": "object"
             },
+            "BigqueryLogicalModelField": {
+                "description": "A field of a logical model",
+                "properties": {
+                    "description": {
+                        "description": "Optional description of this field",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "Name of the field",
+                        "type": "string"
+                    },
+                    "type": {
+                        "additionalProperties": true,
+                        "description": "Type of the field\nA type used in a Logical Model field\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                    }
+                },
+                "required": [
+                    "name",
+                    "type"
+                ],
+                "type": "object"
+            },
             "BigqueryLogicalModelMetadata": {
                 "description": "A return type.",
                 "properties": {
@@ -782,7 +804,14 @@
                         "description": "Return types for the logical model",
                         "items": {
                             "additionalProperties": true,
-                            "description": "A scalar type or reference to another logical model\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                            "anyOf": [
+                                {
+                                    "$ref": "#/components/schemas/BigqueryLogicalModelField"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/BigqueryLogicalModelField"
+                                }
+                            ]
                         },
                         "type": "array"
                     },
@@ -818,7 +847,7 @@
                     "array_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__BigQuery"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig__BigQuery"
                         },
                         "type": "array"
                     },
@@ -833,7 +862,7 @@
                     "object_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__BigQuery"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig__BigQuery"
                         },
                         "type": "array"
                     },
@@ -910,15 +939,7 @@
             "BigqueryRUManual": {
                 "properties": {
                     "manual_configuration": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/BigqueryRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/BigqueryRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/BigqueryRelManualTableConfig"
                     }
                 },
                 "required": [
@@ -1145,13 +1166,6 @@
                         "default": {},
                         "description": "Free variables in the expression and their types",
                         "type": "object"
-                    },
-                    "array_relationships": {
-                        "default": [],
-                        "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__BigQuery"
-                        },
-                        "type": "array"
                     },
                     "configuration": {
                         "$ref": "#/components/schemas/StoredProcedureConfig"
@@ -1700,6 +1714,28 @@
                 ],
                 "type": "object"
             },
+            "CitusLogicalModelField": {
+                "description": "A field of a logical model",
+                "properties": {
+                    "description": {
+                        "description": "Optional description of this field",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "Name of the field",
+                        "type": "string"
+                    },
+                    "type": {
+                        "additionalProperties": true,
+                        "description": "Type of the field\nA type used in a Logical Model field\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                    }
+                },
+                "required": [
+                    "name",
+                    "type"
+                ],
+                "type": "object"
+            },
             "CitusLogicalModelMetadata": {
                 "description": "A return type.",
                 "properties": {
@@ -1711,7 +1747,14 @@
                         "description": "Return types for the logical model",
                         "items": {
                             "additionalProperties": true,
-                            "description": "A scalar type or reference to another logical model\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                            "anyOf": [
+                                {
+                                    "$ref": "#/components/schemas/CitusLogicalModelField"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/CitusLogicalModelField"
+                                }
+                            ]
                         },
                         "type": "array"
                     },
@@ -1747,7 +1790,7 @@
                     "array_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Citus_"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig___Postgres__Citus_"
                         },
                         "type": "array"
                     },
@@ -1762,7 +1805,7 @@
                     "object_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Citus_"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig___Postgres__Citus_"
                         },
                         "type": "array"
                     },
@@ -1856,15 +1899,7 @@
             "CitusRUManual": {
                 "properties": {
                     "manual_configuration": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/CitusRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/CitusRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/CitusRelManualTableConfig"
                     }
                 },
                 "required": [
@@ -2102,13 +2137,6 @@
                         "default": {},
                         "description": "Free variables in the expression and their types",
                         "type": "object"
-                    },
-                    "array_relationships": {
-                        "default": [],
-                        "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Citus_"
-                        },
-                        "type": "array"
                     },
                     "configuration": {
                         "$ref": "#/components/schemas/StoredProcedureConfig"
@@ -2673,6 +2701,28 @@
                 ],
                 "type": "object"
             },
+            "CockroachLogicalModelField": {
+                "description": "A field of a logical model",
+                "properties": {
+                    "description": {
+                        "description": "Optional description of this field",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "Name of the field",
+                        "type": "string"
+                    },
+                    "type": {
+                        "additionalProperties": true,
+                        "description": "Type of the field\nA type used in a Logical Model field\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                    }
+                },
+                "required": [
+                    "name",
+                    "type"
+                ],
+                "type": "object"
+            },
             "CockroachLogicalModelMetadata": {
                 "description": "A return type.",
                 "properties": {
@@ -2684,7 +2734,14 @@
                         "description": "Return types for the logical model",
                         "items": {
                             "additionalProperties": true,
-                            "description": "A scalar type or reference to another logical model\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                            "anyOf": [
+                                {
+                                    "$ref": "#/components/schemas/CockroachLogicalModelField"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/CockroachLogicalModelField"
+                                }
+                            ]
                         },
                         "type": "array"
                     },
@@ -2720,7 +2777,7 @@
                     "array_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Cockroach_"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig___Postgres__Cockroach_"
                         },
                         "type": "array"
                     },
@@ -2735,7 +2792,7 @@
                     "object_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Cockroach_"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig___Postgres__Cockroach_"
                         },
                         "type": "array"
                     },
@@ -2829,15 +2886,7 @@
             "CockroachRUManual": {
                 "properties": {
                     "manual_configuration": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/CockroachRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/CockroachRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/CockroachRelManualTableConfig"
                     }
                 },
                 "required": [
@@ -3075,13 +3124,6 @@
                         "default": {},
                         "description": "Free variables in the expression and their types",
                         "type": "object"
-                    },
-                    "array_relationships": {
-                        "default": [],
-                        "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Cockroach_"
-                        },
-                        "type": "array"
                     },
                     "configuration": {
                         "$ref": "#/components/schemas/StoredProcedureConfig"
@@ -3801,6 +3843,28 @@
                 ],
                 "type": "object"
             },
+            "DataconnectorLogicalModelField": {
+                "description": "A field of a logical model",
+                "properties": {
+                    "description": {
+                        "description": "Optional description of this field",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "Name of the field",
+                        "type": "string"
+                    },
+                    "type": {
+                        "additionalProperties": true,
+                        "description": "Type of the field\nA type used in a Logical Model field\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                    }
+                },
+                "required": [
+                    "name",
+                    "type"
+                ],
+                "type": "object"
+            },
             "DataconnectorLogicalModelMetadata": {
                 "description": "A return type.",
                 "properties": {
@@ -3812,7 +3876,14 @@
                         "description": "Return types for the logical model",
                         "items": {
                             "additionalProperties": true,
-                            "description": "A scalar type or reference to another logical model\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                            "anyOf": [
+                                {
+                                    "$ref": "#/components/schemas/DataconnectorLogicalModelField"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/DataconnectorLogicalModelField"
+                                }
+                            ]
                         },
                         "type": "array"
                     },
@@ -3848,7 +3919,7 @@
                     "array_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__DataConnector"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig__DataConnector"
                         },
                         "type": "array"
                     },
@@ -3863,7 +3934,7 @@
                     "object_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__DataConnector"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig__DataConnector"
                         },
                         "type": "array"
                     },
@@ -3946,15 +4017,7 @@
             "DataconnectorRUManual": {
                 "properties": {
                     "manual_configuration": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/DataconnectorRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/DataconnectorRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/DataconnectorRelManualTableConfig"
                     }
                 },
                 "required": [
@@ -4189,13 +4252,6 @@
                         "default": {},
                         "description": "Free variables in the expression and their types",
                         "type": "object"
-                    },
-                    "array_relationships": {
-                        "default": [],
-                        "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__DataConnector"
-                        },
-                        "type": "array"
                     },
                     "configuration": {
                         "$ref": "#/components/schemas/StoredProcedureConfig"
@@ -4524,6 +4580,9 @@
                         ],
                         "type": "string"
                     },
+                    "response": {
+                        "additionalProperties": true
+                    },
                     "session_argument": {
                         "type": "string"
                     }
@@ -4551,6 +4610,23 @@
                     "role"
                 ],
                 "type": "object"
+            },
+            "FunctionReturnType": {
+                "discriminator": {
+                    "mapping": {
+                        "inferred": "InferredFunctionResponse",
+                        "table": "TableFunctionResponse"
+                    },
+                    "propertyName": "type"
+                },
+                "oneOf": [
+                    {
+                        "$ref": "#/components/schemas/InferredFunctionResponse"
+                    },
+                    {
+                        "$ref": "#/components/schemas/TableFunctionResponse"
+                    }
+                ]
             },
             "GraphQLName": {
                 "type": "string"
@@ -4636,6 +4712,20 @@
                         "type": "string"
                     }
                 },
+                "type": "object"
+            },
+            "InferredFunctionResponse": {
+                "properties": {
+                    "type": {
+                        "enum": [
+                            "inferred"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "type"
+                ],
                 "type": "object"
             },
             "InputObjectFieldDefinition": {
@@ -5417,6 +5507,28 @@
                 ],
                 "type": "object"
             },
+            "MssqlLogicalModelField": {
+                "description": "A field of a logical model",
+                "properties": {
+                    "description": {
+                        "description": "Optional description of this field",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "Name of the field",
+                        "type": "string"
+                    },
+                    "type": {
+                        "additionalProperties": true,
+                        "description": "Type of the field\nA type used in a Logical Model field\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                    }
+                },
+                "required": [
+                    "name",
+                    "type"
+                ],
+                "type": "object"
+            },
             "MssqlLogicalModelMetadata": {
                 "description": "A return type.",
                 "properties": {
@@ -5428,7 +5540,14 @@
                         "description": "Return types for the logical model",
                         "items": {
                             "additionalProperties": true,
-                            "description": "A scalar type or reference to another logical model\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                            "anyOf": [
+                                {
+                                    "$ref": "#/components/schemas/MssqlLogicalModelField"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/MssqlLogicalModelField"
+                                }
+                            ]
                         },
                         "type": "array"
                     },
@@ -5464,7 +5583,7 @@
                     "array_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__MSSQL"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig__MSSQL"
                         },
                         "type": "array"
                     },
@@ -5479,7 +5598,7 @@
                     "object_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__MSSQL"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig__MSSQL"
                         },
                         "type": "array"
                     },
@@ -5572,15 +5691,7 @@
             "MssqlRUManual": {
                 "properties": {
                     "manual_configuration": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/MssqlRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/MssqlRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/MssqlRelManualTableConfig"
                     }
                 },
                 "required": [
@@ -5818,13 +5929,6 @@
                         "default": {},
                         "description": "Free variables in the expression and their types",
                         "type": "object"
-                    },
-                    "array_relationships": {
-                        "default": [],
-                        "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig__MSSQL"
-                        },
-                        "type": "array"
                     },
                     "configuration": {
                         "$ref": "#/components/schemas/StoredProcedureConfig"
@@ -6664,6 +6768,28 @@
                 ],
                 "type": "object"
             },
+            "PostgresLogicalModelField": {
+                "description": "A field of a logical model",
+                "properties": {
+                    "description": {
+                        "description": "Optional description of this field",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "Name of the field",
+                        "type": "string"
+                    },
+                    "type": {
+                        "additionalProperties": true,
+                        "description": "Type of the field\nA type used in a Logical Model field\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                    }
+                },
+                "required": [
+                    "name",
+                    "type"
+                ],
+                "type": "object"
+            },
             "PostgresLogicalModelMetadata": {
                 "description": "A return type.",
                 "properties": {
@@ -6675,7 +6801,14 @@
                         "description": "Return types for the logical model",
                         "items": {
                             "additionalProperties": true,
-                            "description": "A scalar type or reference to another logical model\nvalue with unspecified type - this is a placeholder that will eventually be replaced with a more detailed description"
+                            "anyOf": [
+                                {
+                                    "$ref": "#/components/schemas/PostgresLogicalModelField"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/PostgresLogicalModelField"
+                                }
+                            ]
                         },
                         "type": "array"
                     },
@@ -6711,7 +6844,7 @@
                     "array_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Vanilla_"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig___Postgres__Vanilla_"
                         },
                         "type": "array"
                     },
@@ -6726,7 +6859,7 @@
                     "object_relationships": {
                         "default": [],
                         "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Vanilla_"
+                            "$ref": "#/components/schemas/RelDef_RelManualNativeQueryConfig___Postgres__Vanilla_"
                         },
                         "type": "array"
                     },
@@ -6895,15 +7028,7 @@
             "PostgresRUManual": {
                 "properties": {
                     "manual_configuration": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/PostgresRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/PostgresRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/PostgresRelManualTableConfig"
                     }
                 },
                 "required": [
@@ -7180,13 +7305,6 @@
                         "default": {},
                         "description": "Free variables in the expression and their types",
                         "type": "object"
-                    },
-                    "array_relationships": {
-                        "default": [],
-                        "items": {
-                            "$ref": "#/components/schemas/RelDef_RelManualConfig___Postgres__Vanilla_"
-                        },
-                        "type": "array"
                     },
                     "configuration": {
                         "$ref": "#/components/schemas/StoredProcedureConfig"
@@ -7801,7 +7919,7 @@
                 ],
                 "type": "object"
             },
-            "RelDef_RelManualConfig__BigQuery": {
+            "RelDef_RelManualNativeQueryConfig__BigQuery": {
                 "properties": {
                     "comment": {
                         "type": "string"
@@ -7810,15 +7928,7 @@
                         "type": "string"
                     },
                     "using": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/BigqueryRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/BigqueryRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/BigqueryRelManualNativeQueryConfig"
                     }
                 },
                 "required": [
@@ -7827,7 +7937,7 @@
                 ],
                 "type": "object"
             },
-            "RelDef_RelManualConfig__DataConnector": {
+            "RelDef_RelManualNativeQueryConfig__DataConnector": {
                 "properties": {
                     "comment": {
                         "type": "string"
@@ -7836,15 +7946,7 @@
                         "type": "string"
                     },
                     "using": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/DataconnectorRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/DataconnectorRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/DataconnectorRelManualNativeQueryConfig"
                     }
                 },
                 "required": [
@@ -7853,7 +7955,7 @@
                 ],
                 "type": "object"
             },
-            "RelDef_RelManualConfig__MSSQL": {
+            "RelDef_RelManualNativeQueryConfig__MSSQL": {
                 "properties": {
                     "comment": {
                         "type": "string"
@@ -7862,15 +7964,7 @@
                         "type": "string"
                     },
                     "using": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/MssqlRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/MssqlRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/MssqlRelManualNativeQueryConfig"
                     }
                 },
                 "required": [
@@ -7879,7 +7973,7 @@
                 ],
                 "type": "object"
             },
-            "RelDef_RelManualConfig___Postgres__Citus_": {
+            "RelDef_RelManualNativeQueryConfig___Postgres__Citus_": {
                 "properties": {
                     "comment": {
                         "type": "string"
@@ -7888,15 +7982,7 @@
                         "type": "string"
                     },
                     "using": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/CitusRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/CitusRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/CitusRelManualNativeQueryConfig"
                     }
                 },
                 "required": [
@@ -7905,7 +7991,7 @@
                 ],
                 "type": "object"
             },
-            "RelDef_RelManualConfig___Postgres__Cockroach_": {
+            "RelDef_RelManualNativeQueryConfig___Postgres__Cockroach_": {
                 "properties": {
                     "comment": {
                         "type": "string"
@@ -7914,15 +8000,7 @@
                         "type": "string"
                     },
                     "using": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/CockroachRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/CockroachRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/CockroachRelManualNativeQueryConfig"
                     }
                 },
                 "required": [
@@ -7931,7 +8009,7 @@
                 ],
                 "type": "object"
             },
-            "RelDef_RelManualConfig___Postgres__Vanilla_": {
+            "RelDef_RelManualNativeQueryConfig___Postgres__Vanilla_": {
                 "properties": {
                     "comment": {
                         "type": "string"
@@ -7940,15 +8018,7 @@
                         "type": "string"
                     },
                     "using": {
-                        "additionalProperties": true,
-                        "anyOf": [
-                            {
-                                "$ref": "#/components/schemas/PostgresRelManualTableConfig"
-                            },
-                            {
-                                "$ref": "#/components/schemas/PostgresRelManualNativeQueryConfig"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/PostgresRelManualNativeQueryConfig"
                     }
                 },
                 "required": [
@@ -8925,6 +8995,27 @@
                         ]
                     }
                 },
+                "type": "object"
+            },
+            "TableFunctionResponse": {
+                "properties": {
+                    "table": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array"
+                    },
+                    "type": {
+                        "enum": [
+                            "table"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "table",
+                    "type"
+                ],
                 "type": "object"
             },
             "TlsAllow": {

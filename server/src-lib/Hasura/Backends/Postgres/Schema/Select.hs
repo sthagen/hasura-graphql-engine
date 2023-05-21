@@ -47,7 +47,7 @@ import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization
-import Hasura.RQL.Types.Table
+import Hasura.Table.Cache
 import Language.GraphQL.Draft.Syntax qualified as G
 
 -- | User-defined function (AKA custom function)
@@ -110,18 +110,19 @@ selectFunctionAggregate mkRootFieldName fi@FunctionInfo {..} description = runMa
   let customization = _siCustomization sourceInfo
       tCase = _rscNamingConvention customization
       mkTypename = runMkTypename $ _rscTypeNames customization
+
   targetTableInfo <- askTableInfo _fiReturnType
+
   selectPermissions <- hoistMaybe $ tableSelectPermissions roleName targetTableInfo
   guard $ spiAllowAgg selectPermissions
   xNodesAgg <- hoistMaybe $ nodesAggExtension @('Postgres pgKind)
-  tableInfo <- askTableInfo _fiReturnType
-  nodesParser <- MaybeT $ tableSelectionList tableInfo
+  nodesParser <- MaybeT $ tableSelectionList targetTableInfo
   lift do
     stringifyNumbers <- retrieve Options.soStringifyNumbers
-    tableGQLName <- getTableIdentifierName tableInfo
-    tableArgsParser <- tableArguments tableInfo
+    tableGQLName <- getTableIdentifierName targetTableInfo
+    tableArgsParser <- tableArguments targetTableInfo
     functionArgsParser <- customSQLFunctionArgs fi _fiGQLAggregateName _fiGQLArgsName
-    aggregateParser <- tableAggregationFields tableInfo
+    aggregateParser <- tableAggregationFields targetTableInfo
     let aggregateFieldName = runMkRootFieldName mkRootFieldName _fiGQLAggregateName
         argsParser = liftA2 (,) functionArgsParser tableArgsParser
         selectionName = mkTypename (applyTypeNameCaseIdentifier tCase $ mkTableAggregateTypeName tableGQLName)
@@ -165,15 +166,15 @@ selectFunctionConnection mkRootFieldName fi@FunctionInfo {..} description pkeyCo
   roleName <- retrieve scRole
   let customization = _siCustomization sourceInfo
       tCase = _rscNamingConvention customization
+
   returnTableInfo <- lift $ askTableInfo _fiReturnType
   selectPermissions <- hoistMaybe $ tableSelectPermissions roleName returnTableInfo
   xRelayInfo <- hoistMaybe $ relayExtension @('Postgres pgKind)
-  tableInfo <- lift $ askTableInfo _fiReturnType
-  selectionSetParser <- MaybeT $ tableConnectionSelectionSet tableInfo
+  selectionSetParser <- MaybeT $ tableConnectionSelectionSet returnTableInfo
   lift do
     let fieldName = runMkRootFieldName mkRootFieldName $ _fiGQLName <> Name.__connection
     stringifyNumbers <- retrieve Options.soStringifyNumbers
-    tableConnectionArgsParser <- tableConnectionArgs pkeyColumns tableInfo
+    tableConnectionArgsParser <- tableConnectionArgs pkeyColumns returnTableInfo
     functionArgsParser <- customSQLFunctionArgs fi _fiGQLName _fiGQLArgsName
     let argsParser = liftA2 (,) functionArgsParser tableConnectionArgsParser
     pure $
@@ -284,7 +285,7 @@ computedFieldPG ComputedFieldInfo {..} parentTable tableInfo = runMaybeT do
 -- | The custom SQL functions' input "args" field parser
 -- > function_name(args: function_args)
 customSQLFunctionArgs ::
-  MonadBuildSchema ('Postgres pgKind) r m n =>
+  (MonadBuildSchema ('Postgres pgKind) r m n) =>
   FunctionInfo ('Postgres pgKind) ->
   G.Name ->
   G.Name ->
@@ -312,7 +313,7 @@ customSQLFunctionArgs FunctionInfo {..} functionName functionArgsName =
 --   be omitted.
 functionArgs ::
   forall r m n pgKind.
-  MonadBuildSchema ('Postgres pgKind) r m n =>
+  (MonadBuildSchema ('Postgres pgKind) r m n) =>
   FunctionTrackedAs ('Postgres pgKind) ->
   Seq.Seq (FunctionInputArgument ('Postgres pgKind)) ->
   SchemaT r m (InputFieldsParser n (FunctionArgsExp ('Postgres pgKind) (IR.UnpreparedValue ('Postgres pgKind))))

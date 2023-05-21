@@ -109,6 +109,10 @@ export const metadataQueryTypes = [
   'untrack_logical_model',
   'track_native_query',
   'untrack_native_query',
+  'track_tables',
+  'untrack_tables',
+  'track_stored_procedure',
+  'untrack_stored_procedure',
 ] as const;
 
 export type MetadataQueryType = (typeof metadataQueryTypes)[number];

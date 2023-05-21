@@ -86,6 +86,7 @@ import Hasura.SQL.BackendMap qualified as BackendMap
 import Hasura.Server.Logging (MetadataLog (..))
 import Hasura.Server.Types (MonadGetPolicies (..))
 import Hasura.StoredProcedure.API (dropStoredProcedureInMetadata)
+import Hasura.Table.Metadata (TableMetadata (..))
 import Network.HTTP.Client.Transformable qualified as HTTP
 import Network.Types.Extended
 
@@ -248,7 +249,7 @@ runReplaceMetadataV2 replaceMetadataArgs = do
   (inconsistentObjects, metadataWarnings) <- runMetadataWarnings $ (runReplaceMetadataV2' replaceMetadataArgs)
   case _rmv2AllowWarningss replaceMetadataArgs of
     AllowWarnings -> pure ()
-    NoAllowWarnings ->
+    DisallowWarnings ->
       unless (null metadataWarnings) $
         throw400WithDetail (CustomCode "metadata-warnings") "failed due to metadata warnings" (J.toJSON metadataWarnings)
   pure $ encJFromJValue $ formatInconsistentObjs inconsistentObjects metadataWarnings
@@ -529,7 +530,7 @@ runReplaceMetadataV2' ReplaceMetadataV2 {..} = do
           SourceName ->
           AB.AnyBackend i ->
           AB.AnyBackend i ->
-          (forall b. BackendEventTrigger b => i b -> i b -> m ()) ->
+          (forall b. (BackendEventTrigger b) => i b -> i b -> m ()) ->
           m ()
         compose sourceName x y f = AB.composeAnyBackend @BackendEventTrigger f x y (logger $ HL.UnstructuredLog HL.LevelInfo $ SB.fromText $ "Event trigger clean up couldn't be done on the source " <> sourceName <<> " because it has changed its type")
 
@@ -702,7 +703,7 @@ purgeMetadataObj = \case
       OtelSubobjectBatchSpanProcessor ->
         MetadataModifier $ metaOpenTelemetryConfig . ocBatchSpanProcessor .~ defaultOtelBatchSpanProcessorConfig
   where
-    handleSourceObj :: forall b. BackendMetadata b => SourceName -> SourceMetadataObjId b -> MetadataModifier
+    handleSourceObj :: forall b. (BackendMetadata b) => SourceName -> SourceMetadataObjId b -> MetadataModifier
     handleSourceObj source = \case
       SMOTable qt -> dropTableInMetadata @b source qt
       SMOFunction qf -> dropFunctionInMetadata @b source qf
@@ -714,11 +715,6 @@ purgeMetadataObj = \case
             %~ case nativeQueryMetadataObjId of
               NQMORel rn _ -> dropNativeQueryRelationshipInMetadata rn
       SMOStoredProcedure sp -> dropStoredProcedureInMetadata @b source sp
-      SMOStoredProcedureObj storedProcedureName storedProcedureMetadataObjId ->
-        MetadataModifier $
-          storedProcedureMetadataSetter @b source storedProcedureName
-            %~ case storedProcedureMetadataObjId of
-              SPMORel rn _ -> dropStoredProcedureRelationshipInMetadata rn
       SMOLogicalModel lm -> dropLogicalModelInMetadata @b source lm
       SMOLogicalModelObj logicalModelName logicalModelMetadataObjId ->
         MetadataModifier $
@@ -841,7 +837,7 @@ runTestWebhookTransform (TestWebhookTransform env headers urlE payload rt _ sv) 
                 J.object ["error_code" J..= J.String "Request Initialization Error", "message" J..= J.String (tshow err)]
        in throw400WithDetail ValidationFailed "request transform validation failed" $ J.toJSON errorBundle
 
-interpolateFromEnv :: MonadError QErr m => Env.Environment -> Text -> m Text
+interpolateFromEnv :: (MonadError QErr m) => Env.Environment -> Text -> m Text
 interpolateFromEnv env url =
   case AT.parseOnly parseEnvTemplate url of
     Left _ -> throwError $ err400 ParseFailed "Invalid Url Template"

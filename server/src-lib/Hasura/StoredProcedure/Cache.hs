@@ -12,11 +12,9 @@ import Hasura.LogicalModel.Cache (LogicalModelInfo)
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (Backend, FunctionName)
 import Hasura.RQL.Types.BackendType (BackendType)
-import Hasura.RQL.Types.Common (RelName)
-import Hasura.RQL.Types.Relationships.Local (RelInfo)
-import Hasura.RQL.Types.Table (RolePermInfoMap)
 import Hasura.StoredProcedure.Metadata (ArgumentName)
 import Hasura.StoredProcedure.Types (NullableScalarType, StoredProcedureConfig)
+import Hasura.Table.Cache (RolePermInfoMap)
 import Language.GraphQL.Draft.Syntax qualified as G
 
 type StoredProcedureCache b = HashMap (FunctionName b) (StoredProcedureInfo b)
@@ -30,7 +28,6 @@ data StoredProcedureInfo (b :: BackendType) = StoredProcedureInfo
     _spiConfig :: StoredProcedureConfig,
     _spiReturns :: LogicalModelInfo b,
     _spiArguments :: HashMap ArgumentName (NullableScalarType b),
-    _spiArrayRelationships :: InsOrdHashMap RelName (RelInfo b),
     _spiDescription :: Maybe Text
   }
   deriving stock (Generic)

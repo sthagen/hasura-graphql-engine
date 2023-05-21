@@ -20,6 +20,10 @@ module Hasura.RQL.DDL.Schema.Source
     GetSourceTables (..),
     runGetSourceTables,
 
+    -- * Get Source Functions
+    GetSourceTrackables (..),
+    runGetSourceTrackables,
+
     -- * Get Table Name
     GetTableInfo (..),
     runGetTableInfo,
@@ -69,12 +73,12 @@ import Hasura.RQL.Types.SchemaCache.Build
 import Hasura.RQL.Types.SchemaCacheTypes
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization
-import Hasura.RQL.Types.Table (Constraint (..), DBTableMetadata (..), ForeignKey (..), ForeignKeyMetadata (..), PrimaryKey (..))
 import Hasura.SQL.AnyBackend (AnyBackend)
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.SQL.AnyBackend qualified as AnyBackend
 import Hasura.Server.Logging (MetadataLog (..))
 import Hasura.Services
+import Hasura.Table.Cache (Constraint (..), DBTableMetadata (..), ForeignKey (..), ForeignKeyMetadata (..), PrimaryKey (..))
 import Language.GraphQL.Draft.Syntax qualified as G
 import Witch qualified
 
@@ -348,6 +352,31 @@ instance FromJSON (GetSourceTables b) where
     pure $ GetSourceTables {..}
 
 -- | Fetch a list of tables for the request data source.
+runGetSourceTrackables ::
+  forall b m r.
+  ( BackendMetadata b,
+    CacheRM m,
+    MonadError Error.QErr m,
+    Metadata.MetadataM m,
+    MonadIO m,
+    MonadBaseControl IO m,
+    MonadReader r m,
+    Has (L.Logger L.Hasura) r,
+    ProvidesNetwork m
+  ) =>
+  GetSourceTrackables b ->
+  m EncJSON
+runGetSourceTrackables GetSourceTrackables {..} = do
+  fmap EncJSON.encJFromJValue (listAllTrackables @b _gstrSourceName)
+
+newtype GetSourceTrackables (b :: BackendType) = GetSourceTrackables {_gstrSourceName :: SourceName}
+
+instance FromJSON (GetSourceTrackables b) where
+  parseJSON = J.withObject "GetSourceFunctions" \o -> do
+    _gstrSourceName <- o .: "source"
+    pure $ GetSourceTrackables {..}
+
+-- | Fetch a list of tables for the request data source.
 runGetSourceTables ::
   forall b m r.
   ( BackendMetadata b,
@@ -367,12 +396,12 @@ runGetSourceTables GetSourceTables {..} = do
 
 --------------------------------------------------------------------------------
 
-data GetTableInfo = GetTableInfo
+data GetTableInfo (b :: BackendType) = GetTableInfo
   { _gtiSourceName :: Common.SourceName,
     _gtiTableName :: API.TableName
   }
 
-instance FromJSON GetTableInfo where
+instance FromJSON (GetTableInfo b) where
   parseJSON = J.withObject "GetSourceTables" \o -> do
     _gtiSourceName <- o .: "source"
     _gtiTableName <- o .: "table"
@@ -385,7 +414,7 @@ runGetTableInfo ::
     MonadError Error.QErr m,
     Metadata.MetadataM m
   ) =>
-  GetTableInfo ->
+  GetTableInfo b ->
   m EncJSON
 runGetTableInfo GetTableInfo {..} = do
   metadata <- Metadata.getMetadata

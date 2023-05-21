@@ -67,10 +67,8 @@ defaultSelectNativeQueryObject NativeQueryInfo {..} fieldName description = runM
     MaybeT . fmap Just $
       buildLogicalModelPermissions @b @r @m @n _nqiReturns
 
-  -- we don't use the logical model args parser as we don't want to support
-  -- WHERE etc on a single item
-  (selectionSetParser, _) <-
-    MaybeT $ buildLogicalModelFields _nqiRelationships _nqiReturns
+  selectionSetParser <-
+    MaybeT $ logicalModelSelectionSet _nqiRelationships _nqiReturns
 
   let sourceObj =
         MO.MOSourceObjId
@@ -90,7 +88,6 @@ defaultSelectNativeQueryObject NativeQueryInfo {..} fieldName description = runM
             ( IR.FromNativeQuery
                 NativeQuery
                   { nqRootFieldName = _nqiRootFieldName,
-                    nqArgs,
                     nqInterpolatedQuery = interpolatedQuery _nqiCode nqArgs,
                     nqLogicalModel = buildLogicalModelIR _nqiReturns
                   }
@@ -129,7 +126,7 @@ defaultSelectNativeQuery NativeQueryInfo {..} fieldName description = runMaybeT 
     MaybeT . fmap Just $
       buildLogicalModelPermissions @b @r @m @n _nqiReturns
 
-  (selectionSetParser, logicalModelsArgsParser) <-
+  (selectionListParser, logicalModelsArgsParser) <-
     MaybeT $ buildLogicalModelFields _nqiRelationships _nqiReturns
 
   let sourceObj =
@@ -146,7 +143,7 @@ defaultSelectNativeQuery NativeQueryInfo {..} fieldName description = runMaybeT 
             <$> logicalModelsArgsParser
             <*> nativeQueryArgsParser
         )
-        selectionSetParser
+        selectionListParser
         <&> \((lmArgs, nqArgs), fields) ->
           IR.AnnSelectG
             { IR._asnFields = fields,
@@ -154,7 +151,6 @@ defaultSelectNativeQuery NativeQueryInfo {..} fieldName description = runMaybeT 
                 IR.FromNativeQuery
                   NativeQuery
                     { nqRootFieldName = _nqiRootFieldName,
-                      nqArgs,
                       nqInterpolatedQuery = interpolatedQuery _nqiCode nqArgs,
                       nqLogicalModel = buildLogicalModelIR _nqiReturns
                     },

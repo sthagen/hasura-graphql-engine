@@ -63,12 +63,12 @@ import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization as SC
-import Hasura.RQL.Types.Table
 import Hasura.RemoteSchema.Metadata
 import Hasura.RemoteSchema.SchemaCache
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.Server.Types
 import Hasura.StoredProcedure.Cache (StoredProcedureCache, _spiReturns)
+import Hasura.Table.Cache
 import Language.GraphQL.Draft.Syntax qualified as G
 
 -------------------------------------------------------------------------------
@@ -337,7 +337,7 @@ buildRoleContext options sources remotes actions customTypes role remoteSchemaPe
   where
     buildSource ::
       forall b.
-      BackendSchema b =>
+      (BackendSchema b) =>
       SchemaContext ->
       SchemaOptions ->
       SourceInfo b ->
@@ -461,7 +461,7 @@ buildRelayRoleContext options sources actions customTypes role expFeatures = do
   where
     buildSource ::
       forall b.
-      BackendSchema b =>
+      (BackendSchema b) =>
       SchemaContext ->
       SchemaOptions ->
       SourceInfo b ->
@@ -664,7 +664,7 @@ buildRemoteSchemaParser remoteSchemaPermsCtx roleName context = do
 --   subscription field parsers.
 buildQueryAndSubscriptionFields ::
   forall b r m n.
-  MonadBuildSchema b r m n =>
+  (MonadBuildSchema b r m n) =>
   MkRootFieldName ->
   SourceInfo b ->
   TableCache b ->
@@ -688,8 +688,8 @@ buildQueryAndSubscriptionFields mkRootFieldName sourceInfo tables (takeExposedAs
           roleName == adminRoleName
             || roleName `HashMap.member` _fiPermissions functionInfo
             || functionPermsCtx == Options.InferFunctionPermissions
-        let targetTableName = _fiReturnType functionInfo
-        lift $ mkRFs $ buildFunctionQueryFields mkRootFieldName functionName functionInfo targetTableName
+        let targetReturnName = _fiReturnType functionInfo
+        lift $ mkRFs $ buildFunctionQueryFields mkRootFieldName functionName functionInfo targetReturnName
   nativeQueryRootFields <-
     buildNativeQueryFields sourceInfo nativeQueries
 
@@ -722,7 +722,7 @@ runMaybeTmempty = (`onNothingM` (pure mempty)) . runMaybeT
 
 buildNativeQueryFields ::
   forall b r m n.
-  MonadBuildSchema b r m n =>
+  (MonadBuildSchema b r m n) =>
   SourceInfo b ->
   NativeQueryCache b ->
   SchemaT r m [P.FieldParser n (QueryRootField UnpreparedValue)]
@@ -750,7 +750,7 @@ buildNativeQueryFields sourceInfo nativeQueries = runMaybeTmempty $ do
 
 buildStoredProcedureFields ::
   forall b r m n.
-  MonadBuildSchema b r m n =>
+  (MonadBuildSchema b r m n) =>
   SourceInfo b ->
   StoredProcedureCache b ->
   SchemaT r m [P.FieldParser n (QueryRootField UnpreparedValue)]
@@ -778,7 +778,7 @@ buildStoredProcedureFields sourceInfo storedProcedures = runMaybeTmempty $ do
 
 buildRelayQueryAndSubscriptionFields ::
   forall b r m n.
-  MonadBuildSchema b r m n =>
+  (MonadBuildSchema b r m n) =>
   MkRootFieldName ->
   SourceInfo b ->
   TableCache b ->
@@ -802,6 +802,7 @@ buildRelayQueryAndSubscriptionFields mkRootFieldName sourceInfo tables (takeExpo
 
   functionConnectionFields <- for (HashMap.toList functions) $ \(functionName, functionInfo) -> runMaybeT do
     let returnTableName = _fiReturnType functionInfo
+
     -- FIXME: only extract the TableInfo once to avoid redundant cache lookups
     returnTableInfo <- lift $ askTableInfo returnTableName
     pkeyColumns <- MaybeT $ (^? tiCoreInfo . tciPrimaryKey . _Just . pkColumns) <$> pure returnTableInfo
@@ -818,7 +819,7 @@ buildRelayQueryAndSubscriptionFields mkRootFieldName sourceInfo tables (takeExpo
 
 buildMutationFields ::
   forall b r m n.
-  MonadBuildSchema b r m n =>
+  (MonadBuildSchema b r m n) =>
   MkRootFieldName ->
   Scenario ->
   SourceInfo b ->
@@ -838,6 +839,7 @@ buildMutationFields mkRootFieldName scenario sourceInfo tables (takeExposedAs FE
     pure $ concat [inserts, updates, deletes]
   functionMutations <- for (HashMap.toList functions) \(functionName, functionInfo) -> runMaybeT $ do
     let targetTableName = _fiReturnType functionInfo
+
     -- A function exposed as mutation must have a function permission
     -- configured for the role. See Note [Function Permissions]
     guard $
@@ -900,7 +902,7 @@ buildQueryParser sourceQueryFields apolloFederationFields remoteQueryFields acti
 
 -- | Builds a @Schema@ at query parsing time
 parseBuildIntrospectionSchema ::
-  MonadParse m =>
+  (MonadParse m) =>
   P.Type 'Output ->
   Maybe (P.Type 'Output) ->
   Maybe (P.Type 'Output) ->
@@ -1062,7 +1064,7 @@ queryRoot = Name._query_root
 finalizeParser :: Parser 'Output P.Parse a -> ParserFn a
 finalizeParser parser = P.toQErr . P.runParse . P.runParser parser
 
-throwOnConflictingDefinitions :: QErrM m => Either P.ConflictingDefinitions a -> m a
+throwOnConflictingDefinitions :: (QErrM m) => Either P.ConflictingDefinitions a -> m a
 throwOnConflictingDefinitions = either (throw500 . fromErrorMessage . toErrorValue) pure
 
 typenameToNamespacedRawRF ::

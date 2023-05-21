@@ -21,7 +21,6 @@ import Hasura.GraphQL.Schema.BoolExp.AggregationPredicates
     defaultAggregationPredicatesParser,
   )
 import Hasura.GraphQL.Schema.Introspection (queryInputFieldsParserIntrospection)
-import Hasura.GraphQL.Schema.NamingCase (NamingCase (..))
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp (GBoolExp (..), OpExpG (AEQ))
 import Hasura.RQL.IR.BoolExp.AggregationPredicates
@@ -29,11 +28,12 @@ import Hasura.RQL.IR.Value (Provenance (Unknown), UnpreparedValue (UVParameter))
 import Hasura.RQL.Types.BackendType (BackendSourceKind (PostgresVanillaKind), BackendType (Postgres), PostgresKind (Vanilla))
 import Hasura.RQL.Types.Column (ColumnType (ColumnScalar), ColumnValue (..))
 import Hasura.RQL.Types.Common (InsertOrder (..), RelName (..), RelType (..), SourceName (..))
+import Hasura.RQL.Types.NamingCase (NamingCase (..))
 import Hasura.RQL.Types.Relationships.Local (RelInfo (..), RelTarget (..))
 import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.Source (DBObjectsIntrospection (..), SourceInfo (..))
 import Hasura.RQL.Types.SourceCustomization (ResolvedSourceCustomization (..))
-import Hasura.RQL.Types.Table
+import Hasura.Table.Cache
   ( TableCoreInfoG (_tciName),
     TableInfo (_tiCoreInfo),
   )
@@ -75,7 +75,7 @@ We cannot do that however, since backends have the closed datakind `BackendType`
 newtype Unshowable a = Unshowable {unUnshowable :: a}
   deriving (Eq, Ord)
 
-instance Typeable a => Show (Unshowable a) where
+instance (Typeable a) => Show (Unshowable a) where
   show _ = "Unshowable<" ++ show (typeRep @a) ++ ">"
 
 spec :: Spec

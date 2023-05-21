@@ -14,6 +14,7 @@ module Hasura.Server.API.Backend
     commandParser,
     eventTriggerCommands,
     functionCommands,
+    trackableCommands,
     functionPermissionsCommands,
     relationshipCommands,
     remoteRelationshipCommands,
@@ -104,8 +105,11 @@ sourceCommands =
 tableCommands :: forall (b :: BackendType). Backend b => [CommandParser b]
 tableCommands =
   [ commandParser "get_source_tables" $ RMGetSourceTables . mkAnyBackend @b,
+    commandParser "get_table_info" $ RMGetTableInfo . mkAnyBackend @b,
     commandParser "track_table" $ RMTrackTable . mkAnyBackend @b,
-    commandParser "untrack_table" $ RMUntrackTable . mkAnyBackend @b
+    commandParser "track_tables" $ RMTrackTables . mkAnyBackend @b,
+    commandParser "untrack_table" $ RMUntrackTable . mkAnyBackend @b,
+    commandParser "untrack_tables" $ RMUntrackTables . mkAnyBackend @b
   ]
 
 tablePermissionsCommands :: forall (b :: BackendType). Backend b => [CommandParser b]
@@ -126,6 +130,11 @@ functionCommands =
   [ commandParser "track_function" $ RMTrackFunction . mkAnyBackend @b,
     commandParser "untrack_function" $ RMUntrackFunction . mkAnyBackend @b,
     commandParser "set_function_customization" $ RMSetFunctionCustomization . mkAnyBackend @b
+  ]
+
+trackableCommands :: forall (b :: BackendType). Backend b => [CommandParser b]
+trackableCommands =
+  [ commandParser "get_source_trackables" $ RMGetSourceTrackables . mkAnyBackend @b
   ]
 
 functionPermissionsCommands :: forall (b :: BackendType). Backend b => [CommandParser b]

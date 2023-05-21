@@ -27,6 +27,7 @@ import Control.Lens hiding ((.=))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Retry qualified as Retry
 import Data.Aeson
+import Data.ByteString.Lazy qualified as LBS
 import Data.Either (isLeft)
 import Data.Environment qualified as Env
 import Data.HashMap.Strict.Extended qualified as HashMap
@@ -35,6 +36,7 @@ import Data.HashSet qualified as HS
 import Data.Proxy
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Text.Extended
 import Hasura.Base.Error
 import Hasura.EncJSON
@@ -43,7 +45,6 @@ import Hasura.Function.API
 import Hasura.Function.Cache
 import Hasura.Function.Metadata (FunctionMetadata (..))
 import Hasura.GraphQL.Schema (buildGQLContext)
-import Hasura.GraphQL.Schema.NamingCase
 import Hasura.Incremental qualified as Inc
 import Hasura.Logging
 import Hasura.LogicalModel.Cache (LogicalModelCache, LogicalModelInfo (..))
@@ -66,7 +67,6 @@ import Hasura.RQL.DDL.Schema.Cache.Config
 import Hasura.RQL.DDL.Schema.Cache.Dependencies
 import Hasura.RQL.DDL.Schema.Cache.Fields
 import Hasura.RQL.DDL.Schema.Cache.Permission
-import Hasura.RQL.DDL.Schema.Table
 import Hasura.RQL.Types.Action
 import Hasura.RQL.Types.Allowlist
 import Hasura.RQL.Types.Backend
@@ -77,9 +77,10 @@ import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.Endpoint
 import Hasura.RQL.Types.EventTrigger
-import Hasura.RQL.Types.Metadata hiding (tmTable)
+import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Metadata.Object
+import Hasura.RQL.Types.NamingCase
 import Hasura.RQL.Types.OpenTelemetry
 import Hasura.RQL.Types.QueryCollection
 import Hasura.RQL.Types.Relationships.Remote
@@ -91,7 +92,6 @@ import Hasura.RQL.Types.SchemaCache.Instances ()
 import Hasura.RQL.Types.SchemaCacheTypes
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization
-import Hasura.RQL.Types.Table
 import Hasura.RemoteSchema.Metadata
 import Hasura.RemoteSchema.SchemaCache
 import Hasura.SQL.AnyBackend qualified as AB
@@ -104,6 +104,9 @@ import Hasura.Services
 import Hasura.Session
 import Hasura.StoredProcedure.Cache (StoredProcedureCache, StoredProcedureInfo (..))
 import Hasura.StoredProcedure.Metadata (StoredProcedureMetadata (..))
+import Hasura.Table.API
+import Hasura.Table.Cache
+import Hasura.Table.Metadata (TableMetadata (..))
 import Hasura.Tracing qualified as Tracing
 import Language.GraphQL.Draft.Syntax qualified as G
 import Network.Types.Extended
@@ -196,7 +199,7 @@ newtype CacheRWT m a
     )
   deriving anyclass (MonadQueryTags)
 
-instance MonadReader r m => MonadReader r (CacheRWT m) where
+instance (MonadReader r m) => MonadReader r (CacheRWT m) where
   ask = lift ask
   local f (CacheRWT m) = CacheRWT $ mapReaderT (local f) m
 
@@ -210,7 +213,7 @@ instance (MonadGetPolicies m) => MonadGetPolicies (CacheRWT m) where
   runGetPrometheusMetricsGranularity = lift $ runGetPrometheusMetricsGranularity
 
 runCacheRWT ::
-  Monad m =>
+  (Monad m) =>
   CacheDynamicConfig ->
   RebuildableSchemaCache ->
   CacheRWT m a ->
@@ -235,7 +238,7 @@ instance
   ) =>
   CacheRWM (CacheRWT m)
   where
-  buildSchemaCacheWithOptions buildReason invalidations metadata = CacheRWT do
+  tryBuildSchemaCacheWithOptions buildReason invalidations metadata validateNewSchemaCache = CacheRWT do
     dynamicConfig <- ask
     (RebuildableSchemaCache lastBuiltSC invalidationKeys rule, oldInvalidations) <- get
     let metadataWithVersion = MetadataWithResourceVersion metadata $ scMetadataResourceVersion lastBuiltSC
@@ -248,7 +251,9 @@ instance
         prunedInvalidationKeys = pruneInvalidationKeys schemaCache newInvalidationKeys
         !newCache = RebuildableSchemaCache schemaCache prunedInvalidationKeys (Inc.rebuildRule result)
         !newInvalidations = oldInvalidations <> invalidations
-    put (newCache, newInvalidations)
+    case validateNewSchemaCache lastBuiltSC schemaCache of
+      (KeepNewSchemaCache, valueToReturn) -> put (newCache, newInvalidations) >> pure valueToReturn
+      (DiscardNewSchemaCache, valueToReturn) -> pure valueToReturn
     where
       -- Prunes invalidation keys that no longer exist in the schema to avoid leaking memory by
       -- hanging onto unnecessary keys.
@@ -549,7 +554,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
         BackendMetadata b
       ) =>
       ( Inc.Dependency (HashMap SourceName Inc.InvalidationKey),
-        Maybe (BackendIntrospection b),
+        Maybe LBS.ByteString,
         BackendInfoAndSourceMetadata b
       )
         `arr` Maybe (SourceConfig b, DBObjectsIntrospection b)
@@ -561,18 +566,26 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
       case maybeSourceConfig of
         Nothing -> returnA -< Nothing
         Just sourceConfig -> do
-          case biMetadata <$> sourceIntrospection of
-            Just rs -> returnA -< Just (sourceConfig, rs)
-            _ ->
-              (|
-                withRecordInconsistency
-                  ( bindErrorA
-                      -< ExceptT do
-                        resSource <- resolveDatabaseMetadata logger _bcasmSourceMetadata sourceConfig
-                        for_ resSource $ liftIO . unLogger logger
-                        pure $ (sourceConfig,) <$> resSource
-                  )
-              |) metadataObj
+          databaseResponse <- bindA -< resolveDatabaseMetadata logger _bcasmSourceMetadata sourceConfig
+          case databaseResponse of
+            Right databaseMetadata -> returnA -< Just (sourceConfig, databaseMetadata)
+            Left databaseError ->
+              -- If database exception occurs, try to lookup from stored introspection
+              case sourceIntrospection >>= decode' of
+                Nothing ->
+                  -- If no stored introspection exist, re-throw the database exception
+                  (| withRecordInconsistency (throwA -< databaseError) |) metadataObj
+                Just storedMetadata -> do
+                  let inconsistencyMessage =
+                        T.unwords
+                          [ "source " <>> sourceName,
+                            " is inconsistent because of stale database introspection is used.",
+                            "The source couldn't be reached for a fresh introspection",
+                            "because we got error: " <> qeError databaseError
+                          ]
+                  -- Still record inconsistency to notify the user obout the usage of stored stale data
+                  recordInconsistencies -< ((Just $ toJSON (qeInternal databaseError), [metadataObj]), inconsistencyMessage)
+                  returnA -< Just (sourceConfig, storedMetadata)
 
     -- impl notes (swann):
     --
@@ -902,17 +915,6 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
                 recordDependenciesM metadataObject schemaObjId $
                   Seq.singleton dependency
 
-                arrayRelationships <-
-                  traverse
-                    (storedProcedureArrayRelationshipSetup sourceName _spmStoredProcedure)
-                    _spmArrayRelationships
-
-                let sourceObject =
-                      SOSourceObj sourceName $
-                        AB.mkAnyBackend $
-                          SOIStoredProcedure @b _spmStoredProcedure
-
-                recordDependenciesM metadataObject sourceObject (mconcat $ snd <$> InsOrdHashMap.elems arrayRelationships)
                 graphqlName <- getStoredProcedureGraphqlName @b _spmStoredProcedure _spmConfig
 
                 pure
@@ -922,7 +924,6 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
                       _spiConfig = _spmConfig,
                       _spiReturns = logicalModel,
                       _spiArguments = _spmArguments,
-                      _spiArrayRelationships = fst <$> arrayRelationships,
                       _spiDescription = _spmDescription
                     }
 
@@ -1001,8 +1002,8 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
                       let sourceMetadata = _bcasmSourceMetadata backendInfoAndSourceMetadata
                           sourceName = _smName sourceMetadata
                           sourceInvalidationsKeys = Inc.selectD #_ikSources invalidationKeys
-                          sourceIntrospection = AB.unpackAnyBackend @b =<< HashMap.lookup sourceName =<< siBackendIntrospection <$> storedIntrospection
-                      maybeResolvedSource <- tryResolveSource -< (sourceInvalidationsKeys, sourceIntrospection, backendInfoAndSourceMetadata)
+                          sourceIntrospection = HashMap.lookup sourceName =<< siBackendIntrospection <$> storedIntrospection
+                      maybeResolvedSource <- tryResolveSource -< (sourceInvalidationsKeys, encJToLBS <$> sourceIntrospection, backendInfoAndSourceMetadata)
                       case maybeResolvedSource of
                         Nothing -> returnA -< Nothing
                         Just (sourceConfig, source) -> do
@@ -1018,7 +1019,6 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
                                   _rsTables source,
                                   tableInputs,
                                   metadataInvalidationKey,
-                                  sourceIntrospection,
                                   namingConv
                                 )
 
@@ -1136,7 +1136,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
             }
 
     buildOpenTelemetry ::
-      MonadWriter (Seq (Either InconsistentMetadata md)) m =>
+      (MonadWriter (Seq (Either InconsistentMetadata md)) m) =>
       OpenTelemetryConfig ->
       m OpenTelemetryInfo
     buildOpenTelemetry OpenTelemetryConfig {..} = do
@@ -1165,7 +1165,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
               )
 
     buildRESTEndpoints ::
-      MonadWriter (Seq (Either InconsistentMetadata md)) m =>
+      (MonadWriter (Seq (Either InconsistentMetadata md)) m) =>
       QueryCollections ->
       [CreateEndpoint] ->
       m (HashMap EndpointName (EndpointMetadata GQLQueryWithText))
@@ -1181,7 +1181,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
           withRecordInconsistencyM (mkEndpointMetadataObject createEndpoint) $ modifyErr addContext $ resolveEndpoint collections createEndpoint
 
     resolveEndpoint ::
-      QErrM m =>
+      (QErrM m) =>
       InsOrdHashMap CollectionName CreateCollection ->
       EndpointMetadata QueryReference ->
       m (EndpointMetadata GQLQueryWithText)
@@ -1216,7 +1216,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
 
     mkEventTriggerMetadataObject ::
       forall b a c.
-      Backend b =>
+      (Backend b) =>
       (CacheDynamicConfig, a, SourceName, c, TableName b, RecreateEventTriggers, EventTriggerConf b) ->
       MetadataObject
     mkEventTriggerMetadataObject (_, _, source, _, table, _, eventTriggerConf) =
@@ -1224,7 +1224,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
 
     mkEventTriggerMetadataObject' ::
       forall b.
-      Backend b =>
+      (Backend b) =>
       SourceName ->
       TableName b ->
       EventTriggerConf b ->
@@ -1389,7 +1389,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
                       primaryKey
 
     buildCronTriggers ::
-      MonadWriter (Seq (Either InconsistentMetadata md)) m =>
+      (MonadWriter (Seq (Either InconsistentMetadata md)) m) =>
       [CronTriggerMetadata] ->
       m (HashMap TriggerName CronTriggerInfo)
     buildCronTriggers = buildInfoMapM ctName mkCronTriggerMetadataObject buildCronTrigger
@@ -1402,7 +1402,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
               resolveCronTrigger env cronTrigger
 
     buildInheritedRoles ::
-      MonadWriter (Seq (Either InconsistentMetadata MetadataDependency)) m =>
+      (MonadWriter (Seq (Either InconsistentMetadata MetadataDependency)) m) =>
       HashSet RoleName ->
       [InheritedRole] ->
       m (HashMap RoleName Role)
@@ -1418,7 +1418,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
             pure resolvedInheritedRole
 
     buildActions ::
-      MonadWriter (Seq (Either InconsistentMetadata MetadataDependency)) m =>
+      (MonadWriter (Seq (Either InconsistentMetadata MetadataDependency)) m) =>
       AnnotatedCustomTypes ->
       BackendMap ScalarMap ->
       OrderedRoles ->
@@ -1438,7 +1438,7 @@ buildSchemaCacheRule logger env = proc (MetadataWithResourceVersion metadataNoDe
             return $ ActionInfo name (outputType, outObject) resolvedDef permissionsMap forwardClientHeaders comment
 
 buildRemoteSchemaRemoteRelationship ::
-  MonadWriter (Seq (Either InconsistentMetadata MetadataDependency)) m =>
+  (MonadWriter (Seq (Either InconsistentMetadata MetadataDependency)) m) =>
   HashMap SourceName (AB.AnyBackend PartiallyResolvedSource) ->
   PartiallyResolvedRemoteSchemaMap ->
   RemoteSchemaName ->
