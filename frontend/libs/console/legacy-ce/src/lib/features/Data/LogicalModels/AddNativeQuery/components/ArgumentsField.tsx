@@ -109,7 +109,7 @@ export const ArgumentsField = ({ types }: { types: string[] }) => {
             onClick={() => {
               append({
                 name: '',
-                type: 'string',
+                type: 'text',
               });
             }}
           >

@@ -232,6 +232,7 @@ instance (Monad m) => CacheRM (CacheRWT m) where
 instance
   ( MonadIO m,
     MonadError QErr m,
+    MonadMetadataStorage m,
     ProvidesNetwork m,
     MonadResolveSource m,
     HasCacheStaticConfig m
@@ -241,12 +242,14 @@ instance
   tryBuildSchemaCacheWithOptions buildReason invalidations metadata validateNewSchemaCache = CacheRWT do
     dynamicConfig <- ask
     (RebuildableSchemaCache lastBuiltSC invalidationKeys rule, oldInvalidations) <- get
-    let metadataWithVersion = MetadataWithResourceVersion metadata $ scMetadataResourceVersion lastBuiltSC
+    let metadataVersion = scMetadataResourceVersion lastBuiltSC
+        metadataWithVersion = MetadataWithResourceVersion metadata metadataVersion
         newInvalidationKeys = invalidateKeys invalidations invalidationKeys
+    storedIntrospection <- onLeftM (fetchSourceIntrospection metadataVersion) (\_ -> pure Nothing)
     result <-
       runCacheBuildM $
         flip runReaderT buildReason $
-          Inc.build rule (metadataWithVersion, dynamicConfig, newInvalidationKeys, Nothing)
+          Inc.build rule (metadataWithVersion, dynamicConfig, newInvalidationKeys, storedIntrospection)
     let schemaCache = Inc.result result
         prunedInvalidationKeys = pruneInvalidationKeys schemaCache newInvalidationKeys
         !newCache = RebuildableSchemaCache schemaCache prunedInvalidationKeys (Inc.rebuildRule result)
@@ -282,6 +285,10 @@ buildHealthCheckCache sources =
     mkSourceHealthCheck (BackendSourceMetadata sourceMetadata) =
       AB.traverseBackend @Backend sourceMetadata mkSourceHealthCheckBackend
 
+    -- 'Nothing' when no health check is defined. See:
+    -- https://hasura.io/docs/latest/deployment/health-checks/source-health-check/
+    -- We likely choose not to install a default `SELECT 1` health check here,
+    -- since we don't want to spam serverless databases.
     mkSourceHealthCheckBackend :: SourceMetadata b -> Maybe (SourceHealthCheckInfo b)
     mkSourceHealthCheckBackend sourceMetadata =
       let sourceName = _smName sourceMetadata

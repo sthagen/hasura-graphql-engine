@@ -95,9 +95,9 @@ runtime errors.
 | Type   | Gauge                                               |
 | Labels | `subscription_kind`: streaming \| live-query        |
 
-### Hasura Cache requests count
+### Hasura cache request count
 
-Tracks cache hit and miss requests, which helps in monitoring and optimizing cache utilization.
+Tracks cache hit and miss requests, which helps in monitoring and optimizing cache utilization. You can read more about this [here](/caching/caching-metrics.mdx).
 
 |        |                              |
 | ------ | ---------------------------- |
@@ -283,6 +283,19 @@ Current number of active PostgreSQL connections. Compare this to
 | Name   | `hasura_postgres_connections`                                                                                                                                                     |
 | Type   | Gauge                                                                                                                                                                             |
 | Labels | `source_name`: name of the database<br />`conn_info`: connection url string (password omitted) or name of the connection url environment variable<br />`role`: primary \| replica |
+
+### Hasura source health
+
+Health check status of a particular data source, corresponding to the output of
+`/healthz/sources`, with possible values 0 through 3 indicating, respectively:
+OK, TIMEOUT, FAILED, ERROR. See the [Source Health Check API Reference](/api-reference/source-health.mdx)
+for details.
+
+|        |                                                                                                                                                                                   |
+| ------ | -------------------------------------- |
+| Name   | `hasura_source_health`                 |
+| Type   | Gauge                                  |
+| Labels | `source_name`: name of the database    |
 
 ### Hasura subscription database execution time
 
