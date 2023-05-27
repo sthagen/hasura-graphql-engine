@@ -229,7 +229,7 @@ class
   -- | Get information about a given table on a given source, whether tracked
   -- or not. Primarily useful for user interfaces.
   getTableInfo ::
-    (CacheRM m, MetadataM m, MonadError QErr m) =>
+    (CacheRM m, MetadataM m, MonadError QErr m, MonadBaseControl IO m, MonadIO m) =>
     SourceName ->
     TableName b ->
     m (Maybe (SourceTableInfo b))
@@ -261,15 +261,6 @@ class
     m G.Name
   getStoredProcedureGraphqlName _ _ =
     throw500 "getStoredProcedureGraphqlName: not implemented for this backend."
-
-  -- | How to convert a column to a field.
-  -- For backends that don't support nested objects or arrays the default implementation
-  -- (i.e. wrapping the ColumnInfo in FIColumn) is what you want.
-  columnInfoToFieldInfo ::
-    HashMap G.Name (TableObjectType b) ->
-    ColumnInfo b ->
-    FieldInfo b
-  columnInfoToFieldInfo _ = FIColumn
 
   -- | Allows the backend to control whether or not a particular source supports being
   -- the target of remote relationships or not

@@ -190,15 +190,17 @@ instance NFData CustomRootField
 
 instance HasCodec CustomRootField where
   codec =
-    dimapCodec dec enc $
-      disjointEitherCodec nullCodec $
-        disjointEitherCodec (codec @Text) nameAndComment
+    dimapCodec dec enc
+      $ disjointEitherCodec nullCodec
+      $ disjointEitherCodec (codec @Text) nameAndComment
     where
       nameAndComment =
-        AC.object "CustomRootField" $
-          CustomRootField
-            <$> optionalFieldOrNullWith' "name" graphQLFieldNameCodec AC..= _crfName
-            <*> optionalFieldOrNullWithOmittedDefault' "comment" Automatic AC..= _crfComment
+        AC.object "CustomRootField"
+          $ CustomRootField
+          <$> optionalFieldOrNullWith' "name" graphQLFieldNameCodec
+          AC..= _crfName
+            <*> optionalFieldOrNullWithOmittedDefault' "comment" Automatic
+          AC..= _crfComment
 
       dec = \case
         Left _ -> CustomRootField Nothing Automatic
@@ -251,26 +253,37 @@ instance NFData TableCustomRootFields
 
 instance HasCodec TableCustomRootFields where
   codec =
-    AC.object "TableCustomRootFields" $
-      TableCustomRootFields
-        <$> field "select" AC..= _tcrfSelect
-        <*> field "select_by_pk" AC..= _tcrfSelectByPk
-        <*> field "select_aggregate" AC..= _tcrfSelectAggregate
-        <*> field "select_stream" AC..= _tcrfSelectStream
-        <*> field "insert" AC..= _tcrfInsert
-        <*> field "insert_one" AC..= _tcrfInsertOne
-        <*> field "update" AC..= _tcrfUpdate
-        <*> field "update_by_pk" AC..= _tcrfUpdateByPk
-        <*> field "update_many" AC..= _tcrfUpdateMany
-        <*> field "delete" AC..= _tcrfDelete
-        <*> field "delete_by_pk" AC..= _tcrfDeleteByPk
+    AC.object "TableCustomRootFields"
+      $ TableCustomRootFields
+      <$> field "select"
+      AC..= _tcrfSelect
+        <*> field "select_by_pk"
+      AC..= _tcrfSelectByPk
+        <*> field "select_aggregate"
+      AC..= _tcrfSelectAggregate
+        <*> field "select_stream"
+      AC..= _tcrfSelectStream
+        <*> field "insert"
+      AC..= _tcrfInsert
+        <*> field "insert_one"
+      AC..= _tcrfInsertOne
+        <*> field "update"
+      AC..= _tcrfUpdate
+        <*> field "update_by_pk"
+      AC..= _tcrfUpdateByPk
+        <*> field "update_many"
+      AC..= _tcrfUpdateMany
+        <*> field "delete"
+      AC..= _tcrfDelete
+        <*> field "delete_by_pk"
+      AC..= _tcrfDeleteByPk
     where
       field name = optionalFieldWithOmittedDefault' name defaultCustomRootField
 
 instance ToJSON TableCustomRootFields where
   toJSON TableCustomRootFields {..} =
-    object $
-      filter
+    object
+      $ filter
         ((/= Null) . snd)
         [ "select" .= _tcrfSelect,
           "select_by_pk" .= _tcrfSelectByPk,
@@ -303,9 +316,10 @@ instance FromJSON TableCustomRootFields where
 
     let duplicateRootFields = HS.toList . duplicates . mapMaybe _crfName $ getAllCustomRootFields tableCustomRootFields
     for_ (nonEmpty duplicateRootFields) \duplicatedFields ->
-      fail . T.unpack $
-        "the following custom root field names are duplicated: "
-          <> englishList "and" (toTxt <$> duplicatedFields)
+      fail
+        . T.unpack
+        $ "the following custom root field names are duplicated: "
+        <> englishList "and" (toTxt <$> duplicatedFields)
 
     pure tableCustomRootFields
     where
@@ -349,8 +363,7 @@ getAllCustomRootFields TableCustomRootFields {..} =
   ]
 
 data FieldInfo (b :: BackendType)
-  = FIColumn (ColumnInfo b)
-  | FINestedObject (NestedObjectInfo b)
+  = FIColumn (StructuredColumnInfo b)
   | FIRelationship (RelInfo b)
   | FIComputedField (ComputedFieldInfo b)
   | FIRemoteRelationship (RemoteFieldInfo (DBJoinField b))
@@ -360,8 +373,8 @@ deriving instance (Backend b) => Eq (FieldInfo b)
 
 instance (Backend b) => ToJSON (FieldInfo b) where
   toJSON =
-    genericToJSON $
-      defaultOptions
+    genericToJSON
+      $ defaultOptions
         { constructorTagModifier = snakeCase . drop 2,
           sumEncoding = TaggedObject "type" "detail"
         }
@@ -372,16 +385,14 @@ type FieldInfoMap = HashMap.HashMap FieldName
 
 fieldInfoName :: forall b. (Backend b) => FieldInfo b -> FieldName
 fieldInfoName = \case
-  FIColumn info -> fromCol @b $ ciColumn info
-  FINestedObject info -> fromCol @b $ _noiColumn info
+  FIColumn info -> fromCol @b $ structuredColumnInfoColumn info
   FIRelationship info -> fromRel $ riName info
   FIComputedField info -> fromComputedField $ _cfiName info
   FIRemoteRelationship info -> fromRemoteRelationship $ getRemoteFieldInfoName info
 
 fieldInfoGraphQLName :: FieldInfo b -> Maybe G.Name
 fieldInfoGraphQLName = \case
-  FIColumn info -> Just $ ciName info
-  FINestedObject info -> Just $ _noiName info
+  FIColumn info -> Just $ structuredColumnInfoName info
   FIRelationship info -> G.mkName $ relNameToTxt $ riName info
   FIComputedField info -> G.mkName $ computedFieldNameToText $ _cfiName info
   FIRemoteRelationship info -> G.mkName $ relNameToTxt $ getRemoteFieldInfoName info
@@ -397,16 +408,20 @@ getRemoteFieldInfoName RemoteFieldInfo {_rfiRHS} = case _rfiRHS of
 fieldInfoGraphQLNames :: FieldInfo b -> [G.Name]
 fieldInfoGraphQLNames info = case info of
   FIColumn _ -> maybeToList $ fieldInfoGraphQLName info
-  FINestedObject _ -> maybeToList $ fieldInfoGraphQLName info
   FIRelationship relationshipInfo -> fold do
     name <- fieldInfoGraphQLName info
     pure $ case riType relationshipInfo of
       ObjRel -> [name]
-      ArrRel -> [name, name <> Name.__aggregate]
+      ArrRel -> addAggregateFields [name]
   FIComputedField _ -> maybeToList $ fieldInfoGraphQLName info
   FIRemoteRelationship _ -> maybeToList $ fieldInfoGraphQLName info
+  where
+    addAggregateFields :: [G.Name] -> [G.Name]
+    addAggregateFields names = do
+      name <- names
+      [name, name <> Name.__aggregate]
 
-getCols :: FieldInfoMap (FieldInfo backend) -> [ColumnInfo backend]
+getCols :: FieldInfoMap (FieldInfo backend) -> [StructuredColumnInfo backend]
 getCols = mapMaybe (^? _FIColumn) . HashMap.elems
 
 -- | Sort columns based on their ordinal position
@@ -752,15 +767,17 @@ instance NFData ColumnConfig
 
 instance HasCodec ColumnConfig where
   codec =
-    AC.object "ColumnConfig" $
-      ColumnConfig
-        <$> optionalFieldOrNullWith' "custom_name" graphQLFieldNameCodec AC..= _ccfgCustomName
-        <*> optionalFieldWithOmittedDefault' "comment" Automatic AC..= _ccfgComment
+    AC.object "ColumnConfig"
+      $ ColumnConfig
+      <$> optionalFieldOrNullWith' "custom_name" graphQLFieldNameCodec
+      AC..= _ccfgCustomName
+        <*> optionalFieldWithOmittedDefault' "comment" Automatic
+      AC..= _ccfgComment
 
 instance ToJSON ColumnConfig where
   toJSON ColumnConfig {..} =
-    object $
-      filter
+    object
+      $ filter
         ((/= Null) . snd)
         [ "custom_name" .= _ccfgCustomName,
           "comment" .= _ccfgComment
@@ -769,8 +786,11 @@ instance ToJSON ColumnConfig where
 instance FromJSON ColumnConfig where
   parseJSON = withObject "ColumnConfig" $ \obj ->
     ColumnConfig
-      <$> obj .:? "custom_name"
-      <*> obj .:? "comment" .!= Automatic
+      <$> obj
+      .:? "custom_name"
+      <*> obj
+      .:? "comment"
+      .!= Automatic
 
 instance Semigroup ColumnConfig where
   a <> b = ColumnConfig customName comment
@@ -805,12 +825,16 @@ emptyTableConfig =
 
 instance (Backend b) => HasCodec (TableConfig b) where
   codec =
-    AC.object (backendPrefix @b <> "TableConfig") $
-      TableConfig
-        <$> optionalFieldWithDefault' "custom_root_fields" emptyCustomRootFields AC..= _tcCustomRootFields
-        <*> columnConfigCodec AC..= _tcColumnConfig
-        <*> optionalFieldOrNullWith' "custom_name" graphQLFieldNameCodec AC..= _tcCustomName
-        <*> optionalFieldWithOmittedDefault' "comment" Automatic AC..= _tcComment
+    AC.object (backendPrefix @b <> "TableConfig")
+      $ TableConfig
+      <$> optionalFieldWithDefault' "custom_root_fields" emptyCustomRootFields
+      AC..= _tcCustomRootFields
+        <*> columnConfigCodec
+      AC..= _tcColumnConfig
+        <*> optionalFieldOrNullWith' "custom_name" graphQLFieldNameCodec
+      AC..= _tcCustomName
+        <*> optionalFieldWithOmittedDefault' "comment" Automatic
+      AC..= _tcComment
     where
       -- custom_column_names is a deprecated property that has been replaced by column_config.
       -- We merge custom_column_names into column_config transparently to maintain backwards
@@ -824,10 +848,12 @@ instance (Backend b) => HasCodec (TableConfig b) where
       -- values from @column_config@ and @custom_column_names@ are merged
       -- produce one value for @_tcColumnConfig@.
       columnConfigCodec =
-        dimapCodec dec enc $
-          (,)
-            <$> optionalFieldWithDefault' "column_config" HashMap.empty AC..= fst
-            <*> optionalFieldWithDefaultWith' "custom_column_names" (hashMapCodec graphQLFieldNameCodec) HashMap.empty AC..= snd
+        dimapCodec dec enc
+          $ (,)
+          <$> optionalFieldWithDefault' "column_config" HashMap.empty
+          AC..= fst
+            <*> optionalFieldWithDefaultWith' "custom_column_names" (hashMapCodec graphQLFieldNameCodec) HashMap.empty
+          AC..= snd
 
       -- if @custom_column_names@ was given then merge its value during decoding
       -- to get a complete value for _tcColumnConfig
@@ -845,10 +871,15 @@ instance (Backend b) => HasCodec (TableConfig b) where
 instance (Backend b) => FromJSON (TableConfig b) where
   parseJSON = withObject "TableConfig" $ \obj -> do
     TableConfig
-      <$> obj .:? "custom_root_fields" .!= emptyCustomRootFields
+      <$> obj
+      .:? "custom_root_fields"
+      .!= emptyCustomRootFields
       <*> parseColumnConfig obj
-      <*> obj .:? "custom_name"
-      <*> obj .:? "comment" .!= Automatic
+      <*> obj
+      .:? "custom_name"
+      <*> obj
+      .:? "comment"
+      .!= Automatic
     where
       -- custom_column_names is a deprecated property that has been replaced by column_config.
       -- We merge custom_column_names into column_config transparently to maintain backwards
@@ -863,8 +894,8 @@ instance (Backend b) => FromJSON (TableConfig b) where
 
 instance (Backend b) => ToJSON (TableConfig b) where
   toJSON TableConfig {..} =
-    object $
-      filter
+    object
+      $ filter
         ((/= Null) . snd)
         [ "custom_root_fields" .= _tcCustomRootFields,
           -- custom_column_names is a deprecated property that has been replaced by column_config.
@@ -1010,6 +1041,7 @@ instance (Backend b) => FromJSON (TableObjectFieldDefinition b) where
 data TableObjectFieldType (b :: BackendType)
   = TOFTScalar G.Name (ScalarType b)
   | TOFTObject G.Name
+  | TOFTArray (XNestedArrays b) (TableObjectFieldType b) Bool -- isNullable
   deriving stock (Generic)
 
 deriving stock instance (Backend b) => Eq (TableObjectFieldType b)
@@ -1059,9 +1091,9 @@ tciUniqueOrPrimaryKeyConstraints ::
   TableCoreInfoG b f (ColumnInfo b) ->
   Maybe (NonEmpty (UniqueConstraint b))
 tciUniqueOrPrimaryKeyConstraints info =
-  NE.nonEmpty $
-    maybeToList (primaryToUnique <$> _tciPrimaryKey info)
-      <> (toList (_tciUniqueConstraints info))
+  NE.nonEmpty
+    $ maybeToList (primaryToUnique <$> _tciPrimaryKey info)
+    <> (toList (_tciUniqueConstraints info))
   where
     primaryToUnique :: PrimaryKey b (ColumnInfo b) -> UniqueConstraint b
     primaryToUnique pk = UniqueConstraint (_pkConstraint pk) (HS.fromList . fmap ciColumn . toList $ _pkColumns pk)
@@ -1136,14 +1168,14 @@ instance (Backend b) => FromJSON (ForeignKeyMetadata b) where
     unless (length columns == length foreignColumns) do
       fail "columns and foreign_columns differ in length"
 
-    pure $
-      ForeignKeyMetadata
+    pure
+      $ ForeignKeyMetadata
         ForeignKey
           { _fkConstraint = constraint,
             _fkForeignTable = foreignTable,
             _fkColumnMapping =
-              NEHashMap.fromNonEmpty $
-                NE.zip columns foreignColumns
+              NEHashMap.fromNonEmpty
+                $ NE.zip columns foreignColumns
           }
 
 -- | Metadata of any Backend table which is being extracted from source database
@@ -1180,7 +1212,7 @@ getFieldInfoM tableInfo fieldName =
 getColumnInfoM ::
   TableInfo b -> FieldName -> Maybe (ColumnInfo b)
 getColumnInfoM tableInfo fieldName =
-  (^? _FIColumn) =<< getFieldInfoM tableInfo fieldName
+  (^? _FIColumn . _SCIScalarColumn) =<< getFieldInfoM tableInfo fieldName
 
 askFieldInfo ::
   (MonadError QErr m) =>
@@ -1208,23 +1240,25 @@ askColInfo ::
   m (ColumnInfo backend)
 askColInfo m c msg = do
   fieldInfo <-
-    modifyErr ("column " <>) $
-      askFieldInfo m (fromCol @backend c)
+    modifyErr ("column " <>)
+      $ askFieldInfo m (fromCol @backend c)
   case fieldInfo of
-    (FIColumn colInfo) -> pure colInfo
-    (FINestedObject _) -> throwErr "nested object"
+    (FIColumn (SCIScalarColumn colInfo)) -> pure colInfo
+    (FIColumn (SCIObjectColumn _)) -> throwErr "object"
+    (FIColumn (SCIArrayColumn _)) -> throwErr "array"
     (FIRelationship _) -> throwErr "relationship"
     (FIComputedField _) -> throwErr "computed field"
     (FIRemoteRelationship _) -> throwErr "remote relationship"
   where
     throwErr fieldType =
-      throwError $
-        err400 UnexpectedPayload $
-          "expecting a database column; but, "
-            <> c <<> " is a "
-            <> fieldType
-            <> "; "
-            <> msg
+      throwError
+        $ err400 UnexpectedPayload
+        $ "expecting a database column; but, "
+        <> c
+        <<> " is a "
+        <> fieldType
+        <> "; "
+        <> msg
 
 askComputedFieldInfo ::
   (MonadError QErr m) =>
@@ -1233,22 +1267,22 @@ askComputedFieldInfo ::
   m (ComputedFieldInfo backend)
 askComputedFieldInfo fields computedField = do
   fieldInfo <-
-    modifyErr ("computed field " <>) $
-      askFieldInfo fields $
-        fromComputedField computedField
+    modifyErr ("computed field " <>)
+      $ askFieldInfo fields
+      $ fromComputedField computedField
   case fieldInfo of
     (FIColumn _) -> throwErr "column"
-    (FINestedObject _) -> throwErr "nested object"
     (FIRelationship _) -> throwErr "relationship"
     (FIRemoteRelationship _) -> throwErr "remote relationship"
     (FIComputedField cci) -> pure cci
   where
     throwErr fieldType =
-      throwError $
-        err400 UnexpectedPayload $
-          "expecting a computed field; but, "
-            <> computedField <<> " is a "
-            <> fieldType
+      throwError
+        $ err400 UnexpectedPayload
+        $ "expecting a computed field; but, "
+        <> computedField
+        <<> " is a "
+        <> fieldType
 
 assertColumnExists ::
   forall backend m.
@@ -1268,16 +1302,17 @@ askRelType ::
   m (RelInfo backend)
 askRelType m r msg = do
   colInfo <-
-    modifyErr ("relationship " <>) $
-      askFieldInfo m (fromRel r)
+    modifyErr ("relationship " <>)
+      $ askFieldInfo m (fromRel r)
   case colInfo of
     (FIRelationship relInfo) -> return relInfo
     _ ->
-      throwError $
-        err400 UnexpectedPayload $
-          "expecting a relationship; but, "
-            <> r <<> " is a postgres column; "
-            <> msg
+      throwError
+        $ err400 UnexpectedPayload
+        $ "expecting a relationship; but, "
+        <> r
+        <<> " is a postgres column; "
+        <> msg
 
 askRemoteRel ::
   (MonadError QErr m) =>
@@ -1296,7 +1331,7 @@ mkAdminRolePermInfo tableInfo =
   RolePermInfo (Just i) (Just s) (Just u) (Just d)
   where
     fields = _tciFieldInfoMap tableInfo
-    pgCols = map ciColumn $ getCols fields
+    pgCols = map structuredColumnInfoColumn $ getCols fields
     pgColsWithFilter = HashMap.fromList $ map (,Nothing) pgCols
     computedFields =
       -- Fetch the list of computed fields not returning rows of existing table.

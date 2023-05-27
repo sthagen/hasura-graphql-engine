@@ -24,6 +24,7 @@ module Hasura.GraphQL.Schema.Common
     AnnotatedActionField,
     AnnotatedActionFields,
     AnnotatedNestedObjectSelect,
+    AnnotatedNestedArraySelect,
     EdgeFields,
     Scenario (..),
     SelectArgs,
@@ -137,7 +138,7 @@ type MonadBuildSchemaBase m n =
 newtype RemoteRelationshipParserBuilder
   = RemoteRelationshipParserBuilder
       ( forall lhsJoinField r n m.
-        MonadBuildSchemaBase m n =>
+        (MonadBuildSchemaBase m n) =>
         RemoteFieldInfo lhsJoinField ->
         SchemaT r m (Maybe [P.FieldParser n (IR.RemoteRelationshipField IR.UnpreparedValue)])
       )
@@ -155,7 +156,7 @@ ignoreRemoteRelationship = RemoteRelationshipParserBuilder $ const $ pure Nothin
 newtype NodeInterfaceParserBuilder = NodeInterfaceParserBuilder
   { runNodeBuilder ::
       ( forall m n.
-        MonadBuildSchemaBase m n =>
+        (MonadBuildSchemaBase m n) =>
         SchemaContext ->
         SchemaOptions ->
         m (P.Parser 'P.Output n NodeMap)
@@ -320,6 +321,8 @@ type AnnotatedActionField = IR.ActionFieldG (IR.RemoteRelationshipField IR.Unpre
 
 type AnnotatedNestedObjectSelect b = IR.AnnNestedObjectSelectG b (IR.RemoteRelationshipField IR.UnpreparedValue) (IR.UnpreparedValue b)
 
+type AnnotatedNestedArraySelect b = IR.AnnNestedArraySelectG b (IR.RemoteRelationshipField IR.UnpreparedValue) (IR.UnpreparedValue b)
+
 -------------------------------------------------------------------------------
 
 data RemoteSchemaParser n = RemoteSchemaParser
@@ -383,17 +386,18 @@ askNativeQueryInfo nativeQueryName = do
 -- | Whether the request is sent with `x-hasura-use-backend-only-permissions` set to `true`.
 data Scenario = Backend | Frontend deriving (Enum, Show, Eq)
 
-textToName :: MonadError QErr m => Text -> m G.Name
+textToName :: (MonadError QErr m) => Text -> m G.Name
 textToName textName =
   G.mkName textName
     `onNothing` throw400
       ValidationFailed
       ( "cannot include "
-          <> textName <<> " in the GraphQL schema because "
+          <> textName
+          <<> " in the GraphQL schema because "
           <> " it is not a valid GraphQL identifier"
       )
 
-textToGQLIdentifier :: MonadError QErr m => Text -> m GQLNameIdentifier
+textToGQLIdentifier :: (MonadError QErr m) => Text -> m GQLNameIdentifier
 textToGQLIdentifier textName = do
   let gqlIdents = do
         (pref, suffs) <- uncons (C.fromSnake textName)
@@ -404,7 +408,8 @@ textToGQLIdentifier textName = do
     `onNothing` throw400
       ValidationFailed
       ( "cannot include "
-          <> textName <<> " in the GraphQL schema because "
+          <> textName
+          <<> " in the GraphQL schema because "
           <> " it is not a valid GraphQL identifier"
       )
 
@@ -414,7 +419,7 @@ partialSQLExpToUnpreparedValue PSESession = IR.UVSession
 partialSQLExpToUnpreparedValue (PSESQLExp sqlExp) = IR.UVLiteral sqlExp
 
 mapField ::
-  Functor m =>
+  (Functor m) =>
   P.InputFieldsParser m (Maybe a) ->
   (a -> b) ->
   P.InputFieldsParser m (Maybe b)
@@ -459,7 +464,7 @@ mkDescriptionWith descM defaultTxt = G.Description $ case descM of
 --      Karthikeyan: Yes, this is correct. We allowed this pre PDV but somehow
 --        got removed in PDV. OTOH, I’m not sure how prevalent this feature
 --        actually is
-takeValidTables :: forall b. Backend b => TableCache b -> TableCache b
+takeValidTables :: forall b. (Backend b) => TableCache b -> TableCache b
 takeValidTables = HashMap.filterWithKey graphQLTableFilter
   where
     graphQLTableFilter tableName tableInfo =
@@ -507,12 +512,12 @@ mkEnumTypeName enumTableName enumTableCustomName = do
 
 addEnumSuffix :: ResolvedSourceCustomization -> GQLNameIdentifier -> Maybe G.Name -> G.Name
 addEnumSuffix customization enumTableGQLName enumTableCustomName =
-  runMkTypename (_rscTypeNames customization) $
-    applyTypeNameCaseIdentifier (_rscNamingConvention customization) $
-      mkEnumTableTypeName enumTableGQLName enumTableCustomName
+  runMkTypename (_rscTypeNames customization)
+    $ applyTypeNameCaseIdentifier (_rscNamingConvention customization)
+    $ mkEnumTableTypeName enumTableGQLName enumTableCustomName
 
 -- TODO: figure out what the purpose of this method is.
-peelWithOrigin :: P.MonadParse m => P.Parser 'P.Both m a -> P.Parser 'P.Both m (IR.ValueWithOrigin a)
+peelWithOrigin :: (P.MonadParse m) => P.Parser 'P.Both m a -> P.Parser 'P.Both m (IR.ValueWithOrigin a)
 peelWithOrigin parser =
   parser
     { P.pParser = \case
@@ -526,12 +531,12 @@ peelWithOrigin parser =
 getIntrospectionResult :: Options.RemoteSchemaPermissions -> RoleName -> RemoteSchemaCtxG remoteFieldInfo -> Maybe IntrospectionResult
 getIntrospectionResult remoteSchemaPermsCtx role remoteSchemaContext =
   if
-      | -- admin doesn't have a custom annotated introspection, defaulting to the original one
-        role == adminRoleName ->
-          pure $ _rscIntroOriginal remoteSchemaContext
-      | -- if permissions are disabled, the role map will be empty, defaulting to the original one
-        remoteSchemaPermsCtx == Options.DisableRemoteSchemaPermissions ->
-          pure $ _rscIntroOriginal remoteSchemaContext
-      | -- otherwise, look the role up in the map; if we find nothing, then the role doesn't have access
-        otherwise ->
-          HashMap.lookup role (_rscPermissions remoteSchemaContext)
+    | -- admin doesn't have a custom annotated introspection, defaulting to the original one
+      role == adminRoleName ->
+        pure $ _rscIntroOriginal remoteSchemaContext
+    | -- if permissions are disabled, the role map will be empty, defaulting to the original one
+      remoteSchemaPermsCtx == Options.DisableRemoteSchemaPermissions ->
+        pure $ _rscIntroOriginal remoteSchemaContext
+    | -- otherwise, look the role up in the map; if we find nothing, then the role doesn't have access
+      otherwise ->
+        HashMap.lookup role (_rscPermissions remoteSchemaContext)

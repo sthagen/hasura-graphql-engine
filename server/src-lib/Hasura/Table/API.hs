@@ -91,10 +91,16 @@ instance (Backend b) => FromJSON (TrackTable b) where
     where
       withOptions = withObject "TrackTable" \o ->
         TrackTable
-          <$> o .:? "source" .!= defaultSource
-          <*> o .: "table"
-          <*> o .:? "is_enum" .!= False
-          <*> o .:? "apollo_federation_config"
+          <$> o
+          .:? "source"
+          .!= defaultSource
+          <*> o
+          .: "table"
+          <*> o
+          .:? "is_enum"
+          .!= False
+          <*> o
+          .:? "apollo_federation_config"
       withoutOptions = TrackTable defaultSource <$> parseJSON v <*> pure False <*> pure Nothing
 
 data SetTableIsEnum b = SetTableIsEnum
@@ -110,9 +116,13 @@ deriving instance (Show (TableName b)) => Show (SetTableIsEnum b)
 instance (Backend b) => FromJSON (SetTableIsEnum b) where
   parseJSON = withObject "SetTableIsEnum" $ \o ->
     SetTableIsEnum
-      <$> o .:? "source" .!= defaultSource
-      <*> o .: "table"
-      <*> o .: "is_enum"
+      <$> o
+      .:? "source"
+      .!= defaultSource
+      <*> o
+      .: "table"
+      <*> o
+      .: "is_enum"
 
 data UntrackTable b = UntrackTable
   { utSource :: SourceName,
@@ -127,9 +137,14 @@ deriving instance (Backend b) => Eq (UntrackTable b)
 instance (Backend b) => FromJSON (UntrackTable b) where
   parseJSON = withObject "UntrackTable" $ \o ->
     UntrackTable
-      <$> o .:? "source" .!= defaultSource
-      <*> o .: "table"
-      <*> o .:? "cascade" .!= False
+      <$> o
+      .:? "source"
+      .!= defaultSource
+      <*> o
+      .: "table"
+      <*> o
+      .:? "cascade"
+      .!= False
 
 isTableTracked :: forall b. (Backend b) => SourceInfo b -> TableName b -> Bool
 isTableTracked sourceInfo tableName =
@@ -146,13 +161,16 @@ trackExistingTableOrViewPhase1 ::
   m ()
 trackExistingTableOrViewPhase1 source tableName = do
   sourceInfo <- askSourceInfo source
-  when (isTableTracked @b sourceInfo tableName) $
-    throw400 AlreadyTracked $
-      "view/table already tracked: " <>> tableName
+  when (isTableTracked @b sourceInfo tableName)
+    $ throw400 AlreadyTracked
+    $ "view/table already tracked: "
+    <>> tableName
   let functionName = tableToFunction @b tableName
-  when (isJust $ HashMap.lookup functionName $ _siFunctions @b sourceInfo) $
-    throw400 NotSupported $
-      "function with name " <> tableName <<> " already exists"
+  when (isJust $ HashMap.lookup functionName $ _siFunctions @b sourceInfo)
+    $ throw400 NotSupported
+    $ "function with name "
+    <> tableName
+    <<> " already exists"
 
 queryForExistingFieldNames :: SchemaCache -> Vector Text
 queryForExistingFieldNames schemaCache = do
@@ -167,26 +185,26 @@ queryForExistingFieldNames schemaCache = do
       --   }
       -- }
       introspectionQuery =
-        [ G.SelectionField $
-            G.Field
+        [ G.SelectionField
+            $ G.Field
               Nothing
               GName.___schema
               mempty
               []
-              [ G.SelectionField $
-                  G.Field
+              [ G.SelectionField
+                  $ G.Field
                     Nothing
                     GName._queryType
                     mempty
                     []
-                    [ G.SelectionField $
-                        G.Field
+                    [ G.SelectionField
+                        $ G.Field
                           Nothing
                           GName._fields
                           mempty
                           []
-                          [ G.SelectionField $
-                              G.Field
+                          [ G.SelectionField
+                              $ G.Field
                                 Nothing
                                 GName._name
                                 mempty
@@ -222,11 +240,11 @@ checkConflictingNode ::
   m ()
 checkConflictingNode sc tnGQL = do
   let fieldNames = queryForExistingFieldNames sc
-  when (tnGQL `elem` fieldNames) $
-    throw400 RemoteSchemaConflicts $
-      "node "
-        <> tnGQL
-        <> " already exists in current graphql schema"
+  when (tnGQL `elem` fieldNames)
+    $ throw400 RemoteSchemaConflicts
+    $ "node "
+    <> tnGQL
+    <> " already exists in current graphql schema"
 
 findConflictingNodes ::
   SchemaCache ->
@@ -238,10 +256,10 @@ findConflictingNodes sc extractName items = do
   flip foldMap items $ \item ->
     let name = extractName item
         err =
-          err400 RemoteSchemaConflicts $
-            "node "
-              <> name
-              <> " already exists in current graphql schema"
+          err400 RemoteSchemaConflicts
+            $ "node "
+            <> name
+            <> " already exists in current graphql schema"
      in [(item, err) | name `elem` fieldNames]
 
 trackExistingTableOrViewPhase2 ::
@@ -261,9 +279,9 @@ trackExistingTableOrViewPhase2 trackTable@TrackTableV2 {ttv2Table = TrackTable {
   -}
   checkConflictingNode sc $ snakeCaseTableName @b tName
   buildSchemaCacheFor
-    ( MOSourceObjId tSource $
-        AB.mkAnyBackend $
-          SMOTable @b tName
+    ( MOSourceObjId tSource
+        $ AB.mkAnyBackend
+        $ SMOTable @b tName
     )
     $ mkTrackTableMetadataModifier trackTable
   pure successMsg
@@ -311,8 +329,11 @@ data TrackTables b = TrackTables
 instance (Backend b) => FromJSON (TrackTables b) where
   parseJSON = withObject "TrackTables" $ \o -> do
     TrackTables
-      <$> o .: "tables"
-      <*> o .:? "allow_warnings" .!= AllowWarnings
+      <$> o
+      .: "tables"
+      <*> o
+      .:? "allow_warnings"
+      .!= AllowWarnings
 
 runTrackTablesQ ::
   forall b m.
@@ -320,9 +341,9 @@ runTrackTablesQ ::
   TrackTables b ->
   m EncJSON
 runTrackTablesQ TrackTables {..} = do
-  unless (null duplicatedTables) $
-    let tables = commaSeparated $ (\(source, tableName) -> toTxt source <> "." <> toTxt tableName) <$> duplicatedTables
-     in withPathK "tables" $ throw400 BadRequest ("The following tables occur more than once in the request: " <> tables)
+  unless (null duplicatedTables)
+    $ let tables = commaSeparated $ (\(source, tableName) -> toTxt source <> "." <> toTxt tableName) <$> duplicatedTables
+       in withPathK "tables" $ throw400 BadRequest ("The following tables occur more than once in the request: " <> tables)
 
   (successfulTables, metadataWarnings) <- runMetadataWarnings $ do
     phase1SuccessfulTables <- fmap mconcat . for _ttv2Tables $ \trackTable@TrackTableV2 {ttv2Table = TrackTable {..}} -> do
@@ -335,14 +356,14 @@ runTrackTablesQ TrackTables {..} = do
 
     trackExistingTablesOrViewsPhase2 phase1SuccessfulTables
 
-  when (null successfulTables) $
-    throw400WithDetail InvalidConfiguration "all tables failed to track" (toJSON metadataWarnings)
+  when (null successfulTables)
+    $ throw400WithDetail InvalidConfiguration "all tables failed to track" (toJSON metadataWarnings)
 
   case _ttv2AllowWarnings of
     AllowWarnings -> pure ()
     DisallowWarnings ->
-      unless (null metadataWarnings) $
-        throw400WithDetail (CustomCode "metadata-warnings") "failed due to metadata warnings" (toJSON metadataWarnings)
+      unless (null metadataWarnings)
+        $ throw400WithDetail (CustomCode "metadata-warnings") "failed due to metadata warnings" (toJSON metadataWarnings)
 
   pure $ mkSuccessResponseWithWarnings metadataWarnings
   where
@@ -392,8 +413,11 @@ data UntrackTables b = UntrackTables
 instance (Backend b) => FromJSON (UntrackTables b) where
   parseJSON = withObject "UntrackTables" $ \o -> do
     UntrackTables
-      <$> o .: "tables"
-      <*> o .:? "allow_warnings" .!= AllowWarnings
+      <$> o
+      .: "tables"
+      <*> o
+      .:? "allow_warnings"
+      .!= AllowWarnings
 
 runUntrackTablesQ ::
   forall b m.
@@ -401,9 +425,9 @@ runUntrackTablesQ ::
   UntrackTables b ->
   m EncJSON
 runUntrackTablesQ UntrackTables {..} = do
-  unless (null duplicatedTables) $
-    let tables = commaSeparated $ (\(source, tableName) -> toTxt source <> "." <> toTxt tableName) <$> duplicatedTables
-     in withPathK "tables" $ throw400 BadRequest ("The following tables occur more than once in the request: " <> tables)
+  unless (null duplicatedTables)
+    $ let tables = commaSeparated $ (\(source, tableName) -> toTxt source <> "." <> toTxt tableName) <$> duplicatedTables
+       in withPathK "tables" $ throw400 BadRequest ("The following tables occur more than once in the request: " <> tables)
 
   (successfulTables, metadataWarnings) <- runMetadataWarnings $ do
     phase1SuccessfulTables <- fmap mconcat . for _utTables $ \untrackTable -> do
@@ -416,14 +440,14 @@ runUntrackTablesQ UntrackTables {..} = do
 
     untrackExistingTablesOrViewsPhase2 phase1SuccessfulTables
 
-  when (null successfulTables) $
-    throw400WithDetail InvalidConfiguration "all tables failed to untrack" (toJSON metadataWarnings)
+  when (null successfulTables)
+    $ throw400WithDetail InvalidConfiguration "all tables failed to untrack" (toJSON metadataWarnings)
 
   case _utAllowWarnings of
     AllowWarnings -> pure ()
     DisallowWarnings ->
-      unless (null metadataWarnings) $
-        throw400WithDetail (CustomCode "metadata-warnings") "failed due to metadata warnings" (toJSON metadataWarnings)
+      unless (null metadataWarnings)
+        $ throw400WithDetail (CustomCode "metadata-warnings") "failed due to metadata warnings" (toJSON metadataWarnings)
 
   pure $ mkSuccessResponseWithWarnings metadataWarnings
   where
@@ -439,7 +463,7 @@ runUntrackTablesQ UntrackTables {..} = do
               _ -> Nothing
           )
 
-mkUntrackTableObjectId :: forall b. Backend b => UntrackTable b -> MetadataObjId
+mkUntrackTableObjectId :: forall b. (Backend b) => UntrackTable b -> MetadataObjId
 mkUntrackTableObjectId UntrackTable {..} =
   MOSourceObjId utSource . AB.mkAnyBackend $ SMOTable @b utTable
 
@@ -499,7 +523,9 @@ runSetExistingTableIsEnumQ (SetTableIsEnum source tableName isEnum) = do
   buildSchemaCacheFor
     (MOSourceObjId source $ AB.mkAnyBackend $ SMOTable @b tableName)
     $ MetadataModifier
-    $ tableMetadataSetter @b source tableName . tmIsEnum .~ isEnum
+    $ tableMetadataSetter @b source tableName
+    . tmIsEnum
+    .~ isEnum
   return successMsg
 
 data SetTableCustomization b = SetTableCustomization
@@ -512,9 +538,13 @@ data SetTableCustomization b = SetTableCustomization
 instance (Backend b) => FromJSON (SetTableCustomization b) where
   parseJSON = withObject "SetTableCustomization" $ \o ->
     SetTableCustomization
-      <$> o .:? "source" .!= defaultSource
-      <*> o .: "table"
-      <*> o .: "configuration"
+      <$> o
+      .:? "source"
+      .!= defaultSource
+      <*> o
+      .: "table"
+      <*> o
+      .: "configuration"
 
 data SetTableCustomFields = SetTableCustomFields
   { _stcfSource :: SourceName,
@@ -527,10 +557,17 @@ data SetTableCustomFields = SetTableCustomFields
 instance FromJSON SetTableCustomFields where
   parseJSON = withObject "SetTableCustomFields" $ \o ->
     SetTableCustomFields
-      <$> o .:? "source" .!= defaultSource
-      <*> o .: "table"
-      <*> o .:? "custom_root_fields" .!= emptyCustomRootFields
-      <*> o .:? "custom_column_names" .!= HashMap.empty
+      <$> o
+      .:? "source"
+      .!= defaultSource
+      <*> o
+      .: "table"
+      <*> o
+      .:? "custom_root_fields"
+      .!= emptyCustomRootFields
+      <*> o
+      .:? "custom_column_names"
+      .!= HashMap.empty
 
 runSetTableCustomFieldsQV2 ::
   (QErrM m, CacheRWM m, MetadataM m) => SetTableCustomFields -> m EncJSON
@@ -541,7 +578,9 @@ runSetTableCustomFieldsQV2 (SetTableCustomFields source tableName rootFields col
   buildSchemaCacheFor
     (MOSourceObjId source $ AB.mkAnyBackend $ SMOTable @('Postgres 'Vanilla) tableName)
     $ MetadataModifier
-    $ tableMetadataSetter source tableName . tmConfiguration .~ tableConfig
+    $ tableMetadataSetter source tableName
+    . tmConfiguration
+    .~ tableConfig
   return successMsg
 
 runSetTableCustomization ::
@@ -554,7 +593,9 @@ runSetTableCustomization (SetTableCustomization source table config) = do
   buildSchemaCacheFor
     (MOSourceObjId source $ AB.mkAnyBackend $ SMOTable @b table)
     $ MetadataModifier
-    $ tableMetadataSetter source table . tmConfiguration .~ config
+    $ tableMetadataSetter source table
+    . tmConfiguration
+    .~ config
   return successMsg
 
 untrackExistingTableOrViewPhase1 ::
@@ -564,9 +605,9 @@ untrackExistingTableOrViewPhase1 ::
   m ()
 untrackExistingTableOrViewPhase1 (UntrackTable source vn _) = do
   schemaCache <- askSchemaCache
-  void $
-    unsafeTableInfo @b source vn (scSources schemaCache)
-      `onNothing` throw400 AlreadyUntracked ("view/table already untracked: " <>> vn)
+  void
+    $ unsafeTableInfo @b source vn (scSources schemaCache)
+    `onNothing` throw400 AlreadyUntracked ("view/table already untracked: " <>> vn)
 
 untrackExistingTableOrViewPhase2 ::
   forall b m.
@@ -578,8 +619,8 @@ untrackExistingTableOrViewPhase2 untrackTable@(UntrackTable source tableName cas
   sourceConfig <- askSourceConfig @b source
 
   -- Report batch with an error if cascade is not set
-  unless (null indirectDeps || cascade) $
-    reportDependentObjectsExist indirectDeps
+  unless (null indirectDeps || cascade)
+    $ reportDependentObjectsExist indirectDeps
   -- Purge all the dependents from state
   metadataModifier <- mkUntrackTableMetadataModifier untrackTable indirectDeps
   -- delete the table and its direct dependencies
@@ -662,7 +703,7 @@ buildTableCache ::
     Inc.Dependency Inc.InvalidationKey,
     NamingCase
   )
-    `arr` HashMap.HashMap (TableName b) (TableCoreInfoG b (ColumnInfo b) (ColumnInfo b))
+    `arr` HashMap.HashMap (TableName b) (TableCoreInfoG b (StructuredColumnInfo b) (ColumnInfo b))
 buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuildInputs, reloadMetadataInvalidationKey, tCase) -> do
   rawTableInfos <-
     (|
@@ -680,9 +721,11 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
                       Just metadataTable ->
                         buildRawTableInfo -< (table, metadataTable, sourceConfig, reloadMetadataInvalidationKey)
                 )
-            |) (mkTableMetadataObject source tableName)
+            |)
+              (mkTableMetadataObject source tableName)
         )
-      |) (HashMap.groupOnNE _tbiName tableBuildInputs)
+      |)
+      (HashMap.groupOnNE _tbiName tableBuildInputs)
   let rawTableCache = catMaybes rawTableInfos
       enumTables = flip mapMaybe rawTableCache \rawTableInfo ->
         (,,) <$> _tciPrimaryKey rawTableInfo <*> pure (_tciCustomConfig rawTableInfo) <*> _tciEnumValues rawTableInfo
@@ -694,9 +737,9 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
   where
     mkTableMetadataObject source name =
       MetadataObject
-        ( MOSourceObjId source $
-            AB.mkAnyBackend $
-              SMOTable @b name
+        ( MOSourceObjId source
+            $ AB.mkAnyBackend
+            $ SMOTable @b name
         )
         (toJSON name)
 
@@ -756,7 +799,7 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
       HashMap.HashMap (TableName b) (PrimaryKey b (Column b), TableConfig b, EnumValues) ->
       TableCoreInfoG b (RawColumnInfo b) (Column b) ->
       NamingCase ->
-      n (TableCoreInfoG b (ColumnInfo b) (ColumnInfo b))
+      n (TableCoreInfoG b (StructuredColumnInfo b) (ColumnInfo b))
     processTableInfo enumTables rawInfo tCase = do
       let columns = _tciFieldInfoMap rawInfo
           enumReferences = resolveEnumReferences enumTables (_tciForeignKeys rawInfo)
@@ -765,7 +808,7 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
           >>= traverse (processColumnInfo tCase enumReferences (_tciName rawInfo))
       assertNoDuplicateFieldNames (HashMap.elems columnInfoMap)
 
-      primaryKey <- traverse (resolvePrimaryKeyColumns columnInfoMap) (_tciPrimaryKey rawInfo)
+      primaryKey <- traverse (resolvePrimaryKeyColumns $ HashMap.mapMaybe toScalarColumnInfo columnInfoMap) (_tciPrimaryKey rawInfo)
       pure
         rawInfo
           { _tciFieldInfoMap = columnInfoMap,
@@ -798,8 +841,10 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
       This column -> pure (column, mempty)
       These column config -> pure (column, config)
       That _ ->
-        throw400 NotExists $
-          "configuration was given for the column " <> fieldName <<> ", but no such column exists"
+        throw400 NotExists
+          $ "configuration was given for the column "
+          <> fieldName
+          <<> ", but no such column exists"
 
     extractColumnConfiguration ::
       (QErrM n) =>
@@ -821,45 +866,72 @@ buildTableCache = Inc.cache proc (source, sourceConfig, dbTablesMeta, tableBuild
       HashMap.HashMap (Column b) (NonEmpty (EnumReference b)) ->
       TableName b ->
       (RawColumnInfo b, GQLNameIdentifier, Maybe G.Description) ->
-      n (ColumnInfo b)
-    processColumnInfo tCase tableEnumReferences tableName (rawInfo, name, description) = do
-      resolvedType <- resolveColumnType
-      pure
-        ColumnInfo
-          { ciColumn = pgCol,
-            ciName = (applyFieldNameCaseIdentifier tCase name),
-            ciPosition = rciPosition rawInfo,
-            ciType = resolvedType,
-            ciIsNullable = rciIsNullable rawInfo,
-            ciDescription = description,
-            ciMutability = rciMutability rawInfo
-          }
+      n (StructuredColumnInfo b)
+    processColumnInfo tCase tableEnumReferences tableName (rawInfo, name, description) =
+      processRawColumnType (rciIsNullable rawInfo) $ rciType rawInfo
       where
+        processRawColumnType isNullable = \case
+          RawColumnTypeScalar scalarType -> do
+            resolvedType <- resolveColumnType scalarType
+            pure
+              $ SCIScalarColumn
+                ColumnInfo
+                  { ciColumn = pgCol,
+                    ciName = applyFieldNameCaseIdentifier tCase name,
+                    ciPosition = rciPosition rawInfo,
+                    ciType = resolvedType,
+                    ciIsNullable = isNullable,
+                    ciDescription = description,
+                    ciMutability = rciMutability rawInfo
+                  }
+          RawColumnTypeObject supportsNestedObjects objectTypeName ->
+            pure
+              $ SCIObjectColumn @b
+                NestedObjectInfo
+                  { _noiSupportsNestedObjects = supportsNestedObjects,
+                    _noiColumn = pgCol,
+                    _noiName = applyFieldNameCaseIdentifier tCase name,
+                    _noiType = objectTypeName,
+                    _noiIsNullable = isNullable,
+                    _noiDescription = description,
+                    _noiMutability = rciMutability rawInfo
+                  }
+          RawColumnTypeArray supportsNestedArrays rawColumnType isNullable' -> do
+            nestedColumnInfo <- processRawColumnType isNullable' rawColumnType
+            pure
+              $ SCIArrayColumn @b
+                NestedArrayInfo
+                  { _naiSupportsNestedArrays = supportsNestedArrays,
+                    _naiIsNullable = isNullable,
+                    _naiColumnInfo = nestedColumnInfo
+                  }
         pgCol = rciName rawInfo
-        resolveColumnType =
+        resolveColumnType scalarType =
           case HashMap.lookup pgCol tableEnumReferences of
             -- no references? not an enum
-            Nothing -> pure $ ColumnScalar (rciType rawInfo)
+            Nothing -> pure $ ColumnScalar scalarType
             -- one reference? is an enum
             Just (enumReference :| []) -> pure $ ColumnEnumReference enumReference
             -- multiple referenced enums? the schema is strange, so let’s reject it
             Just enumReferences ->
-              throw400 ConstraintViolation $
-                "column "
-                  <> rciName rawInfo <<> " in table "
-                  <> tableName
-                    <<> " references multiple enum tables ("
-                  <> commaSeparated (map (dquote . erTable) $ toList enumReferences)
-                  <> ")"
+              throw400 ConstraintViolation
+                $ "column "
+                <> rciName rawInfo
+                <<> " in table "
+                <> tableName
+                <<> " references multiple enum tables ("
+                <> commaSeparated (map (dquote . erTable) $ toList enumReferences)
+                <> ")"
 
     assertNoDuplicateFieldNames columns =
-      void $ flip HashMap.traverseWithKey (HashMap.groupOn ciName columns) \name columnsWithName ->
+      void $ flip HashMap.traverseWithKey (HashMap.groupOn structuredColumnInfoName columns) \name columnsWithName ->
         case columnsWithName of
           one : two : more ->
-            throw400 AlreadyExists $
-              "the definitions of columns "
-                <> englishList "and" (dquote . ciColumn <$> (one :| two : more))
-                <> " are in conflict: they are mapped to the same field name, " <>> name
+            throw400 AlreadyExists
+              $ "the definitions of columns "
+              <> englishList "and" (dquote . structuredColumnInfoColumn <$> (one :| two : more))
+              <> " are in conflict: they are mapped to the same field name, "
+              <>> name
           _ -> pure ()
 
     buildDescription :: TableName b -> TableConfig b -> DBTableMetadata b -> Maybe PGDescription
@@ -882,9 +954,13 @@ data SetApolloFederationConfig b = SetApolloFederationConfig
 instance (Backend b) => FromJSON (SetApolloFederationConfig b) where
   parseJSON = withObject "SetApolloFederationConfig" $ \o ->
     SetApolloFederationConfig
-      <$> o .:? "source" .!= defaultSource
-      <*> o .: "table"
-      <*> o .:? "apollo_federation_config"
+      <$> o
+      .:? "source"
+      .!= defaultSource
+      <*> o
+      .: "table"
+      <*> o
+      .:? "apollo_federation_config"
 
 runSetApolloFederationConfig ::
   forall b m.
@@ -900,5 +976,7 @@ runSetApolloFederationConfig (SetApolloFederationConfig source table apolloFedCo
     -- this approach of replacing the configuration everytime the API is called
     -- and maybe throw some error if the configuration is already there.
     $ MetadataModifier
-    $ tableMetadataSetter @b source table . tmApolloFederationConfig .~ apolloFedConfig
+    $ tableMetadataSetter @b source table
+    . tmApolloFederationConfig
+    .~ apolloFedConfig
   return successMsg

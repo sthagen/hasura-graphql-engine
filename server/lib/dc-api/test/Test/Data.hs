@@ -89,7 +89,7 @@ numericColumns =
     >>= ( API._tiColumns
             >>> mapMaybe
               ( \API.ColumnInfo {..} ->
-                  if _ciType == API.ScalarType "number"
+                  if _ciType == API.ColumnTypeScalar (API.ScalarType "number")
                     then Just _ciName
                     else Nothing
               )
@@ -690,7 +690,9 @@ findColumnInfo API.SchemaResponse {..} tableName columnName =
 
 findColumnScalarType :: API.SchemaResponse -> API.TableName -> API.ColumnName -> API.ScalarType
 findColumnScalarType schemaResponse tableName columnName =
-  API._ciType $ findColumnInfo schemaResponse tableName columnName
+  case API._ciType $ findColumnInfo schemaResponse tableName columnName of
+    API.ColumnTypeScalar scalarType -> scalarType
+    _ -> error $ "Column " <> show columnName <> " in table " <> show tableName <> " does not have a scalar type"
 
 emptyQuery :: API.Query
 emptyQuery = API.Query Nothing Nothing Nothing Nothing Nothing Nothing Nothing
@@ -799,8 +801,8 @@ mkSubqueryAggregatesFieldValue :: HashMap API.FieldName J.Value -> API.FieldValu
 mkSubqueryAggregatesFieldValue aggregates =
   API.mkRelationshipFieldValue $ API.QueryResponse Nothing (Just aggregates)
 
-mkAndExpr :: Foldable f => f API.Expression -> API.Expression
+mkAndExpr :: (Foldable f) => f API.Expression -> API.Expression
 mkAndExpr = API.And . Set.fromList . Foldable.toList
 
-mkOrExpr :: Foldable f => f API.Expression -> API.Expression
+mkOrExpr :: (Foldable f) => f API.Expression -> API.Expression
 mkOrExpr = API.Or . Set.fromList . Foldable.toList

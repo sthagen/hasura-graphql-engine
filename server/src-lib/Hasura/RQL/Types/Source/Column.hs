@@ -27,13 +27,14 @@ import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Hasura.RQL.Types.Backend (Backend (..))
+import Hasura.RQL.Types.Column (RawColumnType (..))
 import Prelude
 
 --------------------------------------------------------------------------------
 
 data SourceColumnInfo b = SourceColumnInfo
   { _sciName :: Column b,
-    _sciType :: ScalarType b,
+    _sciType :: RawColumnType b,
     _sciNullable :: Bool,
     _sciDescription :: Maybe Text,
     _sciInsertable :: Bool,
@@ -44,13 +45,13 @@ data SourceColumnInfo b = SourceColumnInfo
   deriving anyclass (Hashable)
   deriving (FromJSON, ToJSON, ToSchema) via Autodocodec (SourceColumnInfo b)
 
-deriving instance Backend b => Eq (SourceColumnInfo b)
+deriving instance (Backend b) => Eq (SourceColumnInfo b)
 
-deriving instance Backend b => Ord (SourceColumnInfo b)
+deriving instance (Backend b) => Ord (SourceColumnInfo b)
 
-deriving instance Backend b => Show (SourceColumnInfo b)
+deriving instance (Backend b) => Show (SourceColumnInfo b)
 
-instance Backend b => HasCodec (SourceColumnInfo b) where
+instance (Backend b) => HasCodec (SourceColumnInfo b) where
   codec =
     object "ColumnInfo" $
       SourceColumnInfo

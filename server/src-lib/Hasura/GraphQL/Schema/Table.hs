@@ -17,6 +17,7 @@ module Hasura.GraphQL.Schema.Table
   )
 where
 
+import Control.Lens ((^?))
 import Data.Has
 import Data.HashMap.Strict qualified as HashMap
 import Data.HashSet qualified as Set
@@ -99,20 +100,21 @@ tableSelectColumnsEnum tableInfo = do
   columns <- tableSelectColumns tableInfo
   let enumName = mkTypename $ applyTypeNameCaseIdentifier tCase $ mkTableSelectColumnTypeName tableGQLName
       description =
-        Just $
-          G.Description $
-            "select columns of table " <>> tableInfoName tableInfo
+        Just
+          $ G.Description
+          $ "select columns of table "
+          <>> tableInfoName tableInfo
   -- We noticed many 'Definition's allocated, from 'define' below, so memoize
   -- to gain more sharing and lower memory residency.
-  case nonEmpty $ map (define . ciName &&& ciColumn) columns of
+  case nonEmpty $ map (define . structuredColumnInfoName &&& structuredColumnInfoColumn) columns of
     Nothing -> pure Nothing
     Just columnDefinitions ->
       Just
         <$> P.memoizeOn
           'tableSelectColumnsEnum
           (enumName, description, columns)
-          ( pure $
-              P.enum enumName description columnDefinitions
+          ( pure
+              $ P.enum enumName description columnDefinitions
           )
   where
     define name =
@@ -139,20 +141,23 @@ tableSelectColumnsPredEnum columnPredicate predName tableInfo = do
       mkTypename = runMkTypename $ _rscTypeNames customization
       predName' = applyFieldNameCaseIdentifier tCase predName
   tableGQLName <- getTableIdentifierName @b tableInfo
-  columns <- filter (columnPredicate . ciType) <$> tableSelectColumns tableInfo
+  columns <- filter (columnPredicate . ciType) . mapMaybe (^? _SCIScalarColumn) <$> tableSelectColumns tableInfo
   let enumName = mkTypename $ applyTypeNameCaseIdentifier tCase $ mkSelectColumnPredTypeName tableGQLName predName
       description =
-        Just $
-          G.Description $
-            "select \"" <> G.unName predName' <> "\" columns of table " <>> tableInfoName tableInfo
-  pure $
-    P.enum enumName description
-      <$> nonEmpty
-        [ ( define $ ciName column,
-            ciColumn column
-          )
-          | column <- columns
-        ]
+        Just
+          $ G.Description
+          $ "select \""
+          <> G.unName predName'
+          <> "\" columns of table "
+          <>> tableInfoName tableInfo
+  pure
+    $ P.enum enumName description
+    <$> nonEmpty
+      [ ( define $ ciName column,
+          ciColumn column
+        )
+        | column <- columns
+      ]
   where
     define name =
       P.Definition name (Just $ G.Description "column name") Nothing [] P.EnumValueInfo
@@ -201,12 +206,12 @@ updateColumnsPlaceholderParser tableInfo = do
     Nothing -> do
       tableGQLName <- getTableIdentifierName tableInfo
       let enumName = mkTypename $ applyTypeNameCaseIdentifier tCase $ mkTableUpdateColumnTypeName tableGQLName
-      pure $
-        P.enum enumName (Just $ G.Description $ "placeholder for update columns of table " <> tableInfoName tableInfo <<> " (current role has no relevant permissions)") $
-          pure
-            ( P.Definition @_ @P.EnumValueInfo Name.__PLACEHOLDER (Just $ G.Description "placeholder (do not use)") Nothing [] P.EnumValueInfo,
-              Nothing
-            )
+      pure
+        $ P.enum enumName (Just $ G.Description $ "placeholder for update columns of table " <> tableInfoName tableInfo <<> " (current role has no relevant permissions)")
+        $ pure
+          ( P.Definition @_ @P.EnumValueInfo Name.__PLACEHOLDER (Just $ G.Description "placeholder (do not use)") Nothing [] P.EnumValueInfo,
+            Nothing
+          )
 
 tableSelectPermissions :: RoleName -> TableInfo b -> Maybe (SelPermInfo b)
 tableSelectPermissions role tableInfo = _permSel $ getRolePermInfo role tableInfo
@@ -228,10 +233,12 @@ tableSelectFields tableInfo = do
   filterM (canBeSelected roleName permissions) $ HashMap.elems tableFields
   where
     canBeSelected _ Nothing _ = pure False
-    canBeSelected _ (Just permissions) (FIColumn columnInfo) =
+    canBeSelected _ (Just permissions) (FIColumn (SCIScalarColumn (columnInfo))) =
       pure $! HashMap.member (ciColumn columnInfo) (spiCols permissions)
-    canBeSelected _ (Just permissions) (FINestedObject NestedObjectInfo {..}) =
+    canBeSelected _ (Just permissions) (FIColumn (SCIObjectColumn NestedObjectInfo {..})) =
       pure $! HashMap.member _noiColumn (spiCols permissions)
+    canBeSelected role permissions (FIColumn (SCIArrayColumn NestedArrayInfo {..})) =
+      canBeSelected role permissions (FIColumn _naiColumnInfo)
     canBeSelected role _ (FIRelationship relationshipInfo) = do
       case riTarget relationshipInfo of
         RelTargetNativeQuery _ -> error "tableSelectFields RelTargetNativeQuery"
@@ -253,7 +260,7 @@ tableColumns ::
 tableColumns tableInfo =
   mapMaybe columnInfo . HashMap.elems . _tciFieldInfoMap . _tiCoreInfo $ tableInfo
   where
-    columnInfo (FIColumn ci) = Just ci
+    columnInfo (FIColumn (SCIScalarColumn ci)) = Just ci
     columnInfo _ = Nothing
 
 -- | Get the columns of a table that may be selected under the given select
@@ -267,7 +274,7 @@ tableSelectColumns ::
     Has (SourceInfo b) r
   ) =>
   TableInfo b ->
-  m [ColumnInfo b]
+  m [StructuredColumnInfo b]
 tableSelectColumns tableInfo =
   mapMaybe columnInfo <$> tableSelectFields tableInfo
   where

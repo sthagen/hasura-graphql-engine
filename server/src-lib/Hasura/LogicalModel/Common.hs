@@ -13,7 +13,7 @@ import Hasura.LogicalModel.NullableScalarType (NullableScalarType (..))
 import Hasura.LogicalModel.Types (LogicalModelField (..), LogicalModelType (..), LogicalModelTypeScalar (..))
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend (Backend (..))
-import Hasura.RQL.Types.Column (ColumnInfo (..), ColumnMutability (..), ColumnType (..), fromCol)
+import Hasura.RQL.Types.Column (ColumnInfo (..), ColumnMutability (..), ColumnType (..), StructuredColumnInfo (..), fromCol)
 import Hasura.Table.Cache (FieldInfo (..), FieldInfoMap)
 import Language.GraphQL.Draft.Syntax qualified as G
 
@@ -46,11 +46,14 @@ toFieldInfo fields =
 traverseWithIndex :: (Applicative m) => (Int -> aa -> m bb) -> [aa] -> m [bb]
 traverseWithIndex f = zipWithM f [0 ..]
 
-logicalModelToColumnInfo :: forall b. (Backend b) => Int -> (Column b, NullableScalarType b) -> Maybe (ColumnInfo b)
+logicalModelToColumnInfo :: forall b. (Backend b) => Int -> (Column b, NullableScalarType b) -> Maybe (StructuredColumnInfo b)
 logicalModelToColumnInfo i (column, NullableScalarType {..}) = do
   name <- G.mkName (toTxt column)
-  pure $
-    ColumnInfo
+  pure
+    $
+    -- TODO(dmoverton): handle object and array columns
+    SCIScalarColumn
+    $ ColumnInfo
       { ciColumn = column,
         ciName = name,
         ciPosition = i,

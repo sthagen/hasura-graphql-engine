@@ -98,8 +98,9 @@ resolveSource sourceConfig =
     let result = (,) <$> tables <*> routines
     case result of
       Left err ->
-        throw400 Unexpected $
-          "unexpected exception while connecting to database: " <> tshow err
+        throw400 Unexpected
+          $ "unexpected exception while connecting to database: "
+          <> tshow err
       Right (restTables, restRoutines) -> do
         seconds <- liftIO $ fmap systemSeconds getSystemTime
         let functions = FunctionOverloads <$> HashMap.groupOnNE (routineReferenceToFunctionName . routineReference) restRoutines
@@ -114,7 +115,7 @@ resolveSource sourceConfig =
                               [ RawColumnInfo
                                   { rciName = ColumnName name,
                                     rciPosition = position,
-                                    rciType = restTypeToScalarType type',
+                                    rciType = RawColumnTypeScalar $ restTypeToScalarType type',
                                     rciIsNullable =
                                       case mode of
                                         Nullable -> True

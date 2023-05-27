@@ -107,7 +107,6 @@ instance BackendMetadata 'DataConnector where
   postDropSourceHook _sourceConfig _tableTriggerMap = pure ()
   buildComputedFieldBooleanExp _ _ _ _ _ _ =
     error "buildComputedFieldBooleanExp: not implemented for the Data Connector backend."
-  columnInfoToFieldInfo = columnInfoToFieldInfo'
   listAllTables = listAllTables'
   listAllTrackables = listAllTrackables'
   getTableInfo = getTableInfo'
@@ -119,7 +118,7 @@ arityJsonAggSelect = \case
   API.FunctionArityMany -> JASMultipleRows
 
 functionReturnTypeFromAPI ::
-  MonadError QErr m =>
+  (MonadError QErr m) =>
   DC.FunctionName ->
   (Maybe (FunctionReturnType 'DataConnector), API.FunctionReturnType) ->
   m DC.TableName
@@ -127,13 +126,13 @@ functionReturnTypeFromAPI funcGivenName = \case
   (Just (DC.FunctionReturnsTable t), _) -> pure t
   (_, API.FunctionReturnsTable t) -> pure (Witch.into t)
   _ ->
-    throw400 NotSupported $
-      "Function "
-        <> toTxt funcGivenName
-        <> " is missing a return type - This should be explicit in metadata, or inferred from agent"
+    throw400 NotSupported
+      $ "Function "
+      <> toTxt funcGivenName
+      <> " is missing a return type - This should be explicit in metadata, or inferred from agent"
 
 buildFunctionInfo' ::
-  MonadError QErr m =>
+  (MonadError QErr m) =>
   SourceName ->
   DC.FunctionName ->
   SystemDefined ->
@@ -166,10 +165,10 @@ buildFunctionInfo'
           (Just (DC.FunctionReturnsTable t), _) -> pure $ SOSourceObj sourceName $ mkAnyBackend $ SOITable @'DataConnector t
           (_, API.FunctionReturnsTable t) -> pure $ SOSourceObj sourceName $ mkAnyBackend $ SOITable @'DataConnector (Witch.into t)
           _ ->
-            throw400 NotSupported $
-              "Function "
-                <> tshow funcName
-                <> " is missing a return type - This should be explicit in metadata, or inferred from agent"
+            throw400 NotSupported
+              $ "Function "
+              <> tshow funcName
+              <> " is missing a return type - This should be explicit in metadata, or inferred from agent"
 
       inputArguments <- do
         let argNames = map API._faInputArgName infoArgs
@@ -179,15 +178,17 @@ buildFunctionInfo'
         case _fcSessionArgument of
           Nothing -> pure $ Seq.fromList $ map IAUserProvided infoArgs
           Just sessionArgName -> do
-            unless (any (\arg -> getFuncArgNameTxt sessionArgName == API._faInputArgName arg) infoArgs) $
-              throw400 NotSupported $
-                "Session argument not mappable: " <> tshow sessionArgName
-            pure $
-              Seq.fromList $
-                flip map infoArgs $ \arg ->
-                  if getFuncArgNameTxt sessionArgName == API._faInputArgName arg
-                    then IASessionVariables sessionArgName
-                    else IAUserProvided arg
+            unless (any (\arg -> getFuncArgNameTxt sessionArgName == API._faInputArgName arg) infoArgs)
+              $ throw400 NotSupported
+              $ "Session argument not mappable: "
+              <> tshow sessionArgName
+            pure
+              $ Seq.fromList
+              $ flip map infoArgs
+              $ \arg ->
+                if getFuncArgNameTxt sessionArgName == API._faInputArgName arg
+                  then IASessionVariables sessionArgName
+                  else IAUserProvided arg
 
       functionReturnType <- functionReturnTypeFromAPI funcName (_fcResponse, returnType)
 
@@ -228,7 +229,8 @@ resolveBackendInfo' logger = proc (invalidationKeys, optionsMap) -> do
         ( \dataConnectorName dataConnectorOptions -> do
             getDataConnectorCapabilitiesIfNeeded -< (invalidationKeys, dataConnectorName, dataConnectorOptions)
         )
-      |) (toHashMap optionsMap)
+      |)
+      (toHashMap optionsMap)
   returnA -< HashMap.catMaybes maybeDataConnectorCapabilities
   where
     getDataConnectorCapabilitiesIfNeeded ::
@@ -241,7 +243,8 @@ resolveBackendInfo' logger = proc (invalidationKeys, optionsMap) -> do
         withRecordInconsistency
           ( bindErrorA -< ExceptT $ getDataConnectorCapabilities dataConnectorOptions httpMgr
           )
-        |) metadataObj
+        |)
+        metadataObj
 
     getDataConnectorCapabilities ::
       DC.DataConnectorOptions ->
@@ -290,8 +293,14 @@ resolveSourceConfig'
 
 getDataConnectorInfo :: (MonadError QErr m) => DC.DataConnectorName -> HashMap DC.DataConnectorName DC.DataConnectorInfo -> m DC.DataConnectorInfo
 getDataConnectorInfo dataConnectorName backendInfo =
-  onNothing (HashMap.lookup dataConnectorName backendInfo) $
-    throw400 DataConnectorError ("Data connector named " <> toTxt dataConnectorName <<> " was not found in the data connector backend info")
+  onNothing (HashMap.lookup dataConnectorName backendInfo)
+    $ throw400 DataConnectorError ("Data connector named " <> toTxt dataConnectorName <<> " was not found in the data connector backend info")
+
+mkRawColumnType :: API.Capabilities -> API.ColumnType -> RQL.T.C.RawColumnType 'DataConnector
+mkRawColumnType capabilities = \case
+  API.ColumnTypeScalar scalarType -> RQL.T.C.RawColumnTypeScalar $ DC.mkScalarType capabilities scalarType
+  API.ColumnTypeObject name -> RQL.T.C.RawColumnTypeObject () name
+  API.ColumnTypeArray columnType isNullable -> RQL.T.C.RawColumnTypeArray () (mkRawColumnType capabilities columnType) isNullable
 
 resolveDatabaseMetadata' ::
   ( MonadIO m,
@@ -303,9 +312,8 @@ resolveDatabaseMetadata' ::
   m (Either QErr (DBObjectsIntrospection 'DataConnector))
 resolveDatabaseMetadata' logger SourceMetadata {_smName} sourceConfig@DC.SourceConfig {_scCapabilities} = runExceptT do
   API.SchemaResponse {..} <- requestDatabaseSchema logger _smName sourceConfig
-  let typeNames = maybe mempty (HashSet.fromList . toList . fmap API._otdName) _srObjectTypes
-      customObjectTypes =
-        maybe mempty (HashMap.fromList . mapMaybe (toTableObjectType _scCapabilities typeNames) . toList) _srObjectTypes
+  let customObjectTypes =
+        maybe mempty (HashMap.fromList . mapMaybe (toTableObjectType _scCapabilities) . toList) _srObjectTypes
       tables = HashMap.fromList $ do
         API.TableInfo {..} <- _srTables
         let primaryKeyColumns = fmap Witch.from . NESeq.fromList <$> _tiPrimaryKey
@@ -314,11 +322,11 @@ resolveDatabaseMetadata' logger SourceMetadata {_smName} sourceConfig@DC.SourceC
                 { _ptmiOid = OID 0, -- TODO: This is wrong and needs to be fixed. It is used for diffing tables and seeing what's new/deleted/altered, so reusing 0 for all tables is problematic.
                   _ptmiColumns = do
                     API.ColumnInfo {..} <- _tiColumns
-                    pure $
-                      RQL.T.C.RawColumnInfo
+                    pure
+                      $ RQL.T.C.RawColumnInfo
                         { rciName = Witch.from _ciName,
                           rciPosition = 1, -- TODO: This is very wrong and needs to be fixed. It is used for diffing tables and seeing what's new/deleted/altered, so reusing 1 for all columns is problematic.
-                          rciType = DC.mkScalarType _scCapabilities _ciType,
+                          rciType = mkRawColumnType _scCapabilities _ciType,
                           rciIsNullable = _ciNullable,
                           rciDescription = fmap GQL.Description _ciDescription,
                           rciMutability = RQL.T.C.ColumnMutability _ciInsertable _ciUpdatable
@@ -349,8 +357,8 @@ resolveDatabaseMetadata' logger SourceMetadata {_smName} sourceConfig@DC.SourceC
          in HashMap.fromList do
               infos@(API.FunctionInfo {..} NEList.:| _) <- grouped
               pure (Witch.into _fiName, FunctionOverloads infos)
-   in pure $
-        DBObjectsIntrospection
+   in pure
+        $ DBObjectsIntrospection
           { _rsTables = tables,
             _rsFunctions = functions,
             _rsScalars = mempty
@@ -368,23 +376,33 @@ requestDatabaseSchema logger sourceName sourceConfig = do
     . flip runAgentClientT (AgentClientContext logger (DC._scEndpoint transformedSourceConfig) (DC._scManager transformedSourceConfig) (DC._scTimeoutMicroseconds transformedSourceConfig) Nothing)
     $ Client.schema sourceName (DC._scConfig transformedSourceConfig)
 
-toTableObjectType :: API.Capabilities -> HashSet G.Name -> API.ObjectTypeDefinition -> Maybe (G.Name, RQL.T.T.TableObjectType 'DataConnector)
-toTableObjectType capabilities typeNames API.ObjectTypeDefinition {..} =
+getFieldType :: API.Capabilities -> API.ColumnType -> Maybe (RQL.T.T.TableObjectFieldType 'DataConnector)
+getFieldType capabilities = \case
+  API.ColumnTypeScalar scalarType -> RQL.T.T.TOFTScalar <$> G.mkName (API.getScalarType scalarType) <*> pure (DC.mkScalarType capabilities scalarType)
+  API.ColumnTypeObject objectTypeName -> pure $ RQL.T.T.TOFTObject objectTypeName
+  API.ColumnTypeArray columnType isNullable -> RQL.T.T.TOFTArray () <$> getFieldType capabilities columnType <*> pure isNullable
+
+getGraphQLType :: Bool -> RQL.T.T.TableObjectFieldType 'DataConnector -> G.GType
+getGraphQLType isNullable = \case
+  RQL.T.T.TOFTScalar name _ -> G.TypeNamed (G.Nullability isNullable) name
+  RQL.T.T.TOFTObject name -> G.TypeNamed (G.Nullability isNullable) name
+  RQL.T.T.TOFTArray _ fieldType isNullable' ->
+    G.TypeList (G.Nullability isNullable) $ getGraphQLType isNullable' fieldType
+
+toTableObjectType :: API.Capabilities -> API.ObjectTypeDefinition -> Maybe (G.Name, RQL.T.T.TableObjectType 'DataConnector)
+toTableObjectType capabilities API.ObjectTypeDefinition {..} =
   (_otdName,) . RQL.T.T.TableObjectType _otdName (G.Description <$> _otdDescription) <$> traverse toTableObjectFieldDefinition _otdColumns
   where
     toTableObjectFieldDefinition API.ColumnInfo {..} = do
-      fieldTypeName <- G.mkName $ API.getScalarType _ciType
+      fieldType <- getFieldType capabilities _ciType
       fieldName <- G.mkName $ API.unColumnName _ciName
-      pure $
-        RQL.T.T.TableObjectFieldDefinition
+      pure
+        $ RQL.T.T.TableObjectFieldDefinition
           { _tofdColumn = Witch.from _ciName,
             _tofdName = fieldName,
             _tofdDescription = G.Description <$> _ciDescription,
-            _tofdGType = GraphQLType $ G.TypeNamed (G.Nullability _ciNullable) fieldTypeName,
-            _tofdFieldType =
-              if HashSet.member fieldTypeName typeNames
-                then RQL.T.T.TOFTObject fieldTypeName
-                else RQL.T.T.TOFTScalar fieldTypeName $ DC.mkScalarType capabilities _ciType
+            _tofdGType = GraphQLType $ getGraphQLType _ciNullable fieldType,
+            _tofdFieldType = fieldType
           }
 
 -- | Construct a 'HashSet' 'RQL.T.T.ForeignKeyMetadata'
@@ -392,8 +410,9 @@ toTableObjectType capabilities typeNames API.ObjectTypeDefinition {..} =
 -- metadata.
 buildForeignKeySet :: API.ForeignKeys -> HashSet (RQL.T.T.ForeignKeyMetadata 'DataConnector)
 buildForeignKeySet (API.ForeignKeys constraints) =
-  HashSet.fromList $
-    constraints & HashMap.foldMapWithKey @[RQL.T.T.ForeignKeyMetadata 'DataConnector]
+  HashSet.fromList
+    $ constraints
+    & HashMap.foldMapWithKey @[RQL.T.T.ForeignKeyMetadata 'DataConnector]
       \constraintName API.Constraint {..} -> maybeToList do
         let columnMapAssocList = HashMap.foldrWithKey' (\(API.ColumnName k) (API.ColumnName v) acc -> (DC.ColumnName k, DC.ColumnName v) : acc) [] _cColumnMapping
         columnMapping <- NEHashMap.fromList columnMapAssocList
@@ -429,8 +448,8 @@ parseBoolExpOperations' rhsParser rootFieldInfoMap fieldInfoMap columnRef value 
       v -> pure . AEQ False <$> parseWithTy columnType v
 
     parseOperation :: (Text, J.Value) -> m (OpExpG 'DataConnector v)
-    parseOperation (opStr, val) = withPathK opStr $
-      case opStr of
+    parseOperation (opStr, val) = withPathK opStr
+      $ case opStr of
         "_eq" -> parseEq
         "$eq" -> parseEq
         "_neq" -> parseNeq
@@ -509,12 +528,16 @@ parseBoolExpOperations' rhsParser rootFieldInfoMap fieldInfoMap columnRef value 
         validateRhsColumn :: RQL.T.T.FieldInfoMap (RQL.T.T.FieldInfo 'DataConnector) -> DC.ColumnName -> m DC.ColumnName
         validateRhsColumn fieldInfoMap' rhsCol = do
           rhsType <- RQL.T.T.askColumnType fieldInfoMap' rhsCol "column operators can only compare table columns"
-          when (columnType /= rhsType) $
-            throw400 UnexpectedPayload $
-              "incompatible column types: "
-                <> columnRef <<> " has type "
-                <> columnType <<> ", but "
-                <> rhsCol <<> " has type " <>> rhsType
+          when (columnType /= rhsType)
+            $ throw400 UnexpectedPayload
+            $ "incompatible column types: "
+            <> columnRef
+            <<> " has type "
+            <> columnType
+            <<> ", but "
+            <> rhsCol
+            <<> " has type "
+            <>> rhsType
           pure rhsCol
 
 parseCollectableType' ::
@@ -541,30 +564,6 @@ mkTypedSessionVar ::
 mkTypedSessionVar columnType =
   PSESessVar (columnTypeToScalarType <$> columnType)
 
--- | This function assumes that if a type name is present in the custom object types for the table then it
--- refers to a nested object of that type.
--- Otherwise it is a normal (scalar) column.
-columnInfoToFieldInfo' :: HashMap G.Name (RQL.T.T.TableObjectType 'DataConnector) -> RQL.T.C.ColumnInfo 'DataConnector -> RQL.T.T.FieldInfo 'DataConnector
-columnInfoToFieldInfo' gqlTypes columnInfo@RQL.T.C.ColumnInfo {..} =
-  maybe (RQL.T.T.FIColumn columnInfo) RQL.T.T.FINestedObject getNestedObjectInfo
-  where
-    getNestedObjectInfo =
-      case ciType of
-        RQL.T.C.ColumnScalar (DC.ScalarType scalarTypeName _) -> do
-          gqlName <- GQL.mkName scalarTypeName
-          guard $ HashMap.member gqlName gqlTypes
-          pure $
-            RQL.T.C.NestedObjectInfo
-              { RQL.T.C._noiSupportsNestedObjects = (),
-                RQL.T.C._noiColumn = ciColumn,
-                RQL.T.C._noiName = ciName,
-                RQL.T.C._noiType = gqlName,
-                RQL.T.C._noiIsNullable = ciIsNullable,
-                RQL.T.C._noiDescription = ciDescription,
-                RQL.T.C._noiMutability = ciMutability
-              }
-        RQL.T.C.ColumnEnumReference {} -> Nothing
-
 buildObjectRelationshipInfo' ::
   (MonadError QErr m) =>
   DC.SourceConfig ->
@@ -574,8 +573,8 @@ buildObjectRelationshipInfo' ::
   ObjRelDef 'DataConnector ->
   m (RelInfo 'DataConnector, Seq SchemaDependency)
 buildObjectRelationshipInfo' sourceConfig sourceName fks tableName objRel = do
-  ifSupportsLocalRelationships sourceName sourceConfig $
-    defaultBuildObjectRelationshipInfo sourceName fks tableName objRel
+  ifSupportsLocalRelationships sourceName sourceConfig
+    $ defaultBuildObjectRelationshipInfo sourceName fks tableName objRel
 
 buildArrayRelationshipInfo' ::
   (MonadError QErr m) =>
@@ -586,8 +585,8 @@ buildArrayRelationshipInfo' ::
   ArrRelDef 'DataConnector ->
   m (RelInfo 'DataConnector, Seq SchemaDependency)
 buildArrayRelationshipInfo' sourceConfig sourceName fks tableName arrRel =
-  ifSupportsLocalRelationships sourceName sourceConfig $
-    defaultBuildArrayRelationshipInfo sourceName fks tableName arrRel
+  ifSupportsLocalRelationships sourceName sourceConfig
+    $ defaultBuildArrayRelationshipInfo sourceName fks tableName arrRel
 
 ifSupportsLocalRelationships :: (MonadError QErr m) => SourceName -> DC.SourceConfig -> m a -> m a
 ifSupportsLocalRelationships sourceName DC.SourceConfig {..} action = do
@@ -667,7 +666,7 @@ convertTableMetadataToTableInfo tableName RQL.T.T.DBTableMetadata {..} =
           _sciValueGenerated =
             extraColumnMetadata
               >>= DC._ecmValueGenerated
-              >>= pure . \case
+              <&> \case
                 API.AutoIncrement -> AutoIncrement
                 API.UniqueIdentifier -> UniqueIdentifier
                 API.DefaultValue -> DefaultValue

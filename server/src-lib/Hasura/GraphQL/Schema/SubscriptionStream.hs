@@ -7,6 +7,7 @@ module Hasura.GraphQL.Schema.SubscriptionStream
   )
 where
 
+import Control.Lens ((^?))
 import Control.Monad.Memoize
 import Data.Has
 import Data.List.NonEmpty qualified as NE
@@ -70,17 +71,17 @@ cursorOrderingArgParser = do
       tCase = _rscNamingConvention customization
       enumName = runMkTypename (_rscTypeNames customization) $ applyTypeNameCaseCust tCase Name._cursor_ordering
   let description =
-        Just $
-          G.Description $
-            "ordering argument of a cursor"
-  pure $
-    P.enum enumName description $
-      NE.fromList -- It's fine to use fromList here because we know the list is never empty.
-        [ ( define enumNameVal,
-            snd enumNameVal
-          )
-          | enumNameVal <- [(Name._ASC, COAscending), (Name._DESC, CODescending)]
-        ]
+        Just
+          $ G.Description
+          $ "ordering argument of a cursor"
+  pure
+    $ P.enum enumName description
+    $ NE.fromList -- It's fine to use fromList here because we know the list is never empty.
+      [ ( define enumNameVal,
+          snd enumNameVal
+        )
+        | enumNameVal <- [(Name._ASC, COAscending), (Name._DESC, CODescending)]
+      ]
   where
     define (name, val) =
       let orderingTypeDesc = bool "descending" "ascending" $ val == COAscending
@@ -191,7 +192,7 @@ tableStreamCursorExp tableInfo = do
   memoizeOn 'tableStreamCursorExp (sourceName, tableName) $ do
     tableGQLName <- getTableGQLName tableInfo
     tableGQLIdentifier <- getTableIdentifierName tableInfo
-    columnInfos <- tableSelectColumns tableInfo
+    columnInfos <- mapMaybe (^? _SCIScalarColumn) <$> tableSelectColumns tableInfo
     let objName = mkTypename $ applyTypeNameCaseIdentifier tCase $ mkStreamCursorInputTypeName tableGQLIdentifier
         description = G.Description $ "Streaming cursor of the table " <>> tableGQLName
     columnParsers <- tableStreamColumnArg tableGQLIdentifier columnInfos
@@ -235,8 +236,8 @@ tableStreamArguments tableInfo = do
         [c] -> pure c
         _ -> parseError "multiple column cursors are not supported yet"
     batchSizeArg <- cursorBatchSizeArg tCase
-    pure $
-      IR.SelectStreamArgsG whereArg batchSizeArg cursorArg
+    pure
+      $ IR.SelectStreamArgsG whereArg batchSizeArg cursorArg
 
 -- | Field parser for a streaming subscription for a table.
 selectStreamTable ::
@@ -262,17 +263,18 @@ selectStreamTable tableInfo fieldName description = runMaybeT $ do
   stringifyNumbers <- retrieve Options.soStringifyNumbers
   tableStreamArgsParser <- lift $ tableStreamArguments tableInfo
   selectionSetParser <- MaybeT $ tableSelectionList tableInfo
-  lift $
-    memoizeOn 'selectStreamTable (sourceName, tableName, fieldName) $ do
-      pure $
-        P.setFieldParserOrigin (MOSourceObjId sourceName (AB.mkAnyBackend $ SMOTable @b tableName)) $
-          P.subselection fieldName description tableStreamArgsParser selectionSetParser
-            <&> \(args, fields) ->
-              IR.AnnSelectStreamG
-                { IR._assnXStreamingSubscription = xStreamSubscription,
-                  IR._assnFields = fields,
-                  IR._assnFrom = IR.FromTable tableName,
-                  IR._assnPerm = tablePermissionsInfo selectPermissions,
-                  IR._assnArgs = args,
-                  IR._assnStrfyNum = stringifyNumbers
-                }
+  lift
+    $ memoizeOn 'selectStreamTable (sourceName, tableName, fieldName)
+    $ do
+      pure
+        $ P.setFieldParserOrigin (MOSourceObjId sourceName (AB.mkAnyBackend $ SMOTable @b tableName))
+        $ P.subselection fieldName description tableStreamArgsParser selectionSetParser
+        <&> \(args, fields) ->
+          IR.AnnSelectStreamG
+            { IR._assnXStreamingSubscription = xStreamSubscription,
+              IR._assnFields = fields,
+              IR._assnFrom = IR.FromTable tableName,
+              IR._assnPerm = tablePermissionsInfo selectPermissions,
+              IR._assnArgs = args,
+              IR._assnStrfyNum = stringifyNumbers
+            }

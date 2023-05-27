@@ -9,6 +9,9 @@ module Hasura.Backends.Postgres.Instances.Metadata () where
 
 import Data.HashMap.Strict qualified as HashMap
 import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
+import Data.HashMap.Strict.NonEmpty qualified as NEHashMap
+import Data.HashSet qualified as HashSet
+import Data.Semigroup.Foldable (toNonEmpty)
 import Data.String.Interpolate (i)
 import Data.Text.Extended
 import Database.PG.Query.PTI qualified as PTI
@@ -17,7 +20,7 @@ import Database.PG.Query.Transaction (Query)
 import Database.PG.Query.Transaction qualified as Query
 import Database.PostgreSQL.LibPQ qualified as PQ
 import Hasura.Backends.Postgres.DDL qualified as Postgres
-import Hasura.Backends.Postgres.Execute.Types (runPgSourceReadTx)
+import Hasura.Backends.Postgres.Execute.Types (PGExecCtxInfo (..), PGExecFrom (..), PGExecTxType (..), runPgSourceReadTx, _pecRunTx, _pscExecCtx)
 import Hasura.Backends.Postgres.Instances.NativeQueries as Postgres (validateNativeQuery)
 import Hasura.Backends.Postgres.SQL.Types (QualifiedObject (..), QualifiedTable)
 import Hasura.Backends.Postgres.SQL.Types qualified as Postgres
@@ -26,11 +29,16 @@ import Hasura.Base.Error
 import Hasura.Prelude
 import Hasura.RQL.DDL.Relationship (defaultBuildArrayRelationshipInfo, defaultBuildObjectRelationshipInfo)
 import Hasura.RQL.Types.Backend (Backend)
+import Hasura.RQL.Types.Backend qualified as Backend
 import Hasura.RQL.Types.BackendType
+import Hasura.RQL.Types.Column (ColumnMutability (..), RawColumnInfo (..))
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Relationships.Local
 import Hasura.RQL.Types.SchemaCache (askSourceConfig)
+import Hasura.RQL.Types.Source.Column (SourceColumnInfo (..))
+import Hasura.RQL.Types.Source.Table (SourceConstraint (..), SourceForeignKeys (..), SourceTableInfo (..), SourceTableType (..))
 import Hasura.Table.Cache
+import Language.GraphQL.Draft.Syntax (unDescription)
 
 --------------------------------------------------------------------------------
 -- PostgresMetadata
@@ -51,57 +59,62 @@ class PostgresMetadata (pgKind :: PostgresKind) where
   -- is primarily used by the console to display tables for tracking etc.
   listAllTablesSql :: Query
 
+  -- | Given 'PgExtraTableMetadata', return whether this is source "table" is a
+  -- table or a view.
+  tableTypeImpl :: Backend.ExtraTableMetadata ('Postgres pgKind) -> SourceTableType
+
   -- | A mapping from pg scalar types with clear oid equivalent to oid.
   --
   -- This is a insert order hash map so that when we invert it
   -- duplicate oids will point to a more "general" type.
   pgTypeOidMapping :: InsOrdHashMap.InsOrdHashMap Postgres.PGScalarType PQ.Oid
   pgTypeOidMapping =
-    InsOrdHashMap.fromList $
-      [ (Postgres.PGSmallInt, PTI.int2),
-        (Postgres.PGSerial, PTI.int4),
-        (Postgres.PGInteger, PTI.int4),
-        (Postgres.PGBigSerial, PTI.int8),
-        (Postgres.PGBigInt, PTI.int8),
-        (Postgres.PGFloat, PTI.float4),
-        (Postgres.PGDouble, PTI.float8),
-        (Postgres.PGMoney, PTI.numeric),
-        (Postgres.PGNumeric, PTI.numeric),
-        (Postgres.PGBoolean, PTI.bool),
-        (Postgres.PGChar, PTI.bpchar),
-        (Postgres.PGVarchar, PTI.varchar),
-        (Postgres.PGText, PTI.text),
-        (Postgres.PGDate, PTI.date),
-        (Postgres.PGTimeStamp, PTI.timestamp),
-        (Postgres.PGTimeStampTZ, PTI.timestamptz),
-        (Postgres.PGTimeTZ, PTI.timetz),
-        (Postgres.PGJSON, PTI.json),
-        (Postgres.PGJSONB, PTI.jsonb),
-        (Postgres.PGUUID, PTI.uuid),
-        (Postgres.PGArray Postgres.PGSmallInt, PTI.int2_array),
-        (Postgres.PGArray Postgres.PGSerial, PTI.int4_array),
-        (Postgres.PGArray Postgres.PGInteger, PTI.int4_array),
-        (Postgres.PGArray Postgres.PGBigSerial, PTI.int8_array),
-        (Postgres.PGArray Postgres.PGBigInt, PTI.int8_array),
-        (Postgres.PGArray Postgres.PGFloat, PTI.float4_array),
-        (Postgres.PGArray Postgres.PGDouble, PTI.float8_array),
-        (Postgres.PGArray Postgres.PGMoney, PTI.numeric_array),
-        (Postgres.PGArray Postgres.PGNumeric, PTI.numeric_array),
-        (Postgres.PGArray Postgres.PGBoolean, PTI.bool_array),
-        (Postgres.PGArray Postgres.PGChar, PTI.char_array),
-        (Postgres.PGArray Postgres.PGVarchar, PTI.varchar_array),
-        (Postgres.PGArray Postgres.PGText, PTI.text_array),
-        (Postgres.PGArray Postgres.PGDate, PTI.date_array),
-        (Postgres.PGArray Postgres.PGTimeStamp, PTI.timestamp_array),
-        (Postgres.PGArray Postgres.PGTimeStampTZ, PTI.timestamptz_array),
-        (Postgres.PGArray Postgres.PGTimeTZ, PTI.timetz_array),
-        (Postgres.PGArray Postgres.PGJSON, PTI.json_array),
-        (Postgres.PGArray Postgres.PGJSON, PTI.jsonb_array),
-        (Postgres.PGArray Postgres.PGUUID, PTI.uuid_array)
-      ]
+    InsOrdHashMap.fromList
+      $ [ (Postgres.PGSmallInt, PTI.int2),
+          (Postgres.PGSerial, PTI.int4),
+          (Postgres.PGInteger, PTI.int4),
+          (Postgres.PGBigSerial, PTI.int8),
+          (Postgres.PGBigInt, PTI.int8),
+          (Postgres.PGFloat, PTI.float4),
+          (Postgres.PGDouble, PTI.float8),
+          (Postgres.PGMoney, PTI.numeric),
+          (Postgres.PGNumeric, PTI.numeric),
+          (Postgres.PGBoolean, PTI.bool),
+          (Postgres.PGChar, PTI.bpchar),
+          (Postgres.PGVarchar, PTI.varchar),
+          (Postgres.PGText, PTI.text),
+          (Postgres.PGDate, PTI.date),
+          (Postgres.PGTimeStamp, PTI.timestamp),
+          (Postgres.PGTimeStampTZ, PTI.timestamptz),
+          (Postgres.PGTimeTZ, PTI.timetz),
+          (Postgres.PGJSON, PTI.json),
+          (Postgres.PGJSONB, PTI.jsonb),
+          (Postgres.PGUUID, PTI.uuid),
+          (Postgres.PGArray Postgres.PGSmallInt, PTI.int2_array),
+          (Postgres.PGArray Postgres.PGSerial, PTI.int4_array),
+          (Postgres.PGArray Postgres.PGInteger, PTI.int4_array),
+          (Postgres.PGArray Postgres.PGBigSerial, PTI.int8_array),
+          (Postgres.PGArray Postgres.PGBigInt, PTI.int8_array),
+          (Postgres.PGArray Postgres.PGFloat, PTI.float4_array),
+          (Postgres.PGArray Postgres.PGDouble, PTI.float8_array),
+          (Postgres.PGArray Postgres.PGMoney, PTI.numeric_array),
+          (Postgres.PGArray Postgres.PGNumeric, PTI.numeric_array),
+          (Postgres.PGArray Postgres.PGBoolean, PTI.bool_array),
+          (Postgres.PGArray Postgres.PGChar, PTI.char_array),
+          (Postgres.PGArray Postgres.PGVarchar, PTI.varchar_array),
+          (Postgres.PGArray Postgres.PGText, PTI.text_array),
+          (Postgres.PGArray Postgres.PGDate, PTI.date_array),
+          (Postgres.PGArray Postgres.PGTimeStamp, PTI.timestamp_array),
+          (Postgres.PGArray Postgres.PGTimeStampTZ, PTI.timestamptz_array),
+          (Postgres.PGArray Postgres.PGTimeTZ, PTI.timetz_array),
+          (Postgres.PGArray Postgres.PGJSON, PTI.json_array),
+          (Postgres.PGArray Postgres.PGJSON, PTI.jsonb_array),
+          (Postgres.PGArray Postgres.PGUUID, PTI.uuid_array)
+        ]
 
 instance PostgresMetadata 'Vanilla where
   validateRel _ _ _ = pure ()
+  tableTypeImpl = Postgres._petmTableType
 
   listAllTablesSql =
     Query.fromText
@@ -154,8 +167,8 @@ instance PostgresMetadata 'Citus where
         case ( _tciExtraTableMetadata $ _tiCoreInfo sourceTableInfo,
                _tciExtraTableMetadata $ _tiCoreInfo targetTableInfo
              ) of
-          (Distributed {}, Local) -> notSupported
-          (Distributed {}, Reference) -> pure ()
+          (Distributed {}, Local {}) -> notSupported
+          (Distributed {}, Reference {}) -> pure ()
           (Distributed {}, Distributed {}) -> pure ()
           (_, Distributed {}) -> notSupported
           (_, _) -> pure ()
@@ -173,9 +186,9 @@ instance PostgresMetadata 'Citus where
 
       showDistributionType :: ExtraTableMetadata -> Text
       showDistributionType = \case
-        Local -> "local"
-        Distributed _ -> "distributed"
-        Reference -> "reference"
+        Local {} -> "local"
+        Distributed {} -> "distributed"
+        Reference {} -> "reference"
 
       throwNotSupportedError :: TableInfo ('Postgres 'Citus) -> TableInfo ('Postgres 'Citus) -> Text -> m ()
       throwNotSupportedError sourceTableInfo targetTableInfo t =
@@ -195,6 +208,7 @@ instance PostgresMetadata 'Citus where
                   <> ")"
               )
 
+  tableTypeImpl = tableType
   listAllTablesSql =
     Query.fromText
       [i|
@@ -218,6 +232,7 @@ instance PostgresMetadata 'Citus where
 
 instance PostgresMetadata 'Cockroach where
   validateRel _ _ _ = pure ()
+  tableTypeImpl = Postgres._petmTableType
 
   pgTypeOidMapping =
     InsOrdHashMap.fromList
@@ -275,7 +290,51 @@ instance
   buildComputedFieldBooleanExp = Postgres.buildComputedFieldBooleanExp
   validateNativeQuery = Postgres.validateNativeQuery (pgTypeOidMapping @pgKind)
   supportsBeingRemoteRelationshipTarget _ = True
-  getTableInfo _ _ = throw400 UnexpectedPayload "get_table_info not yet supported in Postgres!"
+
+  getTableInfo sourceName tableName = do
+    sourceConfig <- askSourceConfig @('Postgres pgKind) sourceName
+
+    result <-
+      either throwError pure =<< runExceptT do
+        _pecRunTx (_pscExecCtx sourceConfig) (PGExecCtxInfo NoTxRead InternalRawQuery)
+          $ Postgres.pgFetchTableMetadata @pgKind (HashSet.singleton tableName)
+
+    pure do
+      DBTableMetadata {..} <- HashMap.lookup tableName result
+
+      let convertColumn :: RawColumnInfo ('Postgres pgKind) -> SourceColumnInfo ('Postgres pgKind)
+          convertColumn RawColumnInfo {..} =
+            SourceColumnInfo
+              { _sciName = rciName,
+                _sciType = rciType,
+                _sciNullable = rciIsNullable,
+                _sciDescription = fmap unDescription rciDescription,
+                _sciInsertable = _cmIsInsertable rciMutability,
+                _sciUpdatable = _cmIsUpdatable rciMutability,
+                _sciValueGenerated = Nothing
+              }
+
+          convertForeignKeys :: HashSet (ForeignKeyMetadata ('Postgres pgKind)) -> SourceForeignKeys ('Postgres pgKind)
+          convertForeignKeys foreignKeys = SourceForeignKeys $ HashMap.fromList do
+            ForeignKeyMetadata ForeignKey {..} <- HashSet.toList foreignKeys
+
+            let mappings :: HashMap Postgres.PGCol Postgres.PGCol
+                mappings = NEHashMap.toHashMap _fkColumnMapping
+
+            pure (_cName _fkConstraint, SourceConstraint _fkForeignTable mappings)
+
+      pure
+        SourceTableInfo
+          { _stiName = tableName,
+            _stiInsertable = maybe True viIsInsertable _ptmiViewInfo,
+            _stiUpdatable = maybe True viIsUpdatable _ptmiViewInfo,
+            _stiDeletable = maybe True viIsDeletable _ptmiViewInfo,
+            _stiForeignKeys = convertForeignKeys _ptmiForeignKeys,
+            _stiPrimaryKey = fmap (toNonEmpty . _pkColumns) _ptmiPrimaryKey,
+            _stiColumns = map convertColumn _ptmiColumns,
+            _stiType = tableTypeImpl @pgKind _ptmiExtraTableMetadata,
+            _stiDescription = Nothing
+          }
 
   listAllTables sourceName = do
     sourceConfig <- askSourceConfig @('Postgres pgKind) sourceName

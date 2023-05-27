@@ -22,7 +22,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
-import Data.Text.Extended qualified as T (toTxt)
 import Hasura.Backends.BigQuery.Instances.Types ()
 import Hasura.Backends.BigQuery.Source (BigQuerySourceConfig (..))
 import Hasura.Backends.BigQuery.Types as BigQuery
@@ -36,6 +35,7 @@ import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Column qualified as Rql
 import Hasura.RQL.Types.Common qualified as Rql
 import Hasura.RQL.Types.Relationships.Local qualified as Rql
+import Language.GraphQL.Draft.Syntax qualified as G
 
 --------------------------------------------------------------------------------
 -- Types
@@ -118,12 +118,12 @@ newtype FromIr a = FromIr
         )
         a
   }
-  deriving (Functor, Applicative, Monad, MonadValidate (NonEmpty Error))
+  deriving (Functor, Applicative, Monad, MonadValidate (NonEmpty Error), MonadWriter FromIrWriter)
 
 -- | Collected from using a native query in a query.
 --   Each entry here because a CTE to be prepended to the query.
 newtype FromIrWriter = FromIrWriter
-  { fromIrWriterNativeQueries :: Map NativeQueryName (InterpolatedQuery Expression)
+  { fromIrWriterNativeQueries :: Map (Aliased NativeQueryName) (InterpolatedQuery Expression)
   }
   deriving newtype (Semigroup, Monoid)
 
@@ -185,8 +185,8 @@ data ParentSelectFromEntity
 
 runFromIr :: FromIrConfig -> FromIr a -> Validate (NonEmpty Error) (a, FromIrWriter)
 runFromIr config fromIr =
-  runWriterT $
-    evalStateT
+  runWriterT
+    $ evalStateT
       (runReaderT (unFromIr fromIr) (FromIrReader {config}))
       (FromIrState {indices = mempty})
 
@@ -460,8 +460,8 @@ fromSelectAggregate minnerJoinFields annSelectG = do
                   )
               ]
       indexColumn =
-        ColumnExpression $
-          FieldName
+        ColumnExpression
+          $ FieldName
             { fieldNameEntity = innerSelectAlias,
               fieldName = unEntityAlias indexAlias
             }
@@ -796,9 +796,9 @@ fromFunction parentEntityAlias functionName positionalArgs namedArgs = do
         case parentEntityAlias of
           NoParentEntity -> refute $ pure NoParentEntityInternalError
           ParentEntityAlias entityAlias ->
-            pure $
-              ColumnExpression $
-                FieldName columnName (entityAliasText entityAlias)
+            pure
+              $ ColumnExpression
+              $ FieldName columnName (entityAliasText entityAlias)
 
 fromAnnBoolExp ::
   Ir.GBoolExp 'BigQuery (Ir.AnnBoolExpFld 'BigQuery Expression) ->
@@ -806,9 +806,11 @@ fromAnnBoolExp ::
 fromAnnBoolExp = traverse fromAnnBoolExpFld >=> fromGBoolExp
 
 fromNativeQuery :: NativeQuery 'BigQuery Expression -> FromIr From
-fromNativeQuery NativeQuery {..} = FromIr do
-  tell (FromIrWriter (M.singleton nqRootFieldName nqInterpolatedQuery))
-  pure (FromNativeQuery nqRootFieldName)
+fromNativeQuery NativeQuery {..} = do
+  alias <- generateEntityAlias (NativeQueryTemplate nqRootFieldName)
+  let nqAlias = Aliased nqRootFieldName (entityAliasText alias)
+  tell (FromIrWriter (M.singleton nqAlias nqInterpolatedQuery))
+  pure (FromNativeQuery nqAlias)
 
 fromAnnBoolExpFld ::
   Ir.AnnBoolExpFld 'BigQuery Expression -> ReaderT EntityAlias FromIr Expression
@@ -1226,10 +1228,10 @@ fromObjectRelationSelectG ::
 -- We're not using existingJoins at the moment, which was used to
 -- avoid re-joining on the same table twice.
 fromObjectRelationSelectG _existingJoins annRelationSelectG = do
-  let tableFrom = case target of
-        Ir.FromTable t -> t
-        other -> error $ "fromObjectRelationSelectG: " <> show other
-  selectFrom <- lift (fromQualifiedTable tableFrom)
+  selectFrom <- case target of
+    Ir.FromTable t -> lift $ fromQualifiedTable t
+    Ir.FromNativeQuery nq -> lift $ fromNativeQuery nq
+    other -> error $ "fromObjectRelationSelectG: " <> show other
   let entityAlias :: EntityAlias = fromAlias selectFrom
   fieldSources <-
     local
@@ -1427,9 +1429,11 @@ fromArrayAggregateSelectG annRelationSelectG = do
         joinRightTable = fromAlias (selectFrom select),
         joinOn,
         joinProvenance =
-          ArrayAggregateJoinProvenance $
-            mapMaybe (\p -> (,aggregateProjectionsFieldOrigin p) <$> projectionAlias p) . toList . selectProjections $
-              select,
+          ArrayAggregateJoinProvenance
+            $ mapMaybe (\p -> (,aggregateProjectionsFieldOrigin p) <$> projectionAlias p)
+            . toList
+            . selectProjections
+            $ select,
         -- Above: Needed by DataLoader to determine the type of
         -- Haskell-native join to perform.
         joinFieldName,
@@ -1818,7 +1822,7 @@ fromGBoolExp =
 
 -- | Attempt to refine a list into a 'NonEmpty'. If the given list is empty,
 -- this will 'refute' the computation with an 'UnexpectedEmptyList' error.
-toNonEmpty :: MonadValidate (NonEmpty Error) m => [x] -> m (NonEmpty x)
+toNonEmpty :: (MonadValidate (NonEmpty Error) m) => [x] -> m (NonEmpty x)
 toNonEmpty = \case
   [] -> refute (UnexpectedEmptyList :| [])
   x : xs -> pure (x :| xs)
@@ -1867,6 +1871,7 @@ data NameTemplate
   | IndexTemplate
   | UnnestTemplate
   | FunctionTemplate FunctionName
+  | NativeQueryTemplate NativeQueryName
 
 generateEntityAlias :: NameTemplate -> FromIr EntityAlias
 generateEntityAlias template = do
@@ -1891,13 +1896,14 @@ generateEntityAlias template = do
         IndexTemplate -> "idx"
         UnnestTemplate -> "unnest"
         FunctionTemplate FunctionName {..} -> functionName
+        NativeQueryTemplate NativeQueryName {..} -> G.unName getNativeQueryName
 
 fromAlias :: From -> EntityAlias
 fromAlias (FromQualifiedTable Aliased {aliasedAlias}) = EntityAlias aliasedAlias
 fromAlias (FromSelect Aliased {aliasedAlias}) = EntityAlias aliasedAlias
 fromAlias (FromSelectJson Aliased {aliasedAlias}) = EntityAlias aliasedAlias
 fromAlias (FromFunction Aliased {aliasedAlias}) = EntityAlias aliasedAlias
-fromAlias (FromNativeQuery (NativeQueryName nativeQueryName)) = EntityAlias (T.toTxt nativeQueryName)
+fromAlias (FromNativeQuery Aliased {aliasedAlias}) = EntityAlias aliasedAlias
 
 fieldTextNames :: Ir.AnnFieldsG 'BigQuery Void Expression -> [Text]
 fieldTextNames = fmap (\(Rql.FieldName name, _) -> name)
