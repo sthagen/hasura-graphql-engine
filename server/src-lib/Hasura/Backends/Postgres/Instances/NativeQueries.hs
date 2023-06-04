@@ -17,7 +17,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text
-import Data.Text.Extended (commaSeparated, toTxt)
+import Data.Text.Extended (commaSeparated, dquoteList, toTxt)
 import Data.Tuple (swap)
 import Database.PG.Query qualified as PG
 import Database.PostgreSQL.LibPQ qualified as PQ
@@ -35,6 +35,7 @@ import Hasura.NativeQuery.Metadata
     NativeQueryMetadata (..),
   )
 import Hasura.NativeQuery.Types (NullableScalarType (nstType))
+import Hasura.NativeQuery.Validation (validateArgumentDeclaration)
 import Hasura.Prelude
 import Hasura.RQL.Types.BackendType
 
@@ -49,6 +50,7 @@ validateNativeQuery ::
   NativeQueryMetadata ('Postgres pgKind) ->
   m ()
 validateNativeQuery pgTypeOidMapping env connConf logicalModel model = do
+  validateArgumentDeclaration model
   (prepname, preparedQuery) <- nativeQueryToPreparedStatement logicalModel model
   description <- runCheck prepname (PG.fromText preparedQuery)
   let returnColumns = bimap toTxt nstType <$> InsOrdHashMap.toList (columnsFromFields $ _lmmFields logicalModel)
@@ -226,7 +228,7 @@ nativeQueryToPreparedStatement logicalModel model = do
 
       returnedColumnNames :: Text
       returnedColumnNames =
-        commaSeparated $ InsOrdHashMap.keys (columnsFromFields $ _lmmFields logicalModel)
+        dquoteList $ InsOrdHashMap.keys (columnsFromFields $ _lmmFields logicalModel)
 
       wrapInCTE :: Text -> Text
       wrapInCTE query =

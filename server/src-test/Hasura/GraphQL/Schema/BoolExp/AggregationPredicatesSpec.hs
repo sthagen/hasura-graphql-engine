@@ -24,7 +24,7 @@ import Hasura.GraphQL.Schema.Introspection (queryInputFieldsParserIntrospection)
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp (GBoolExp (..), OpExpG (AEQ))
 import Hasura.RQL.IR.BoolExp.AggregationPredicates
-import Hasura.RQL.IR.Value (Provenance (Unknown), UnpreparedValue (UVParameter))
+import Hasura.RQL.IR.Value (Provenance (FreshVar), UnpreparedValue (UVParameter))
 import Hasura.RQL.Types.BackendType (BackendSourceKind (PostgresVanillaKind), BackendType (Postgres), PostgresKind (Vanilla))
 import Hasura.RQL.Types.Column (ColumnType (ColumnScalar), ColumnValue (..))
 import Hasura.RQL.Types.Common (InsertOrder (..), RelName (..), RelType (..), SourceName (..))
@@ -44,13 +44,7 @@ import Test.Hspec
 import Test.Hspec.Extended
 import Test.Parser.Field qualified as GQL
 import Test.Parser.Internal
-  ( ColumnInfoBuilder
-      ( ColumnInfoBuilder,
-        cibIsPrimaryKey,
-        cibName,
-        cibNullable,
-        cibType
-      ),
+  ( ColumnInfoBuilder (..),
     TableInfoBuilder (columns, relations),
     buildTableInfo,
     mkTable,
@@ -212,7 +206,7 @@ spec = do
                             [ AEQ
                                 True
                                 ( UVParameter
-                                    Unknown
+                                    FreshVar
                                     ColumnValue
                                       { cvType = ColumnScalar PGInteger,
                                         cvValue = PGValInteger 42
@@ -255,12 +249,14 @@ spec = do
             { columns =
                 [ ColumnInfoBuilder
                     { cibName = "id",
+                      cibPosition = 0,
                       cibType = ColumnScalar PGInteger,
                       cibNullable = False,
                       cibIsPrimaryKey = True
                     },
                   ColumnInfoBuilder
                     { cibName = "title",
+                      cibPosition = 1,
                       cibType = ColumnScalar PGText,
                       cibNullable = False,
                       cibIsPrimaryKey = False
@@ -277,24 +273,28 @@ spec = do
             { columns =
                 [ ColumnInfoBuilder
                     { cibName = "id",
+                      cibPosition = 0,
                       cibType = ColumnScalar PGInteger,
                       cibNullable = False,
                       cibIsPrimaryKey = True
                     },
                   ColumnInfoBuilder
                     { cibName = "title",
+                      cibPosition = 1,
                       cibType = ColumnScalar PGText,
                       cibNullable = False,
                       cibIsPrimaryKey = False
                     },
                   ColumnInfoBuilder
                     { cibName = "duration_seconds",
+                      cibPosition = 2,
                       cibType = ColumnScalar PGInteger,
                       cibNullable = False,
                       cibIsPrimaryKey = False
                     },
                   ColumnInfoBuilder
                     { cibName = "album_id",
+                      cibPosition = 3,
                       cibType = ColumnScalar PGInteger,
                       cibNullable = False,
                       cibIsPrimaryKey = False
@@ -327,7 +327,7 @@ spec = do
           _siConfiguration = notImplementedYet "SourceConfig",
           _siQueryTagsConfig = Nothing,
           _siCustomization = ResolvedSourceCustomization mempty mempty HasuraCase Nothing,
-          _siDbObjectsIntrospection = DBObjectsIntrospection mempty mempty mempty
+          _siDbObjectsIntrospection = DBObjectsIntrospection mempty mempty mempty mempty
         }
 
     makeTableCache :: [TableInfo ('Postgres 'Vanilla)] -> HashMap QualifiedTable (TableInfo ('Postgres 'Vanilla))
