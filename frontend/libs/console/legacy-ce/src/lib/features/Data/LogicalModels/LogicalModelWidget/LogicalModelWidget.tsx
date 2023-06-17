@@ -1,12 +1,11 @@
 import Skeleton from 'react-loading-skeleton';
 import { CreateBooleanMap } from '../../../../components/Common/utils/tsUtils';
-import { Driver, drivers } from '../../../../dataSources';
 import { Button } from '../../../../new-components/Button';
 import { Dialog } from '../../../../new-components/Dialog';
 import { useConsoleForm } from '../../../../new-components/Form';
 import { IndicatorCard } from '../../../../new-components/IndicatorCard';
 import { hasuraToast } from '../../../../new-components/Toasts';
-import { Feature } from '../../../DataSource';
+import { Feature, nativeDrivers } from '../../../DataSource';
 import { useMetadata } from '../../../hasura-metadata-api';
 import { DisplayToastErrorMessage } from '../../components/DisplayErrorMessage';
 import { useSupportedDataTypes } from '../../hooks/useSupportedDataTypes';
@@ -20,12 +19,20 @@ import {
   AddLogicalModelFormData,
   addLogicalModelValidationSchema,
 } from './validationSchema';
+import { extractModelsAndQueriesFromMetadata } from '../../../hasura-metadata-api/selectors';
+import { Link } from 'react-router';
+import { formFieldToLogicalModelField } from './mocks/utils/formFieldToLogicalModelField';
+import { useEnvironmentState } from '../../../ConnectDBRedesign/hooks';
 
 export type AddLogicalModelDialogProps = {
   defaultValues?: AddLogicalModelFormData;
   onCancel?: () => void;
   onSubmit?: () => void;
-  disabled?: CreateBooleanMap<AddLogicalModelFormData>;
+  disabled?: CreateBooleanMap<
+    AddLogicalModelFormData & {
+      callToAction?: boolean;
+    }
+  >;
   asDialog?: boolean;
 };
 
@@ -46,8 +53,9 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
       defaultValues: props.defaultValues,
     },
   });
-
+  const { consoleType } = useEnvironmentState();
   const selectedDataSource = watch('dataSourceName');
+  const allowedDrivers = consoleType === 'oss' ? ['postgres'] : nativeDrivers;
 
   /**
    * Options for the data sources
@@ -58,7 +66,7 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
     isLoading: isMetadataLoading,
   } = useMetadata(m =>
     m.metadata.sources
-      .filter(s => drivers.includes(s.kind as Driver))
+      .filter(s => allowedDrivers.includes(s.kind))
       .map(source => ({
         value: source.name,
         label: source.name,
@@ -83,9 +91,19 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
     },
   });
 
+  const { data: modelsAndQueries } = useMetadata(m =>
+    extractModelsAndQueriesFromMetadata(m)
+  );
+
+  const logicalModels = modelsAndQueries?.models || [];
+
   const onSubmit = (data: AddLogicalModelFormData) => {
     trackLogicalModel({
-      data,
+      data: {
+        dataSourceName: data.dataSourceName,
+        name: data.name,
+        fields: data.fields.map(formFieldToLogicalModelField),
+      },
       onSuccess: () => {
         hasuraToast({
           type: 'success',
@@ -115,18 +133,38 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
     return isMetadataLoading || isIntrospectionLoading ? (
       <Skeleton count={8} height={20} />
     ) : (
-      <Form onSubmit={onSubmit}>
-        <LogicalModelFormInputs
-          sourceOptions={sourceOptions}
-          typeOptions={typeOptions}
-          disabled={props.disabled}
-        />
-        <div className="flex justify-end">
-          <Button type="submit" mode="primary" isLoading={isLoading}>
-            {isEditMode ? 'Edit Logical Model' : 'Create Logical Model'}
-          </Button>
-        </div>
-      </Form>
+      <>
+        {isEditMode && (
+          <IndicatorCard status="info">
+            The current release does not support editing Logical Models. This
+            feature will be available in a future release. You can still{' '}
+            <Link
+              to={`/data/native-queries/logical-models/${props.defaultValues?.dataSourceName}/${props.defaultValues?.name}/permissions`}
+            >
+              edit permissions
+            </Link>{' '}
+            or edit logical models directly by modifying the Metadata.
+          </IndicatorCard>
+        )}
+        <Form onSubmit={onSubmit}>
+          <LogicalModelFormInputs
+            sourceOptions={sourceOptions}
+            typeOptions={typeOptions}
+            disabled={props.disabled}
+            logicalModels={logicalModels}
+          />
+          <div className="flex justify-end">
+            <Button
+              disabled={props.disabled?.callToAction}
+              type="submit"
+              mode="primary"
+              isLoading={isLoading}
+            >
+              {isEditMode ? 'Edit Logical Model' : 'Create Logical Model'}
+            </Button>
+          </div>
+        </Form>
+      </>
     );
 
   return (
@@ -159,6 +197,7 @@ export const LogicalModelWidget = (props: AddLogicalModelDialogProps) => {
               sourceOptions={sourceOptions}
               typeOptions={typeOptions}
               disabled={props.disabled}
+              logicalModels={logicalModels}
             />
           </Form>
         )}
