@@ -1261,6 +1261,10 @@
                         "default": false,
                         "type": "boolean"
                     },
+                    "logical_model": {
+                        "nullable": true,
+                        "type": "string"
+                    },
                     "object_relationships": {
                         "default": [],
                         "items": {
@@ -2288,6 +2292,10 @@
                         "default": false,
                         "type": "boolean"
                     },
+                    "logical_model": {
+                        "nullable": true,
+                        "type": "string"
+                    },
                     "object_relationships": {
                         "default": [],
                         "items": {
@@ -3274,6 +3282,10 @@
                     "is_enum": {
                         "default": false,
                         "type": "boolean"
+                    },
+                    "logical_model": {
+                        "nullable": true,
+                        "type": "string"
                     },
                     "object_relationships": {
                         "default": [],
@@ -4351,6 +4363,10 @@
                         "default": false,
                         "type": "boolean"
                     },
+                    "logical_model": {
+                        "nullable": true,
+                        "type": "string"
+                    },
                     "object_relationships": {
                         "default": [],
                         "items": {
@@ -4918,6 +4934,11 @@
                                 "$ref": "#/components/schemas/FromEnv"
                             }
                         ]
+                    },
+                    "isolation_level": {
+                        "default": "read-committed",
+                        "description": "The transaction isolation level in which the queries made to the source will be run with (default: read-committed).\nIsolation level",
+                        "type": "string"
                     },
                     "pool_settings": {
                         "$ref": "#/components/schemas/MSSQLPoolSettings"
@@ -6079,6 +6100,10 @@
                     "is_enum": {
                         "default": false,
                         "type": "boolean"
+                    },
+                    "logical_model": {
+                        "nullable": true,
+                        "type": "string"
                     },
                     "object_relationships": {
                         "default": [],
@@ -7455,6 +7480,10 @@
                     "is_enum": {
                         "default": false,
                         "type": "boolean"
+                    },
+                    "logical_model": {
+                        "nullable": true,
+                        "type": "string"
                     },
                     "object_relationships": {
                         "default": [],

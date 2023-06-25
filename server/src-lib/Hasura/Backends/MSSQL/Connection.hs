@@ -27,12 +27,15 @@ where
 import Autodocodec (HasCodec (codec), dimapCodec, disjointEitherCodec, optionalFieldOrNull', optionalFieldWithDefault', requiredField')
 import Autodocodec qualified as AC
 import Autodocodec.Extended (fromEnvCodec)
+import Control.Lens (united)
 import Control.Monad.Morph (hoist)
 import Control.Monad.Trans.Control
 import Data.Aeson
 import Data.Aeson qualified as J
 import Data.Environment qualified as Env
+import Data.Has
 import Data.Text (pack, unpack)
+import Data.Text qualified as T
 import Data.Time (localTimeToUTC)
 import Database.MSSQL.Pool qualified as MSPool
 import Database.MSSQL.Transaction qualified as MSTx
@@ -146,7 +149,8 @@ defaultMSSQLPoolSettings =
 
 data MSSQLConnectionInfo = MSSQLConnectionInfo
   { _mciConnectionString :: InputConnectionString,
-    _mciPoolSettings :: MSSQLPoolSettings
+    _mciPoolSettings :: MSSQLPoolSettings,
+    _mciIsolationLevel :: MSTx.TxIsolation
   }
   deriving (Show, Eq, Generic)
 
@@ -162,6 +166,14 @@ instance HasCodec MSSQLConnectionInfo where
       AC..= _mciConnectionString
         <*> requiredField' "pool_settings"
       AC..= _mciPoolSettings
+        <*> AC.optionalFieldWithDefault "isolation_level" MSTx.ReadCommitted isolationLevelDoc
+      AC..= _mciIsolationLevel
+    where
+      isolationLevelDoc =
+        T.unwords
+          [ "The transaction isolation level in which the queries made to the",
+            "source will be run with (default: read-committed)."
+          ]
 
 instance ToJSON MSSQLConnectionInfo where
   toJSON = genericToJSON hasuraJSON
@@ -174,6 +186,9 @@ instance FromJSON MSSQLConnectionInfo where
       <*> o
       .:? "pool_settings"
       .!= defaultMSSQLPoolSettings
+      <*> o
+      .:? "isolation_level"
+      .!= MSTx.ReadCommitted
 
 data MSSQLConnConfiguration = MSSQLConnConfiguration
   { _mccConnectionInfo :: MSSQLConnectionInfo,
@@ -249,11 +264,11 @@ data MSSQLExecCtx = MSSQLExecCtx
   }
 
 -- | Creates a MSSQL execution context for a single primary pool
-mkMSSQLExecCtx :: MSPool.MSSQLPool -> ResizePoolStrategy -> MSSQLExecCtx
-mkMSSQLExecCtx pool resizeStrategy =
+mkMSSQLExecCtx :: MSTx.TxIsolation -> MSPool.MSSQLPool -> ResizePoolStrategy -> MSSQLExecCtx
+mkMSSQLExecCtx isolationLevel pool resizeStrategy =
   MSSQLExecCtx
-    { mssqlRunReadOnly = \tx -> MSTx.runTxE defaultMSSQLTxErrorHandler MSTx.ReadCommitted tx pool,
-      mssqlRunReadWrite = \tx -> MSTx.runTxE defaultMSSQLTxErrorHandler MSTx.ReadCommitted tx pool,
+    { mssqlRunReadOnly = \tx -> MSTx.runTxE defaultMSSQLTxErrorHandler isolationLevel tx pool,
+      mssqlRunReadWrite = \tx -> MSTx.runTxE defaultMSSQLTxErrorHandler isolationLevel tx pool,
       mssqlRunSerializableTx = \tx -> MSTx.runTxE defaultMSSQLTxErrorHandler MSTx.Serializable tx pool,
       mssqlDestroyConn = MSPool.drainMSSQLPool pool,
       mssqlResizePools =
@@ -303,6 +318,10 @@ instance Eq MSSQLSourceConfig where
 
 instance ToJSON MSSQLSourceConfig where
   toJSON = toJSON . _mscConnectionString
+
+-- Note: () ~ ScalarTypeParsingContext 'MSSQL but we can't use the type family instance in the Has instance.
+instance Has () MSSQLSourceConfig where
+  hasLens = united
 
 odbcValueToJValue :: ODBC.Value -> J.Value
 odbcValueToJValue = \case
