@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 -- | This file contains the handlers that are used within websocket server.
@@ -99,7 +98,7 @@ import Hasura.Server.Prometheus
     PrometheusMetrics (..),
   )
 import Hasura.Server.Telemetry.Counters qualified as Telem
-import Hasura.Server.Types (GranularPrometheusMetricsState (..), MonadGetPolicies (..), RequestId, getRequestId)
+import Hasura.Server.Types (GranularPrometheusMetricsState (..), MonadGetPolicies (..), RequestId, getInputValidationSetting, getRequestId)
 import Hasura.Services.Network
 import Hasura.Session
 import Hasura.Tracing qualified as Tracing
@@ -474,6 +473,7 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
   env <- liftIO $ acEnvironment <$> getAppContext appStateRef
   sqlGenCtx <- liftIO $ acSQLGenCtx <$> getAppContext appStateRef
   enableAL <- liftIO $ acEnableAllowlist <$> getAppContext appStateRef
+  inputValidationSetting <- liftIO $ (getInputValidationSetting . acExperimentalFeatures) <$> getAppContext appStateRef
 
   (reqParsed, queryParts) <- Tracing.newSpan "Parse GraphQL" $ do
     reqParsedE <- lift $ E.checkGQLExecution userInfo (reqHdrs, ipAddress) enableAL sc q requestId
@@ -495,6 +495,7 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
         prometheusMetrics
         userInfo
         sqlGenCtx
+        inputValidationSetting
         readOnlyMode
         sc
         scVer
