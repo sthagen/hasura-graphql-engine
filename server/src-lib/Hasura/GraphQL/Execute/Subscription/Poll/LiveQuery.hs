@@ -10,15 +10,17 @@ where
 import Control.Concurrent.Async qualified as A
 import Control.Concurrent.STM qualified as STM
 import Control.Lens
+import Data.Aeson.Ordered qualified as JO
 import Data.ByteString qualified as BS
 import Data.HashMap.Strict qualified as HashMap
 import Data.List.Split (chunksOf)
-import Data.Monoid (Sum (..))
+import Data.Monoid (Endo (..), Sum (..))
 import Data.Text.Extended
 import GHC.AssertNF.CPP
 import Hasura.Base.Error
 import Hasura.GraphQL.Execute.Backend
 import Hasura.GraphQL.Execute.Subscription.Options
+import Hasura.GraphQL.Execute.Subscription.Plan (applyModifier)
 import Hasura.GraphQL.Execute.Subscription.Poll.Common hiding (Cohort (..), CohortMap, CohortSnapshot (..))
 import Hasura.GraphQL.Execute.Subscription.Poll.Common qualified as C
 import Hasura.GraphQL.Execute.Subscription.TMap qualified as TMap
@@ -26,6 +28,7 @@ import Hasura.GraphQL.Execute.Subscription.Types
 import Hasura.GraphQL.ParameterizedQueryHash (ParameterizedQueryHash)
 import Hasura.GraphQL.Transport.Backend
 import Hasura.GraphQL.Transport.HTTP.Protocol
+import Hasura.Logging (LogLevel (..))
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.BackendTag (backendTag, reify)
@@ -91,10 +94,11 @@ pollLiveQuery ::
   IO GranularPrometheusMetricsState ->
   TMap.TMap (Maybe OperationName) Int ->
   ResolvedConnectionTemplate b ->
+  (Maybe (Endo JO.Value)) ->
   IO ()
-pollLiveQuery pollerId pollerResponseState lqOpts (sourceName, sourceConfig) roleName parameterizedQueryHash query cohortMap postPollHook prometheusMetrics granularPrometheusMetricsState operationNamesMap' resolvedConnectionTemplate = do
+pollLiveQuery pollerId pollerResponseState lqOpts (sourceName, sourceConfig) roleName parameterizedQueryHash query cohortMap postPollHook prometheusMetrics granularPrometheusMetricsState operationNamesMap' resolvedConnectionTemplate modifier = do
   operationNamesMap <- STM.atomically $ TMap.getMap operationNamesMap'
-  (totalTime, (snapshotTime, batchesDetails)) <- withElapsedTime $ do
+  (totalTime, (snapshotTime, (batchesDetails, maybeErrors))) <- withElapsedTime $ do
     -- snapshot the current cohorts and split them into batches
     (snapshotTime, cohortBatches) <- withElapsedTime $ do
       -- get a snapshot of all the cohorts
@@ -107,7 +111,7 @@ pollLiveQuery pollerId pollerResponseState lqOpts (sourceName, sourceConfig) rol
       pure $ zip (BatchId <$> [1 ..]) cohortBatches
 
     -- concurrently process each batch
-    batchesDetails <- A.forConcurrently cohortBatches $ \(batchId, cohorts) -> do
+    batchesDetailsWithMaybeError <- A.forConcurrently cohortBatches $ \(batchId, cohorts) -> do
       (queryExecutionTime, mxRes) <- runDBSubscription @b sourceConfig query (over (each . _2) C._csVariables cohorts) resolvedConnectionTemplate
 
       let dbExecTimeMetric = submDBExecTotalTime $ pmSubscriptionMetrics $ prometheusMetrics
@@ -121,15 +125,22 @@ pollLiveQuery pollerId pollerResponseState lqOpts (sourceName, sourceConfig) rol
 
       previousPollerResponseState <- STM.readTVarIO pollerResponseState
 
-      case mxRes of
-        Left _ -> do
+      maybeError <- case mxRes of
+        Left err -> do
           when (previousPollerResponseState == PRSSuccess) $ do
             Prometheus.Gauge.inc $ submActiveLiveQueryPollersInError $ pmSubscriptionMetrics prometheusMetrics
             STM.atomically $ STM.writeTVar pollerResponseState PRSError
+          let pollDetailsError =
+                PollDetailsError
+                  { _pdeBatchId = batchId,
+                    _pdeErrorDetails = err
+                  }
+          return $ Just pollDetailsError
         Right _ -> do
           when (previousPollerResponseState == PRSError) $ do
             Prometheus.Gauge.dec $ submActiveLiveQueryPollersInError $ pmSubscriptionMetrics prometheusMetrics
             STM.atomically $ STM.writeTVar pollerResponseState PRSSuccess
+          return Nothing
 
       let lqMeta = SubscriptionMetadata $ convertDuration queryExecutionTime
           operations = getCohortOperations cohorts mxRes
@@ -159,17 +170,17 @@ pollLiveQuery pollerId pollerResponseState lqOpts (sourceName, sourceConfig) rol
       let pgExecutionTime = case reify (backendTag @b) of
             Postgres Vanilla -> Just queryExecutionTime
             _ -> Nothing
-      pure
-        $ BatchExecutionDetails
-          pgExecutionTime
-          queryExecutionTime
-          pushTime
-          batchId
-          cohortsExecutionDetails
-          batchResponseSize
-    pure (snapshotTime, batchesDetails)
-
-  let pollDetails =
+          batchExecDetails =
+            BatchExecutionDetails
+              pgExecutionTime
+              queryExecutionTime
+              pushTime
+              batchId
+              cohortsExecutionDetails
+              batchResponseSize
+      pure $ (batchExecDetails, maybeError)
+    pure (snapshotTime, unzip batchesDetailsWithMaybeError)
+  let initPollDetails =
         PollDetails
           { _pdPollerId = pollerId,
             _pdKind = LiveQuery,
@@ -180,8 +191,18 @@ pollLiveQuery pollerId pollerResponseState lqOpts (sourceName, sourceConfig) rol
             _pdTotalTime = totalTime,
             _pdSource = sourceName,
             _pdRole = roleName,
-            _pdParameterizedQueryHash = parameterizedQueryHash
+            _pdParameterizedQueryHash = parameterizedQueryHash,
+            _pdLogLevel = LevelInfo,
+            _pdErrors = Nothing
           }
+      maybePollDetailsErrors = sequenceA maybeErrors
+      pollDetails = case maybePollDetailsErrors of
+        Nothing -> initPollDetails
+        Just pollDetailsErrors ->
+          initPollDetails
+            { _pdLogLevel = LevelError,
+              _pdErrors = Just pollDetailsErrors
+            }
   postPollHook pollDetails
   let totalTimeMetric = submTotalTime $ pmSubscriptionMetrics $ prometheusMetrics
   recordSubcriptionMetric
@@ -218,5 +239,5 @@ pollLiveQuery pollerId pollerResponseState lqOpts (sourceName, sourceConfig) rol
               -- Postgres response is not present in the cohort map of this batch
               -- (this shouldn't happen but if it happens it means a logic error and
               -- we should log it)
-              (pure respBS,cohortId,Just (respHash, respSize),)
+              (pure (applyModifier modifier respBS),cohortId,Just (respHash, respSize),)
                 <$> HashMap.lookup cohortId cohortSnapshotMap
