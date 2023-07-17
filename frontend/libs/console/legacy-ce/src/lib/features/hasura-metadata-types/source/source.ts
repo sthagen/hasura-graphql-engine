@@ -53,6 +53,7 @@ export type MetadataFunction = {
       table: Table;
     };
   };
+  permissions?: Record<string, string>[];
 };
 
 export type Source = {
@@ -111,3 +112,5 @@ export type BulkKeepGoingResponse = [
       path: string;
     }
 ];
+
+export { NativeQueryRelationship } from './nativeQuery';
