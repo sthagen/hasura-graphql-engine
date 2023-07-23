@@ -8,7 +8,6 @@ module Hasura.Backends.Postgres.Translate.Select.Internal.Extractor
     asSingleRowExtr,
     asJsonAggExtr,
     withColumnOp,
-    withColumnCaseBoolExp,
   )
 where
 
@@ -16,7 +15,7 @@ import Control.Monad.Writer.Strict
 import Data.List.NonEmpty qualified as NE
 import Hasura.Backends.Postgres.SQL.DML qualified as S
 import Hasura.Backends.Postgres.SQL.Types
-import Hasura.Backends.Postgres.Translate.BoolExp (toSQLBoolExp)
+import Hasura.Backends.Postgres.Translate.BoolExp (withRedactionExp)
 import Hasura.Backends.Postgres.Translate.Select.Internal.Aliases
 import Hasura.Backends.Postgres.Translate.Select.Internal.Helpers (fromTableRowArgs)
 import Hasura.Backends.Postgres.Translate.Types (PermissionLimitSubQuery (..))
@@ -49,8 +48,8 @@ aggregateFieldsToExtractorExps sourcePrefix aggregateFields =
       AFOp aggOp -> mapMaybe (colToMaybeExp aggregateFieldName) $ _aoFields aggOp
       AFExp _ -> []
   where
-    colsToExps :: [(PGCol, Maybe (AnnColumnCaseBoolExp ('Postgres pgKind) S.SQLExp))] -> [(S.ColumnAlias, S.SQLExp)]
-    colsToExps = fmap (\(col, censorExp) -> mkColumnExp censorExp col)
+    colsToExps :: [(PGCol, AnnRedactionExp ('Postgres pgKind) S.SQLExp)] -> [(S.ColumnAlias, S.SQLExp)]
+    colsToExps = fmap (\(col, redactionExp) -> mkColumnExp redactionExp col)
 
     -- Extract the columns and computed fields we need
     colToMaybeExp ::
@@ -58,18 +57,19 @@ aggregateFieldsToExtractorExps sourcePrefix aggregateFields =
       (FieldName, SelectionField ('Postgres pgKind) S.SQLExp) ->
       Maybe (S.ColumnAlias, S.SQLExp)
     colToMaybeExp aggregateFieldName = \case
-      (_fieldName, SFCol col _ caseBoolExp) -> Just $ mkColumnExp caseBoolExp col
+      (_fieldName, SFCol col _ redactionExp) -> Just $ mkColumnExp redactionExp col
       (fieldName, SFComputedField _name cfss) -> Just $ mkComputedFieldExp aggregateFieldName fieldName cfss
       (_fieldName, SFExp _text) -> Nothing
 
     -- Generate an alias for each column we extract.
     mkColumnExp ::
-      Maybe (AnnColumnCaseBoolExp ('Postgres pgKind) S.SQLExp) ->
+      AnnRedactionExp ('Postgres pgKind) S.SQLExp ->
       PGCol ->
       (S.ColumnAlias, S.SQLExp)
-    mkColumnExp maybeCaseBoolExp column =
+    mkColumnExp redactionExp column =
       let baseTableIdentifier = mkBaseTableIdentifier sourcePrefix
-          qualifiedColumn = withColumnCaseBoolExp baseTableIdentifier maybeCaseBoolExp $ S.mkQIdenExp baseTableIdentifier (toIdentifier column)
+          baseTableQual = S.QualifiedIdentifier baseTableIdentifier Nothing
+          qualifiedColumn = withRedactionExp baseTableQual redactionExp $ S.mkQIdenExp baseTableIdentifier (toIdentifier column)
           columnAlias = contextualizeBaseTableColumn sourcePrefix column
        in (S.toColumnAlias columnAlias, qualifiedColumn)
 
@@ -81,7 +81,7 @@ mkAggregateOrderByExtractorAndFields ::
   forall pgKind.
   (Backend ('Postgres pgKind)) =>
   TableIdentifier ->
-  AnnotatedAggregateOrderBy ('Postgres pgKind) ->
+  AnnotatedAggregateOrderBy ('Postgres pgKind) S.SQLExp ->
   (S.Extractor, AggregateFields ('Postgres pgKind) S.SQLExp)
 mkAggregateOrderByExtractorAndFields sourcePrefix annAggOrderBy =
   case annAggOrderBy of
@@ -89,7 +89,7 @@ mkAggregateOrderByExtractorAndFields sourcePrefix annAggOrderBy =
       ( S.Extractor S.countStar alias,
         [(FieldName "count", AFCount $ CountAggregate S.CTStar)]
       )
-    AAOOp opText _resultType pgColumnInfo ->
+    AAOOp (AggregateOrderByColumn opText _resultType pgColumnInfo redactionExp) ->
       let pgColumn = ciColumn pgColumnInfo
           pgType = ciType pgColumnInfo
        in ( S.Extractor (S.SEFnApp opText [S.SEQIdentifier $ columnToQIdentifier pgColumn] Nothing) alias,
@@ -98,7 +98,7 @@ mkAggregateOrderByExtractorAndFields sourcePrefix annAggOrderBy =
                   $ AggregateOp
                     opText
                     [ ( fromCol @('Postgres pgKind) pgColumn,
-                        SFCol pgColumn pgType Nothing -- TODO(caseBoolExp): This might need censoring too?
+                        SFCol pgColumn pgType redactionExp
                       )
                     ]
               )
@@ -119,13 +119,12 @@ mkRawComputedFieldExpression ::
   TableIdentifier ->
   ComputedFieldScalarSelect ('Postgres pgKind) S.SQLExp ->
   S.SQLExp
-mkRawComputedFieldExpression sourcePrefix (ComputedFieldScalarSelect fn args _ colOpM maybeCaseBoolExp) =
-  -- The computed field is conditionally outputed depending
-  -- on the presence of `caseBoolExpMaybe` and the value it
-  -- evaluates to. `caseBoolExpMaybe` will be set only in the
-  -- case of an inherited role.
+mkRawComputedFieldExpression sourcePrefix (ComputedFieldScalarSelect fn args _ colOpM redactionExp) =
+  -- The computed field is conditionally outputted depending
+  -- on the value of `redactionExp`. `redactionExp` will only specify
+  -- redaction in the case of an inherited role.
   -- See [SQL generation for inherited role]
-  withColumnCaseBoolExp (mkBaseTableIdentifier sourcePrefix) maybeCaseBoolExp
+  withRedactionExp (S.QualifiedIdentifier (mkBaseTableIdentifier sourcePrefix) Nothing) redactionExp
     $ withColumnOp colOpM
     $ S.SEFunction
     $ S.FunctionExp fn (fromTableRowArgs sourcePrefix args) Nothing
@@ -218,21 +217,3 @@ withColumnOp :: Maybe S.ColumnOp -> S.SQLExp -> S.SQLExp
 withColumnOp colOpM sqlExp = case colOpM of
   Nothing -> sqlExp
   Just (S.ColumnOp opText cExp) -> S.mkSQLOpExp opText sqlExp cExp
-
-withColumnCaseBoolExp ::
-  (Backend ('Postgres pgKind)) =>
-  TableIdentifier ->
-  Maybe (AnnColumnCaseBoolExp ('Postgres pgKind) S.SQLExp) ->
-  S.SQLExp ->
-  S.SQLExp
-withColumnCaseBoolExp tableIdentifier maybeCaseBoolExp sqlExpression =
-  -- Check out [SQL generation for inherited role]
-  case maybeCaseBoolExp of
-    Nothing -> sqlExpression
-    Just caseBoolExp ->
-      let boolExp =
-            S.simplifyBoolExp
-              $ toSQLBoolExp (S.QualifiedIdentifier tableIdentifier Nothing)
-              $ _accColCaseBoolExpField
-              <$> caseBoolExp
-       in S.SECond boolExp sqlExpression S.SENull

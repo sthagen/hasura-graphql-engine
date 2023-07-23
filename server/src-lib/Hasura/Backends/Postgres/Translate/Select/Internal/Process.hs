@@ -30,7 +30,7 @@ import Data.Text.Extended (ToTxt (toTxt))
 import Data.Text.NonEmpty qualified as TNE
 import Hasura.Backends.Postgres.SQL.DML qualified as S
 import Hasura.Backends.Postgres.SQL.Types
-import Hasura.Backends.Postgres.Translate.BoolExp (toSQLBoolExp)
+import Hasura.Backends.Postgres.Translate.BoolExp (toSQLBoolExp, withRedactionExp)
 import Hasura.Backends.Postgres.Translate.Column (toJSONableExp)
 import Hasura.Backends.Postgres.Translate.Select.AnnotatedFieldJSON
 import Hasura.Backends.Postgres.Translate.Select.Internal.Aliases
@@ -49,7 +49,6 @@ import Hasura.Backends.Postgres.Translate.Select.Internal.Extractor
   ( aggregateFieldsToExtractorExps,
     asJsonAggExtr,
     mkRawComputedFieldExpression,
-    withColumnCaseBoolExp,
     withColumnOp,
     withJsonAggExtr,
   )
@@ -116,12 +115,12 @@ processSelectParams
   permLimitSubQ
   tablePermissions
   tableArgs = do
-    (additionalExtrs, selectSorting, cursorExp) <-
-      processOrderByItems (identifierToTableIdentifier thisSourcePrefix) fieldAlias similarArrFields distM orderByM
     let prefix = identifierToTableIdentifier $ _pfBase sourcePrefixes
-    (whereSource, fromItem) <- selectFromToQual prefix selectFrom
+    (selectSourceQual, fromItem) <- selectFromToQual prefix selectFrom
+    (additionalExtrs, selectSorting, cursorExp) <-
+      processOrderByItems (identifierToTableIdentifier thisSourcePrefix) selectSourceQual fieldAlias similarArrFields distM orderByM
     let finalWhere =
-          toSQLBoolExp whereSource
+          toSQLBoolExp selectSourceQual
             $ maybe permFilter (andAnnBoolExps permFilter) whereM
         sortingAndSlicing = SortingAndSlicing selectSorting selectSlicing
         selectSource =
@@ -390,10 +389,10 @@ processAnnFields sourcePrefix fieldAlias annFields tCase = do
     baseTableIdentifier = mkBaseTableIdentifier sourcePrefix
 
     toSQLCol :: AnnColumnField ('Postgres pgKind) S.SQLExp -> m S.SQLExp
-    toSQLCol (AnnColumnField col typ asText colOpM caseBoolExpMaybe) = do
+    toSQLCol (AnnColumnField col typ asText colOpM redactionExp) = do
       strfyNum <- ask
       let sqlExpression =
-            withColumnCaseBoolExp baseTableIdentifier caseBoolExpMaybe
+            withRedactionExp (S.QualifiedIdentifier baseTableIdentifier Nothing) redactionExp
               $ withColumnOp colOpM
               $ S.mkQIdenExp baseTableIdentifier col
       pure $ toJSONableExp strfyNum typ asText tCase sqlExpression
@@ -556,7 +555,7 @@ aggregateFieldToExp sourcePrefix aggregateFields strfyNum =
       [S.SQLExp]
     selectionFieldToExtractor aggregateFieldName opText (fieldName, selectionField) =
       withAlias fieldName $ case selectionField of
-        SFCol col ty _caseBoolExp ->
+        SFCol col ty _redactionExp ->
           toJSONableExp strfyNum ty False Nothing
             $ S.SEFnApp opText [S.SEQIdentifier $ columnToQIdentifier col] Nothing
         SFComputedField _cfName ComputedFieldScalarSelect {..} ->

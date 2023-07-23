@@ -32,6 +32,7 @@ import Hasura.RQL.IR.Root
 import Hasura.RQL.IR.Value
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Roles (adminRoleName)
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RemoteSchema.SchemaCache
 import Hasura.Session (BackendOnlyFieldAccess (..), SessionVariables, UserInfo (..), mkSessionVariable)
 import Language.GraphQL.Draft.Parser qualified as G
@@ -137,7 +138,7 @@ buildQueryParsers introspection = do
   RemoteSchemaParser query _ _ <-
     runError
       $ runMemoizeT
-      $ runRemoteSchema schemaContext
+      $ runRemoteSchema schemaContext Options.RemoteForwardAccurately
       $ buildRemoteParser introResult remoteSchemaRels remoteSchemaInfo
   pure
     $ head query
@@ -184,6 +185,8 @@ spec = do
   testNoVarExpansionIfNoPresetUnlessTopLevelOptionalField
   testNoVarExpansionIfNoPresetUnlessTopLevelOptionalFieldSendNullField
   testNoVarExpansionIfNoPresetUnlessTopLevelOptionalFieldSendNullFieldForObjectField
+  testAbsentValuesDontGetForwarded
+  testAbsentValuesWithDefault
   testPartialVarExpansionIfPreset
   testVariableSubstitutionCollision
 
@@ -238,7 +241,7 @@ query($a: A!) {
                    $ Variable
                      (VIRequired _a)
                      (G.TypeNamed (G.Nullability False) _A)
-                     (JSONValue $ J.Object $ KM.fromList [("b", J.Object $ KM.fromList [("c", J.Object $ KM.fromList [("i", J.Number 0)])])])
+                     (Just $ JSONValue $ J.Object $ KM.fromList [("b", J.Object $ KM.fromList [("c", J.Object $ KM.fromList [("i", J.Number 0)])])])
                )
 
 testNoVarExpansionIfNoPresetUnlessTopLevelOptionalField :: Spec
@@ -328,6 +331,57 @@ query ($a: Int) {
                      (G.TypeNamed (G.Nullability True) _Int)
                      (J.Null)
                )
+
+testAbsentValuesDontGetForwarded :: Spec
+testAbsentValuesDontGetForwarded = it "don't forward variables without values" $ do
+  field <-
+    run
+      -- schema
+      [raw|
+scalar Int
+
+type Query {
+  test(a: Int): Int
+}
+|]
+      -- query
+      [raw|
+query ($a: Int) {
+  test(a: $a)
+}
+|]
+      -- variables
+      [raw|
+{
+}
+|]
+  length (_fArguments field) `shouldBe` 0
+
+testAbsentValuesWithDefault :: Spec
+testAbsentValuesWithDefault = it "variable without value doesn't cause field with default to become null" $ do
+  field <-
+    run
+      -- schema
+      [raw|
+scalar Int
+
+type Query {
+  test(a: Int = 3): Int
+}
+|]
+      -- query
+      [raw|
+query ($a: Int) {
+  test(a: $a)
+}
+|]
+      -- variables
+      [raw|
+{
+}
+|]
+  -- Actually, even better would be if `_fArguments` would be empty.
+  head (toList (_fArguments field)) `shouldBe` G.VInt 3
 
 testNoVarExpansionIfNoPresetUnlessTopLevelOptionalFieldSendNullFieldForObjectField :: Spec
 testNoVarExpansionIfNoPresetUnlessTopLevelOptionalFieldSendNullFieldForObjectField = it "send null value in the input variable for nullable object field " $ do

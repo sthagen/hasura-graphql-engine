@@ -198,22 +198,23 @@ buildGQLContext
         res <- liftIO $ runExceptT $ PG.runTx' (_srpaMetadataDbPoolRef schemaRegistryCtx) selectNowQuery
         case res of
           Left err ->
-            pure $ \_ _ ->
+            pure $ \_ _ _ ->
               unLogger logger $ mkGenericLog @Text LevelWarn "schema-registry" ("failed to fetch the time from metadata db correctly: " <> showQErr err)
           Right now -> do
             let schemaRegistryMap = generateSchemaRegistryMap hasuraContexts
-                projectSchemaInfo = \metadataResourceVersion inconsistentMetadata ->
+                projectSchemaInfo = \metadataResourceVersion inconsistentMetadata metadata ->
                   ProjectGQLSchemaInformation
                     schemaRegistryMap
                     (IsMetadataInconsistent $ checkMdErrs inconsistentMetadata)
                     (calculateSchemaSDLHash (generateSDL adminIntrospection) adminRoleName)
                     metadataResourceVersion
                     now
+                    metadata
             pure
-              $ \metadataResourceVersion inconsistentMetadata ->
+              $ \metadataResourceVersion inconsistentMetadata metadata ->
                 STM.atomically
                   $ STM.writeTQueue (_srpaSchemaRegistryTQueueRef schemaRegistryCtx)
-                  $ projectSchemaInfo metadataResourceVersion inconsistentMetadata
+                  $ projectSchemaInfo metadataResourceVersion inconsistentMetadata metadata
 
     pure
       ( ( adminIntrospection,
@@ -243,13 +244,14 @@ buildSchemaOptions ::
   HashSet ExperimentalFeature ->
   SchemaOptions
 buildSchemaOptions
-  ( SQLGenCtx stringifyNum dangerousBooleanCollapse optimizePermissionFilters bigqueryStringNumericInput,
+  ( SQLGenCtx stringifyNum dangerousBooleanCollapse remoteNullForwardingPolicy optimizePermissionFilters bigqueryStringNumericInput,
     functionPermsCtx
     )
   expFeatures =
     SchemaOptions
       { soStringifyNumbers = stringifyNum,
         soDangerousBooleanCollapse = dangerousBooleanCollapse,
+        soRemoteNullForwardingPolicy = remoteNullForwardingPolicy,
         soInferFunctionPermissions = functionPermsCtx,
         soOptimizePermissionFilters = optimizePermissionFilters,
         soIncludeUpdateManyFields =
@@ -314,7 +316,7 @@ buildRoleContext options sources remotes actions customTypes role remoteSchemaPe
     -- build all remote schemas
     -- we only keep the ones that don't result in a name conflict
     (remoteSchemaFields, !remoteSchemaErrors) <-
-      runRemoteSchema schemaContext
+      runRemoteSchema schemaContext (soRemoteNullForwardingPolicy schemaOptions)
         $ buildAndValidateRemoteSchemas remotes sourcesQueryFields sourcesMutationBackendFields role remoteSchemaPermsCtx
     let remotesQueryFields = concatMap piQuery remoteSchemaFields
         remotesMutationFields = concat $ mapMaybe piMutation remoteSchemaFields
@@ -609,7 +611,7 @@ unauthenticatedContext options sources allRemotes expFeatures remoteSchemaPermsC
       Options.DisableRemoteSchemaPermissions -> do
         -- Permissions are disabled, unauthenticated users have access to remote schemas.
         (remoteFields, remoteSchemaErrors) <-
-          runRemoteSchema fakeSchemaContext
+          runRemoteSchema fakeSchemaContext (soRemoteNullForwardingPolicy schemaOptions)
             $ buildAndValidateRemoteSchemas allRemotes [] [] fakeRole remoteSchemaPermsCtx
         pure
           ( fmap (fmap RFRemote) <$> concatMap piQuery remoteFields,
@@ -649,6 +651,7 @@ buildAndValidateRemoteSchemas ::
   Options.RemoteSchemaPermissions ->
   SchemaT
     ( SchemaContext,
+      Options.RemoteNullForwardingPolicy,
       MkTypename,
       CustomizeRemoteFieldName
     )
@@ -706,6 +709,7 @@ buildRemoteSchemaParser ::
   RemoteSchemaCtx ->
   SchemaT
     ( SchemaContext,
+      Options.RemoteNullForwardingPolicy,
       MkTypename,
       CustomizeRemoteFieldName
     )

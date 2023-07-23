@@ -23,7 +23,7 @@ import Hasura.GraphQL.Schema.Parser
     Parser,
   )
 import Hasura.GraphQL.Schema.Parser qualified as P
-import Hasura.GraphQL.Schema.Select (tablePermissionsInfo, tableSelectionList, tableWhereArg)
+import Hasura.GraphQL.Schema.Select (tableSelectionList, tableWhereArg)
 import Hasura.GraphQL.Schema.Table (getTableGQLName, getTableIdentifierName, tableSelectColumns, tableSelectPermissions)
 import Hasura.GraphQL.Schema.Typename
 import Hasura.Name qualified as Name
@@ -191,7 +191,7 @@ tableStreamCursorExp tableInfo = runMaybeT do
       mkTypename = runMkTypename $ _rscTypeNames customization
   tableGQLName <- getTableGQLName tableInfo
   tableGQLIdentifier <- getTableIdentifierName tableInfo
-  -- TODO(caseBoolExp): Do we need to deal with censorship expressions here too?
+  -- TODO(redactionExp): Do we need to deal with redaction expressions here too?
   columnInfos <- mapMaybe (^? _1 . _SCIScalarColumn) <$> tableSelectColumns tableInfo
   columnInfosNE <- hoistMaybe $ NE.nonEmpty columnInfos
   lift $ memoizeOn 'tableStreamCursorExp (sourceName, tableName) do
