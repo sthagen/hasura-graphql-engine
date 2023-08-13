@@ -20,6 +20,7 @@ import {
   deleteTableRelationshipRequestBody,
   renameRelationshipRequestBody,
 } from './utils';
+import { useInvalidateSuggestedRelationships } from '../../../Data/TrackResources/TrackRelationships/hooks/useSuggestedRelationships';
 
 type AllowedRelationshipDefinitions =
   | Omit<LocalTableRelationshipDefinition, 'capabilities'>
@@ -71,6 +72,11 @@ export const useCreateTableRelationships = (
   globalMutateOptions?: MetadataMigrationOptions
 ) => {
   // get these capabilities
+
+  const { invalidateSuggestedRelationships } =
+    useInvalidateSuggestedRelationships({
+      dataSourceName,
+    });
 
   const { data: driverCapabilties = [] } = useAllDriverCapabilities({
     select: data => {
@@ -129,6 +135,8 @@ export const useCreateTableRelationships = (
     errorTransform: transformErrorResponse,
     onSuccess: (data, variable, ctx) => {
       globalMutateOptions?.onSuccess?.(data, variable, ctx);
+      console.log('invalidate');
+      invalidateSuggestedRelationships();
     },
   });
 
@@ -150,12 +158,12 @@ export const useCreateTableRelationships = (
           },
           sourceCapabilities:
             driverCapabilties.find(
-              c => c.driver === getDriver(item.source.fromSource)
+              c => c.driver.kind === getDriver(item.source.fromSource)
             )?.capabilities ?? defaultCapabilities,
           targetCapabilities:
             driverCapabilties.find(
               c =>
-                c.driver ===
+                c.driver.kind ===
                 getDriver(getTargetName(item.definition.target) ?? '')
             )?.capabilities ?? defaultCapabilities,
         });

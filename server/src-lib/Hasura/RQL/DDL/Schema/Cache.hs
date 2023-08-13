@@ -49,8 +49,9 @@ import Hasura.GraphQL.Schema (buildGQLContext)
 import Hasura.Incremental qualified as Inc
 import Hasura.Logging
 import Hasura.LogicalModel.Cache (LogicalModelCache, LogicalModelInfo (..))
+import Hasura.LogicalModel.Fields (runLogicalModelFieldsLookup)
 import Hasura.LogicalModel.Metadata (LogicalModelMetadata (..))
-import Hasura.LogicalModel.Types (LogicalModelField (..), LogicalModelName (..), LogicalModelType (..), LogicalModelTypeArray (..), LogicalModelTypeReference (..))
+import Hasura.LogicalModel.Types (LogicalModelField (..), LogicalModelLocation (..), LogicalModelName (..), LogicalModelType (..), LogicalModelTypeArray (..), LogicalModelTypeReference (..))
 import Hasura.LogicalModelResolver.Metadata (InlineLogicalModelMetadata (..), LogicalModelIdentifier (..))
 import Hasura.Metadata.Class
 import Hasura.NativeQuery.Cache (NativeQueryCache, NativeQueryInfo (..))
@@ -87,6 +88,7 @@ import Hasura.RQL.Types.Metadata.Object
 import Hasura.RQL.Types.NamingCase
 import Hasura.RQL.Types.OpenTelemetry
 import Hasura.RQL.Types.QueryCollection
+import Hasura.RQL.Types.Relationships.Local (RelDef (..), RelManualConfig (..))
 import Hasura.RQL.Types.Relationships.Remote
 import Hasura.RQL.Types.Roles
 import Hasura.RQL.Types.ScheduledTrigger
@@ -811,6 +813,11 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
             allFields :: FieldInfoMap (FieldInfo b) <- addNonColumnFields allSources sourceName sourceConfig tablesRawInfo columns remoteSchemaMap dbFunctions nonColumnInput
             pure $ tableRawInfo {_tciFieldInfoMap = allFields}
 
+      -- Combine logical models that come from DB schema introspection with logical models
+      -- provided via metadata. If two logical models have the same name the one from metadata is preferred.
+      let unifiedLogicalModels = logicalModels <> introspectedLogicalModels
+          unifiedLogicalModelsHashMap = InsOrdHashMap.toHashMap unifiedLogicalModels
+
       -- permissions
       result <-
         interpretWriter
@@ -828,6 +835,7 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
                       tableFields
                       permissionInputs
                       orderedRoles
+                      unifiedLogicalModelsHashMap
                 pure $ TableInfo tableCoreInfo permissionInfos eventTriggerInfos (mkAdminRolePermInfo tableCoreInfo)
       -- Generate a non-recoverable error when inherited roles were not ordered in a way that allows for building permissions to succeed
       tableCache <- bindA -< liftEither result
@@ -893,10 +901,6 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
       -- fetch static config
       cacheStaticConfig <- bindA -< askCacheStaticConfig
 
-      -- Combine logical models that come from DB schema introspection with logical models
-      -- provided via metadata. If two logical models have the same name the one from metadata is preferred.
-      let unifiedLogicalModels = logicalModels <> introspectedLogicalModels
-
       let getLogicalModelTypeDependencies ::
             LogicalModelType b ->
             S.Set LogicalModelName
@@ -906,6 +910,24 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
               getLogicalModelTypeDependencies ltmaArray
             LogicalModelTypeReference (LogicalModelTypeReferenceC lmtrr _) -> S.singleton lmtrr
 
+      let logicalModelDepObjects metadataJSON rootLogicalModelLocation logicalModelName =
+            let metadataObject =
+                  MetadataObject
+                    ( MOSourceObjId sourceName
+                        $ AB.mkAnyBackend
+                        $ SMOLogicalModelObj @b rootLogicalModelLocation
+                        $ LMMOReferencedLogicalModel logicalModelName
+                    )
+                    metadataJSON
+
+                sourceObject :: SchemaObjId
+                sourceObject =
+                  SOSourceObj sourceName
+                    $ AB.mkAnyBackend
+                    $ SOILogicalModelObj @b rootLogicalModelLocation
+                    $ LMOReferencedLogicalModel logicalModelName
+             in (metadataObject, sourceObject)
+
       logicalModelCacheMaybes <-
         interpretWriter
           -< for
@@ -913,32 +935,18 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
             \lmm@LogicalModelMetadata {..} ->
               withRecordInconsistencyM (mkLogicalModelMetadataObject lmm) $ do
                 logicalModelPermissions <-
-                  flip runReaderT sourceConfig $ buildLogicalModelPermissions sourceName tableCoreInfos _lmmName _lmmFields _lmmSelectPermissions orderedRoles
+                  flip runReaderT sourceConfig
+                    $ runLogicalModelFieldsLookup Hasura.LogicalModel.Metadata._lmmFields unifiedLogicalModelsHashMap
+                    $ buildLogicalModelPermissions sourceName tableCoreInfos (LMLLogicalModel _lmmName) _lmmFields _lmmSelectPermissions orderedRoles
 
-                let recordDependency logicalModelName = do
-                      let metadataObject =
-                            MetadataObject
-                              ( MOSourceObjId sourceName
-                                  $ AB.mkAnyBackend
-                                  $ SMOLogicalModelObj @b _lmmName
-                                  $ LMMOReferencedLogicalModel logicalModelName
-                              )
-                              ( toJSON lmm
-                              )
-
-                          sourceObject :: SchemaObjId
-                          sourceObject =
-                            SOSourceObj sourceName
-                              $ AB.mkAnyBackend
-                              $ SOILogicalModelObj @b _lmmName
-                              $ LMOReferencedLogicalModel logicalModelName
-
+                let recordDep (metadataObject, sourceObject) =
                       recordDependenciesM metadataObject sourceObject
                         $ Seq.singleton (SchemaDependency sourceObject DRReferencedLogicalModel)
 
-                -- record a dependency with each Logical Model our types
-                -- reference
-                mapM_ recordDependency (concatMap (S.toList . getLogicalModelTypeDependencies . lmfType) _lmmFields)
+                -- record a dependency with each Logical Model our types reference
+                mapM_
+                  (recordDep . logicalModelDepObjects (toJSON lmm) (LMLLogicalModel _lmmName))
+                  (concatMap (S.toList . getLogicalModelTypeDependencies . lmfType) _lmmFields)
 
                 pure
                   LogicalModelInfo
@@ -995,38 +1003,23 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
                       (HashMap.lookup logicalModelName logicalModelsCache)
                       (throw400 InvalidConfiguration ("The logical model " <> toTxt logicalModelName <> " could not be found"))
                   LMIInlineLogicalModel (InlineLogicalModelMetadata {_ilmmFields, _ilmmSelectPermissions}) -> do
-                    let logicalModelName = LogicalModelName (getNativeQueryName _nqmRootFieldName)
-
-                        recordDependency innerLogicalModelName = do
-                          let nqMetadataObject =
-                                MetadataObject
-                                  ( MOSourceObjId sourceName
-                                      $ AB.mkAnyBackend
-                                      $ SMONativeQueryObj @b _nqmRootFieldName
-                                      $ NQMOReferencedLogicalModel innerLogicalModelName
-                                  )
-                                  ( toJSON preValidationNativeQuery
-                                  )
-
-                              nqSourceObject :: SchemaObjId
-                              nqSourceObject =
-                                SOSourceObj sourceName
-                                  $ AB.mkAnyBackend
-                                  $ SOINativeQueryObj @b _nqmRootFieldName
-                                  $ NQOReferencedLogicalModel innerLogicalModelName
-
-                          recordDependenciesM nqMetadataObject nqSourceObject
-                            $ Seq.singleton (SchemaDependency nqSourceObject DRReferencedLogicalModel)
-
                     logicalModelPermissions <-
-                      flip runReaderT sourceConfig $ buildLogicalModelPermissions sourceName tableCoreInfos logicalModelName _ilmmFields _ilmmSelectPermissions orderedRoles
+                      flip runReaderT sourceConfig
+                        $ runLogicalModelFieldsLookup Hasura.LogicalModel.Metadata._lmmFields unifiedLogicalModelsHashMap
+                        $ buildLogicalModelPermissions sourceName tableCoreInfos (LMLNativeQuery _nqmRootFieldName) _ilmmFields _ilmmSelectPermissions orderedRoles
+
+                    let recordDep (metadataObject', sourceObject) =
+                          recordDependenciesM metadataObject' sourceObject
+                            $ Seq.singleton (SchemaDependency sourceObject DRReferencedLogicalModel)
 
                     -- record a dependency with each Logical Model our types reference
-                    mapM_ recordDependency (concatMap (S.toList . getLogicalModelTypeDependencies . lmfType) _ilmmFields)
+                    mapM_
+                      (recordDep . logicalModelDepObjects (toJSON preValidationNativeQuery) (LMLNativeQuery _nqmRootFieldName))
+                      (concatMap (S.toList . getLogicalModelTypeDependencies . lmfType) _ilmmFields)
 
                     pure
                       $ LogicalModelInfo
-                        { _lmiName = logicalModelName,
+                        { _lmiName = LogicalModelName (getNativeQueryName _nqmRootFieldName),
                           _lmiFields = _ilmmFields,
                           _lmiDescription = _nqmDescription,
                           _lmiPermissions = logicalModelPermissions
@@ -1039,9 +1032,11 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
                       $ Seq.singleton dependency
                   Nothing -> pure ()
 
+                let wrapRelDef (RelDef a b c) = RelDef a (RelManualNativeQueryConfig b) c
+
                 arrayRelationships <-
                   traverse
-                    (nativeQueryRelationshipSetup sourceName _nqmRootFieldName ArrRel)
+                    (nativeQueryRelationshipSetup sourceName _nqmRootFieldName ArrRel . wrapRelDef)
                     (_nqmArrayRelationships preValidationNativeQuery)
 
                 objectRelationships <-
@@ -1365,28 +1360,29 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
       m OpenTelemetryInfo
     buildOpenTelemetry OpenTelemetryConfig {..} = do
       -- Always perform validation, even if OpenTelemetry is disabled
-      mOtelExporterInfo <-
-        fmap join
-          $ withRecordInconsistencyM (MetadataObject (MOOpenTelemetry OtelSubobjectExporterOtlp) (toJSON _ocExporterOtlp))
-          $ liftEither
-          $ parseOtelExporterConfig _ocStatus env _ocExporterOtlp
-      mOtelBatchSpanProcessorInfo <-
-        withRecordInconsistencyM (MetadataObject (MOOpenTelemetry OtelSubobjectBatchSpanProcessor) (toJSON _ocBatchSpanProcessor))
-          $ liftEither
+      _otiBatchSpanProcessorInfo <-
+        withRecordAndDefaultM OtelSubobjectBatchSpanProcessor _ocBatchSpanProcessor defaultOtelBatchSpanProcessorInfo
           $ parseOtelBatchSpanProcessorConfig _ocBatchSpanProcessor
-      pure
-        $ case _ocStatus of
-          OtelDisabled ->
+      case _ocStatus of
+        OtelDisabled ->
+          pure
+            $
             -- Disable all components if OpenTelemetry export not enabled
-            OpenTelemetryInfo Nothing Nothing
-          OtelEnabled ->
-            OpenTelemetryInfo
-              mOtelExporterInfo
-              -- Disable data types if they are not in the enabled set
-              ( if OtelTraces `S.member` _ocEnabledDataTypes
-                  then mOtelBatchSpanProcessorInfo
-                  else Nothing
-              )
+            OpenTelemetryInfo emptyOtelExporterInfo defaultOtelBatchSpanProcessorInfo
+        OtelEnabled -> do
+          -- Do no validation here if OpenTelemetry is disabled (formerly we
+          -- validated headers, but not URIs, but this was not worth the
+          -- complexity)
+          _otiExporterOtlp <-
+            withRecordAndDefaultM OtelSubobjectExporterOtlp _ocExporterOtlp emptyOtelExporterInfo
+              $ parseOtelExporterConfig env _ocEnabledDataTypes _ocExporterOtlp
+          pure $ OpenTelemetryInfo {..}
+      where
+        -- record a validation failure and return a default object in case validation fails, so we can continue:
+        withRecordAndDefaultM objTy fld dfault =
+          fmap (fromMaybe dfault)
+            . withRecordInconsistencyM (MetadataObject (MOOpenTelemetry objTy) (toJSON fld))
+            . liftEither
 
     buildRESTEndpoints ::
       (MonadWriter (Seq CollectItem) m) =>

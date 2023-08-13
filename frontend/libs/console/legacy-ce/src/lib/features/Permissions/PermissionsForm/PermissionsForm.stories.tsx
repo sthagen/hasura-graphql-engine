@@ -5,7 +5,6 @@ import { PermissionsForm, PermissionsFormProps } from './PermissionsForm';
 import { handlers } from './mocks/handlers.mock';
 
 export default {
-  title: 'Features/Permissions/Form',
   component: PermissionsForm,
   decorators: [ReactQueryDecorator()],
   parameters: {
@@ -17,7 +16,7 @@ const roleName = 'user';
 
 export const GDCSelect: StoryObj<PermissionsFormProps> = {
   args: {
-    dataSourceName: 'sqlite',
+    dataSourceName: 'Lite',
     queryType: 'select',
     table: ['Artist'],
     roleName,

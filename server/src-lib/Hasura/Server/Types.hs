@@ -16,8 +16,11 @@ module Hasura.Server.Types
     CheckFeatureFlag (..),
     getRequestId,
     ApolloFederationStatus (..),
+    TriggersErrorLogLevelStatus (..),
     isApolloFederationEnabled,
+    isTriggersErrorLogLevelEnabled,
     GranularPrometheusMetricsState (..),
+    OpenTelemetryExporterState (..),
     CloseWebsocketsOnMetadataChangeStatus (..),
     isCloseWebsocketsOnMetadataChangeStatusEnabled,
     MonadGetPolicies (..),
@@ -164,6 +167,20 @@ isApolloFederationEnabled = \case
 instance ToJSON ApolloFederationStatus where
   toJSON = toJSON . isApolloFederationEnabled
 
+data TriggersErrorLogLevelStatus = TriggersErrorLogLevelEnabled | TriggersErrorLogLevelDisabled
+  deriving stock (Show, Eq, Ord, Generic)
+
+instance FromJSON TriggersErrorLogLevelStatus where
+  parseJSON = fmap (bool TriggersErrorLogLevelDisabled TriggersErrorLogLevelEnabled) . parseJSON
+
+isTriggersErrorLogLevelEnabled :: TriggersErrorLogLevelStatus -> Bool
+isTriggersErrorLogLevelEnabled = \case
+  TriggersErrorLogLevelEnabled -> True
+  TriggersErrorLogLevelDisabled -> False
+
+instance ToJSON TriggersErrorLogLevelStatus where
+  toJSON = toJSON . isTriggersErrorLogLevelEnabled
+
 -- | Whether or not to enable granular metrics for Prometheus.
 --
 -- `GranularMetricsOn` will enable the dynamic labels for the metrics.
@@ -185,6 +202,25 @@ instance ToJSON GranularPrometheusMetricsState where
   toJSON = \case
     GranularMetricsOff -> Bool False
     GranularMetricsOn -> Bool True
+
+-- | Whether or not to enable OpenTelemetry Exporter.
+--
+-- `OpenTelemetryExporterOn` will enable exporting of traces & metrics via the OTel Exporter.
+-- `OpenTelemetryExporterOff` will disable exporting of traces & metrics via the OTel Exporter.
+data OpenTelemetryExporterState
+  = OpenTelemetryExporterOff
+  | OpenTelemetryExporterOn
+  deriving (Eq, Show)
+
+instance FromJSON OpenTelemetryExporterState where
+  parseJSON = withBool "OpenTelemetryExporterState" $ \case
+    False -> pure OpenTelemetryExporterOff
+    True -> pure OpenTelemetryExporterOn
+
+instance ToJSON OpenTelemetryExporterState where
+  toJSON = \case
+    OpenTelemetryExporterOff -> Bool False
+    OpenTelemetryExporterOn -> Bool True
 
 -- | Whether or not to close websocket connections on metadata change.
 data CloseWebsocketsOnMetadataChangeStatus = CWMCEnabled | CWMCDisabled

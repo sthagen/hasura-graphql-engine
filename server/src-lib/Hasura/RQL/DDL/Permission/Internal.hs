@@ -24,12 +24,14 @@ import Data.Sequence qualified as Seq
 import Data.Text qualified as T
 import Data.Text.Extended
 import Hasura.Base.Error
-import Hasura.LogicalModel.Types (LogicalModelName)
+import Hasura.LogicalModel.Common (logicalModelFieldsToFieldInfo)
+import Hasura.LogicalModel.Fields (LogicalModelFieldsRM (..))
+import Hasura.LogicalModel.Types (LogicalModelLocation)
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.BoolExp
-import Hasura.RQL.Types.Column (ColumnReference (ColumnReferenceColumn), StructuredColumnInfo (..))
+import Hasura.RQL.Types.Column (ColumnReference (ColumnReferenceColumn), NestedObjectInfo (..), StructuredColumnInfo (..))
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Permission
@@ -88,6 +90,7 @@ data CreatePermP1Res a = CreatePermP1Res
 procBoolExp ::
   ( QErrM m,
     TableCoreInfoRM b m,
+    LogicalModelFieldsRM b m,
     BackendMetadata b,
     GetAggregationPredicatesDeps b,
     MonadReader r m,
@@ -118,17 +121,18 @@ procLogicalModelBoolExp ::
   forall b m r.
   ( QErrM m,
     TableCoreInfoRM b m,
+    LogicalModelFieldsRM b m,
     BackendMetadata b,
     GetAggregationPredicatesDeps b,
     MonadReader r m,
     Has (ScalarTypeParsingContext b) r
   ) =>
   SourceName ->
-  LogicalModelName ->
+  LogicalModelLocation ->
   FieldInfoMap (FieldInfo b) ->
   BoolExp b ->
   m (AnnBoolExpPartialSQL b, Seq SchemaDependency)
-procLogicalModelBoolExp source lmn fieldInfoMap be = do
+procLogicalModelBoolExp source logicalModelLocation fieldInfoMap be = do
   let -- The parser for the "right hand side" of operations. We use @rhsParser@
       -- as the name here for ease of grepping, though it's maybe a bit vague.
       -- More specifically, if we think of an operation that combines a field
@@ -147,12 +151,12 @@ procLogicalModelBoolExp source lmn fieldInfoMap be = do
       -- this boolean expression? This dependency system is explained more
       -- thoroughly in the 'buildLogicalModelSelPermInfo' inline comments.
       deps :: [SchemaDependency]
-      deps = getLogicalModelBoolExpDeps source lmn abe
+      deps = getLogicalModelBoolExpDeps source logicalModelLocation abe
 
   return (abe, Seq.fromList deps)
 
 annBoolExp ::
-  (QErrM m, TableCoreInfoRM b m, BackendMetadata b) =>
+  (QErrM m, TableCoreInfoRM b m, LogicalModelFieldsRM b m, BackendMetadata b) =>
   BoolExpRHSParser b m v ->
   FieldInfoMap (FieldInfo b) ->
   FieldInfoMap (FieldInfo b) ->
@@ -173,7 +177,7 @@ annBoolExp rhsParser rootFieldInfoMap fim boolExp =
     procExps = mapM (annBoolExp rhsParser rootFieldInfoMap fim)
 
 annColExp ::
-  (QErrM m, TableCoreInfoRM b m, BackendMetadata b) =>
+  (QErrM m, TableCoreInfoRM b m, LogicalModelFieldsRM b m, BackendMetadata b) =>
   BoolExpRHSParser b m v ->
   FieldInfoMap (FieldInfo b) ->
   FieldInfoMap (FieldInfo b) ->
@@ -182,9 +186,17 @@ annColExp ::
 annColExp rhsParser rootFieldInfoMap colInfoMap (ColExp fieldName colVal) = do
   colInfo <- askFieldInfo colInfoMap fieldName
   case colInfo of
-    FIColumn (SCIScalarColumn pgi) -> AVColumn pgi NoRedaction <$> parseBoolExpOperations (_berpValueParser rhsParser) rootFieldInfoMap colInfoMap (ColumnReferenceColumn pgi) colVal
-    FIColumn (SCIObjectColumn {}) ->
-      throw400 NotSupported "nested object not supported"
+    FIColumn (SCIScalarColumn pgi) ->
+      AVColumn pgi NoRedaction
+        <$> parseBoolExpOperations (_berpValueParser rhsParser) rootFieldInfoMap colInfoMap (ColumnReferenceColumn pgi) colVal
+    FIColumn (SCIObjectColumn nestedObjectInfo@NestedObjectInfo {..}) -> do
+      withPathK (toTxt _noiColumn) $ do
+        boolExp <- decodeValue colVal
+        logicalModelFields <-
+          lookupLogicalModelFields _noiType
+            `onNothingM` throw500 ("Logical model " <> _noiType <<> " not found")
+        let logicalModelFieldMap = logicalModelFieldsToFieldInfo logicalModelFields
+        AVNestedObject nestedObjectInfo <$> annBoolExp rhsParser rootFieldInfoMap logicalModelFieldMap boolExp
     FIColumn (SCIArrayColumn {}) ->
       throw400 NotSupported "nested array not supported"
     FIRelationship relInfo -> do
