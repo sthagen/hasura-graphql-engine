@@ -95,10 +95,10 @@ const getUnaryComparisonOperatorEvaluator = (operator: UnaryComparisonOperator):
   };
 };
 
-const getComparisonColumnSelector = (comparisonColumn: ComparisonColumn): string => {
-  if (typeof comparisonColumn.name === "string")
-    return comparisonColumn.name;
-  return comparisonColumn.name[0];
+const getColumnSelector = (columnSelector: string | Array<string>): string => {
+  if (typeof columnSelector === "string")
+    return columnSelector;
+  return columnSelector[0];
 }
 
 const prettyPrintComparisonColumn = (comparisonColumn: ComparisonColumn): string => {
@@ -122,10 +122,12 @@ export const prettyPrintName = (name: TableName | FunctionName): string => {
 
 export const prettyPrintTargetName = (name: TargetName): string => {
   switch (name.type) {
-    case "table":
+    case 'table':
       return prettyPrintName(name.table);
-    case "function":
+    case 'function':
       return prettyPrintName(name.function);
+    case 'interpolated':
+      return name.interpolated;
     default:
       return unreachable(name["type"]);
   }
@@ -221,7 +223,13 @@ const makePerformExistsSubquery = (
       case "related":
         const relationship = findRelationship(exists.in_table.relationship);
         const joinExpression = createFilterExpressionForRelationshipJoin(row, relationship);
-        return [relationship.target_table, joinExpression];
+        const relationshipTarget = relationship.target;
+        switch(relationshipTarget.type) {
+          case 'table':
+            return [relationshipTarget.name, joinExpression];
+          default:
+            throw new Error('makePerformExistsSubquery: only table relationships currently supported');
+        }
       case "unrelated":
         return [exists.in_table.table, undefined];
       default:
@@ -257,9 +265,10 @@ const buildQueryForPathedOrderByElement = (orderByElement: OrderByElement, order
   if (relationshipName === undefined) {
     switch (orderByElement.target.type) {
       case "column":
+        const columnSelector = getColumnSelector(orderByElement.target.column);
         return {
           fields: {
-            [orderByElement.target.column]: { type: "column", column: orderByElement.target.column, column_type: "unknown" } // Unknown column type here is a hack because we don't actually know what the column type is and we don't care
+            [columnSelector]: { type: "column", column: columnSelector, column_type: "unknown" } // Unknown column type here is a hack because we don't actually know what the column type is and we don't care
           }
         };
       case "single_column_aggregate":
@@ -309,7 +318,7 @@ const extractResultFromOrderByElementQueryResponse = (orderByElement: OrderByEle
         if (rows.length > 1)
           throw new Error(`Unexpected number of rows (${rows.length}) returned by order by element query`);
 
-        const fieldValue = rows.length === 1 ? rows[0][orderByElement.target.column] : null;
+        const fieldValue = rows.length === 1 ? rows[0][getColumnSelector(orderByElement.target.column)] : null;
         if (fieldValue !== null && typeof fieldValue === "object")
           throw new Error("Column order by target path did not end in a column field value");
 
@@ -346,7 +355,7 @@ const makeGetOrderByElementValue = (
   if (relationshipName === undefined) {
     if (orderByElement.target.type !== "column")
       throw new Error(`Cannot perform an order by target of type ${orderByElement.target.type} on the current table. Only column-typed targets are supported.`)
-    return applyRedaction(row, orderByElement.target.redaction_expression, coerceUndefinedToNull(row[orderByElement.target.column]));
+    return applyRedaction(row, orderByElement.target.redaction_expression, coerceUndefinedToNull(row[getColumnSelector(orderByElement.target.column)]));
   } else {
     const relationship = findRelationship(relationshipName);
     const orderByRelation = orderByRelations[relationshipName];
@@ -360,8 +369,14 @@ const makeGetOrderByElementValue = (
     if (subquery === null) {
       return null;
     } else {
-      const queryResponse = performQuery({type: "table", table: relationship.target_table}, subquery);
-      return extractResultFromOrderByElementQueryResponse(innerOrderByElement, queryResponse);
+      const relationshipTarget = relationship.target;
+      switch(relationshipTarget.type) {
+        case 'table':
+          const queryResponse = performQuery({type: "table", table: relationshipTarget.name}, subquery);
+          return extractResultFromOrderByElementQueryResponse(innerOrderByElement, queryResponse);
+        default:
+          throw new Error("makeGetOrderByElementValue: Only table relationships currently supported");
+      }
     }
   }
 };
@@ -404,17 +419,7 @@ const paginateRows = (rows: Iterable<Record<string, RawScalarValue>>, offset: nu
 };
 
 const makeFindRelationship = (request: QueryRequest, targetName: TargetName) => (relationshipName: RelationshipName): Relationship => {
-  const relationships = (() => {
-    switch(request.type) {
-      case 'table':
-        return request.table_relationships;
-      case 'function':
-        return request.relationships;
-      default:
-        return unreachable(request["type"]);
-  }})();
-
-  for (var r of relationships) {
+  for (var r of request.relationships) {
     switch(targetName.type) {
       case 'table':
         if(r.type === 'table') {
@@ -436,6 +441,8 @@ const makeFindRelationship = (request: QueryRequest, targetName: TargetName) => 
           }
         }
         break;
+      case 'interpolated':
+        throw new Error('makeFindRelationship: interpolatedQuery targets not supported');
       default:
         return unreachable(targetName["type"]);
     }
@@ -522,12 +529,12 @@ const addRelationshipFilterToQuery = (row: Record<string, RawScalarValue>, relat
 const makeGetComparisonColumnValue = (parentQueryRowChain: Record<string, RawScalarValue>[], applyRedaction: ApplyRedaction) => (comparisonColumn: ComparisonColumn, row: Record<string, RawScalarValue>): RawScalarValue => {
   const path = comparisonColumn.path ?? [];
   if (path.length === 0) {
-    return applyRedaction(row, comparisonColumn.redaction_expression, coerceUndefinedToNull(row[getComparisonColumnSelector(comparisonColumn)]));
+    return applyRedaction(row, comparisonColumn.redaction_expression, coerceUndefinedToNull(row[getColumnSelector(comparisonColumn.name)]));
   } else if (path.length === 1 && path[0] === "$") {
     const queryRow = parentQueryRowChain.length === 0
       ? row
       : parentQueryRowChain[0];
-    return coerceUndefinedToNull(queryRow[getComparisonColumnSelector(comparisonColumn)]);
+    return coerceUndefinedToNull(queryRow[getColumnSelector(comparisonColumn.name)]);
   } else {
     throw new Error(`Unsupported path on ComparisonColumn: ${prettyPrintComparisonColumn(comparisonColumn)}`);
   }
@@ -550,7 +557,14 @@ const projectRow = (
       case "relationship":
         const relationship = findRelationship(field.relationship);
         const subquery = addRelationshipFilterToQuery(row, relationship, field.query);
-        projectedRow[fieldName] = subquery ? performQuery({type: "table", table: relationship.target_table}, subquery) : { aggregates: null, rows: null };
+        const relationshipTarget = relationship.target;
+        switch(relationshipTarget.type) {
+          case 'table':
+            projectedRow[fieldName] = subquery ? performQuery({type: "table", table: relationshipTarget.name}, subquery) : { aggregates: null, rows: null };
+            break;
+          default:
+            throw new Error(`projectRow: relationships currently only work for tables - Target: ${JSON.stringify(relationshipTarget)}`);
+        }
         break;
 
       case "object":
@@ -674,10 +688,12 @@ export type Rows = Record<string, RawScalarValue>[]; // Record<string, ScalarVal
 export const queryData = (getTable: (tableName: TableName) => Rows | undefined, queryRequest: QueryRequest): QueryResponse => {
   const getTableRows = (targetName: TargetName): Rows | undefined => {
     switch (targetName.type) {
-      case "table":
+      case 'table':
         return getTable(targetName.table);
-      case "function":
+      case 'function':
         throw new Error("Can't perform a subquery using a function");
+      case 'interpolated':
+        throw new Error("Can't perform a subquery using an interpolated query");
       default:
         return unreachable(targetName["type"]);
     }
@@ -725,23 +741,27 @@ export const queryData = (getTable: (tableName: TableName) => Rows | undefined, 
 
   const performNewQuery = (targetName: TargetName, query: Query): QueryResponse => performQuery([], targetName, query, getTableRows);
 
-  switch(queryRequest.type) {
+  const rootTarget = queryRequest.target;
+
+  switch(rootTarget.type) {
     case 'function':
       const getRows = (targetName: TargetName): Record<string, RawScalarValue>[] | undefined => {
         switch (targetName.type) {
           case "table":
             return getTable(targetName.table);
           case "function":
-            return respondToFunction(queryRequest.function, queryRequest.function_arguments ?? [], getTable);
+            return respondToFunction(rootTarget.name, rootTarget.arguments ?? [], getTable);
+          case 'interpolated':
+            throw new Error("Can't perform a subquery using an interpolated query");
           default:
-            return unreachable(targetName["type"]);
+            return unreachable(targetName['type']);
         }
       }
-      const result = performQuery([], {type: "function", function: queryRequest.function}, queryRequest.query, getRows);
+      const result = performQuery([], {type: "function", function: rootTarget.name}, queryRequest.query, getRows);
       return result;
 
     case 'table':
-      const targetTable: TargetName = {type: "table", table: queryRequest.table};
+      const targetTable: TargetName = {type: "table", table: rootTarget.name};
       if (queryRequest.foreach) {
         return {
           rows: queryRequest.foreach.map(foreachFilterIds => {
@@ -763,6 +783,8 @@ export const queryData = (getTable: (tableName: TableName) => Rows | undefined, 
       } else {
         return performNewQuery(targetTable, queryRequest.query);
       }
+    case 'interpolated':
+      throw new Error("Can't perform a query using an interpolated query");
   }
 };
 

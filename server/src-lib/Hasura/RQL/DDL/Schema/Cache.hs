@@ -46,15 +46,18 @@ import Hasura.Function.API
 import Hasura.Function.Cache
 import Hasura.Function.Metadata (FunctionMetadata (..))
 import Hasura.GraphQL.Schema (buildGQLContext)
+import Hasura.GraphQL.Schema.Common
 import Hasura.Incremental qualified as Inc
 import Hasura.Logging
 import Hasura.LogicalModel.Cache (LogicalModelCache, LogicalModelInfo (..))
 import Hasura.LogicalModel.Fields (runLogicalModelFieldsLookup)
 import Hasura.LogicalModel.Metadata (LogicalModelMetadata (..))
 import Hasura.LogicalModel.Types (LogicalModelField (..), LogicalModelLocation (..), LogicalModelName (..), LogicalModelType (..), LogicalModelTypeArray (..), LogicalModelTypeReference (..))
+import Hasura.LogicalModelResolver.Lenses (ilmmSelectPermissions, _LMIInlineLogicalModel)
 import Hasura.LogicalModelResolver.Metadata (InlineLogicalModelMetadata (..), LogicalModelIdentifier (..))
 import Hasura.Metadata.Class
 import Hasura.NativeQuery.Cache (NativeQueryCache, NativeQueryInfo (..))
+import Hasura.NativeQuery.Lenses (nqmReturns)
 import Hasura.NativeQuery.Metadata (NativeQueryMetadata (..), getNativeQueryName)
 import Hasura.Prelude
 import Hasura.QueryTags
@@ -85,10 +88,8 @@ import Hasura.RQL.Types.EventTrigger
 import Hasura.RQL.Types.Metadata
 import Hasura.RQL.Types.Metadata.Backend
 import Hasura.RQL.Types.Metadata.Object
-import Hasura.RQL.Types.NamingCase
 import Hasura.RQL.Types.OpenTelemetry
 import Hasura.RQL.Types.QueryCollection
-import Hasura.RQL.Types.Relationships.Local (RelDef (..), RelManualConfig (..))
 import Hasura.RQL.Types.Relationships.Remote
 import Hasura.RQL.Types.Roles
 import Hasura.RQL.Types.ScheduledTrigger
@@ -189,12 +190,20 @@ newtype CacheRWT m a
       UserInfoM,
       MonadMetadataStorage,
       Tracing.MonadTrace,
+      Tracing.MonadTraceContext,
       MonadBase b,
       MonadBaseControl b,
-      ProvidesNetwork,
-      FF.HasFeatureFlagChecker
+      ProvidesNetwork
     )
   deriving anyclass (MonadQueryTags)
+
+-- | Since 'CacheRWT' runs in a context where we have sampled the feature flags
+-- we intentionally use those for 'HasFeatureFlagChecker', so that we always give
+-- coherent results consistent with the 'CacheDynamicConfig'.
+instance (Monad m) => FF.HasFeatureFlagChecker (CacheRWT m) where
+  checkFlag ff = do
+    ffs <- CacheRWT $ asks _cdcSchemaSampledFeatureFlags
+    withSchemaSampledFeatureFlags ffs (FF.checkFlag ff)
 
 instance (MonadReader r m) => MonadReader r (CacheRWT m) where
   ask = lift ask
@@ -433,7 +442,8 @@ buildSchemaCacheRule ::
   Logger Hasura ->
   Env.Environment ->
   Maybe SchemaRegistryContext ->
-  (MetadataWithResourceVersion, CacheDynamicConfig, InvalidationKeys, Maybe StoredIntrospection) `arr` (SchemaCache, (SourcesIntrospectionStatus, SchemaRegistryAction))
+  (MetadataWithResourceVersion, CacheDynamicConfig, InvalidationKeys, Maybe StoredIntrospection)
+    `arr` (SchemaCache, (SourcesIntrospectionStatus, SchemaRegistryAction))
 buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResourceVersion metadataNoDefaults interimMetadataResourceVersion, dynamicConfig, invalidationKeys, storedIntrospection) -> do
   invalidationKeysDep <- Inc.newDependency -< invalidationKeys
   let metadataDefaults = _cdcMetadataDefaults dynamicConfig
@@ -567,6 +577,7 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
         bindA
           -< do
             buildGQLContext
+              (_cdcSchemaSampledFeatureFlags dynamicConfig)
               (_cdcFunctionPermsCtx dynamicConfig)
               (_cdcRemoteSchemaPermsCtx dynamicConfig)
               (_cdcExperimentalFeatures dynamicConfig)
@@ -666,41 +677,50 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
       ) =>
       ( Inc.Dependency (HashMap SourceName Inc.InvalidationKey),
         Maybe LBS.ByteString,
-        BackendInfoAndSourceMetadata b
+        BackendInfoAndSourceMetadata b,
+        SchemaSampledFeatureFlags
       )
         `arr` Maybe (SourceConfig b, DBObjectsIntrospection b)
-    tryResolveSource = Inc.cache proc (invalidationKeys, sourceIntrospection, BackendInfoAndSourceMetadata {..}) -> do
-      let sourceName = _smName _bcasmSourceMetadata
-          metadataObj = MetadataObject (MOSource sourceName) $ toJSON sourceName
+    tryResolveSource =
+      Inc.cache
+        proc
+          ( invalidationKeys,
+            sourceIntrospection,
+            BackendInfoAndSourceMetadata {..},
+            schemaSampledFeatureFlags
+            )
+        -> do
+          let sourceName = _smName _bcasmSourceMetadata
+              metadataObj = MetadataObject (MOSource sourceName) $ toJSON sourceName
 
-      maybeSourceConfig <- tryGetSourceConfig @b -< (invalidationKeys, sourceName, _smConfiguration _bcasmSourceMetadata, _smKind _bcasmSourceMetadata, _bcasmBackendInfo)
-      case maybeSourceConfig of
-        Nothing -> returnA -< Nothing
-        Just sourceConfig -> do
-          databaseResponse <- bindA -< resolveDatabaseMetadata logger _bcasmSourceMetadata sourceConfig
-          case databaseResponse of
-            Right databaseMetadata -> do
-              -- Collect database introspection to persist in the storage
-              tellA -< pure (CollectStoredIntrospection $ SourceIntrospectionItem sourceName $ encJFromJValue databaseMetadata)
-              returnA -< Just (sourceConfig, databaseMetadata)
-            Left databaseError ->
-              -- If database exception occurs, try to lookup from stored introspection
-              case sourceIntrospection >>= decode' of
-                Nothing ->
-                  -- If no stored introspection exist, re-throw the database exception
-                  (| withRecordInconsistency (throwA -< databaseError) |) metadataObj
-                Just storedMetadata -> do
-                  let inconsistencyMessage =
-                        T.unwords
-                          [ "source " <>> sourceName,
-                            " is inconsistent because of stale database introspection is used.",
-                            "The source couldn't be reached for a fresh introspection",
-                            "because we got error: " <> qeError databaseError
-                          ]
-                  -- Still record inconsistency to notify the user obout the usage of stored stale data
-                  recordInconsistencies -< ((Just $ toJSON (qeInternal databaseError), [metadataObj]), inconsistencyMessage)
-                  bindA -< unLogger logger $ StoredIntrospectionLog ("Using stored introspection for database source " <>> sourceName) databaseError
-                  returnA -< Just (sourceConfig, storedMetadata)
+          maybeSourceConfig <- tryGetSourceConfig @b -< (invalidationKeys, sourceName, _smConfiguration _bcasmSourceMetadata, _smKind _bcasmSourceMetadata, _bcasmBackendInfo)
+          case maybeSourceConfig of
+            Nothing -> returnA -< Nothing
+            Just sourceConfig -> do
+              databaseResponse <- bindA -< withSchemaSampledFeatureFlags schemaSampledFeatureFlags (resolveDatabaseMetadata logger _bcasmSourceMetadata sourceConfig)
+              case databaseResponse of
+                Right databaseMetadata -> do
+                  -- Collect database introspection to persist in the storage
+                  tellA -< pure (CollectStoredIntrospection $ SourceIntrospectionItem sourceName $ encJFromJValue databaseMetadata)
+                  returnA -< Just (sourceConfig, databaseMetadata)
+                Left databaseError ->
+                  -- If database exception occurs, try to lookup from stored introspection
+                  case sourceIntrospection >>= decode' of
+                    Nothing ->
+                      -- If no stored introspection exist, re-throw the database exception
+                      (| withRecordInconsistency (throwA -< databaseError) |) metadataObj
+                    Just storedMetadata -> do
+                      let inconsistencyMessage =
+                            T.unwords
+                              [ "source " <>> sourceName,
+                                " is inconsistent because of stale database introspection is used.",
+                                "The source couldn't be reached for a fresh introspection",
+                                "because we got error: " <> qeError databaseError
+                              ]
+                      -- Still record inconsistency to notify the user obout the usage of stored stale data
+                      recordInconsistencies -< ((Just $ toJSON (qeInternal databaseError), [metadataObj]), inconsistencyMessage)
+                      bindA -< unLogger logger $ StoredIntrospectionLog ("Using stored introspection for database source " <>> sourceName) databaseError
+                      returnA -< Just (sourceConfig, storedMetadata)
 
     -- impl notes (swann):
     --
@@ -827,15 +847,16 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
               \((tableCoreInfo, permissionInputs), eventTriggerInfos) -> do
                 let tableFields = _tciFieldInfoMap tableCoreInfo
                 permissionInfos <-
-                  flip runReaderT sourceConfig
-                    $ buildTablePermissions
-                      env
-                      sourceName
-                      tableCoreInfos
-                      tableFields
-                      permissionInputs
-                      orderedRoles
-                      unifiedLogicalModelsHashMap
+                  buildTablePermissions
+                    env
+                    sourceName
+                    sourceConfig
+                    tableCoreInfos
+                    (_tciName tableCoreInfo)
+                    tableFields
+                    permissionInputs
+                    orderedRoles
+                    unifiedLogicalModelsHashMap
                 pure $ TableInfo tableCoreInfo permissionInfos eventTriggerInfos (mkAdminRolePermInfo tableCoreInfo)
       -- Generate a non-recoverable error when inherited roles were not ordered in a way that allows for building permissions to succeed
       tableCache <- bindA -< liftEither result
@@ -843,13 +864,10 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
       -- not forcing the evaluation here results in a measurable negative impact
       -- on memory residency as measured by our benchmark
       let !defaultNC = _cdcDefaultNamingConvention dynamicConfig
-          !isNamingConventionEnabled = EFNamingConventions `elem` (_cdcExperimentalFeatures dynamicConfig)
       !namingConv <-
         bindA
           -<
-            if isNamingConventionEnabled
-              then getNamingCase sourceCustomization (namingConventionSupport @b) defaultNC
-              else pure HasuraCase
+            getNamingCase sourceCustomization (namingConventionSupport @b) defaultNC
       let resolvedCustomization = mkResolvedSourceCustomization sourceCustomization namingConv
 
       -- sql functions
@@ -935,9 +953,8 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
             \lmm@LogicalModelMetadata {..} ->
               withRecordInconsistencyM (mkLogicalModelMetadataObject lmm) $ do
                 logicalModelPermissions <-
-                  flip runReaderT sourceConfig
-                    $ runLogicalModelFieldsLookup Hasura.LogicalModel.Metadata._lmmFields unifiedLogicalModelsHashMap
-                    $ buildLogicalModelPermissions sourceName tableCoreInfos (LMLLogicalModel _lmmName) _lmmFields _lmmSelectPermissions orderedRoles
+                  runLogicalModelFieldsLookup Hasura.LogicalModel.Metadata._lmmFields unifiedLogicalModelsHashMap
+                    $ buildLogicalModelPermissions sourceName sourceConfig tableCoreInfos (LMLLogicalModel _lmmName) _lmmFields _lmmSelectPermissions orderedRoles
 
                 let recordDep (metadataObject, sourceObject) =
                       recordDependenciesM metadataObject sourceObject
@@ -1004,9 +1021,8 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
                       (throw400 InvalidConfiguration ("The logical model " <> toTxt logicalModelName <> " could not be found"))
                   LMIInlineLogicalModel (InlineLogicalModelMetadata {_ilmmFields, _ilmmSelectPermissions}) -> do
                     logicalModelPermissions <-
-                      flip runReaderT sourceConfig
-                        $ runLogicalModelFieldsLookup Hasura.LogicalModel.Metadata._lmmFields unifiedLogicalModelsHashMap
-                        $ buildLogicalModelPermissions sourceName tableCoreInfos (LMLNativeQuery _nqmRootFieldName) _ilmmFields _ilmmSelectPermissions orderedRoles
+                      runLogicalModelFieldsLookup Hasura.LogicalModel.Metadata._lmmFields unifiedLogicalModelsHashMap
+                        $ buildLogicalModelPermissions sourceName sourceConfig tableCoreInfos (LMLNativeQuery _nqmRootFieldName) _ilmmFields _ilmmSelectPermissions orderedRoles
 
                     let recordDep (metadataObject', sourceObject) =
                           recordDependenciesM metadataObject' sourceObject
@@ -1024,7 +1040,7 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
                           _lmiDescription = _nqmDescription,
                           _lmiPermissions = logicalModelPermissions
                         }
-                nqmCode <- validateNativeQuery @b env sourceName (_smConfiguration sourceMetadata) logicalModel preValidationNativeQuery
+                nqmCode <- validateNativeQuery @b env sourceName (_smConfiguration sourceMetadata) sourceConfig logicalModel preValidationNativeQuery
 
                 case maybeDependency of
                   Just dependency ->
@@ -1032,11 +1048,9 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
                       $ Seq.singleton dependency
                   Nothing -> pure ()
 
-                let wrapRelDef (RelDef a b c) = RelDef a (RelManualNativeQueryConfig b) c
-
                 arrayRelationships <-
                   traverse
-                    (nativeQueryRelationshipSetup sourceName _nqmRootFieldName ArrRel . wrapRelDef)
+                    (nativeQueryRelationshipSetup sourceName _nqmRootFieldName ArrRel)
                     (_nqmArrayRelationships preValidationNativeQuery)
 
                 objectRelationships <-
@@ -1169,16 +1183,24 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
           remoteSchemaRoles = map _rspmRole . _rsmPermissions =<< InsOrdHashMap.elems remoteSchemas
           sourceRoles =
             HS.fromList
-              $ concat
               $ InsOrdHashMap.elems sources
               >>= \(BackendSourceMetadata e) ->
-                AB.dispatchAnyBackend @Backend e \(SourceMetadata _ _ tables _functions _nativeQueries _storedProcedures _logicalModels _ _ _ _) -> do
-                  table <- InsOrdHashMap.elems tables
-                  pure
-                    $ InsOrdHashMap.keys (_tmInsertPermissions table)
-                    <> InsOrdHashMap.keys (_tmSelectPermissions table)
-                    <> InsOrdHashMap.keys (_tmUpdatePermissions table)
-                    <> InsOrdHashMap.keys (_tmDeletePermissions table)
+                AB.dispatchAnyBackend @Backend e \(SourceMetadata _ _ tables _functions nativeQueries _storedProcedures logicalModels _ _ _ _) ->
+                  let tableRoles = do
+                        table <- InsOrdHashMap.elems tables
+                        InsOrdHashMap.keys (_tmInsertPermissions table)
+                          <> InsOrdHashMap.keys (_tmSelectPermissions table)
+                          <> InsOrdHashMap.keys (_tmUpdatePermissions table)
+                          <> InsOrdHashMap.keys (_tmDeletePermissions table)
+
+                      logicalModelRoles = do
+                        logicalModel <- InsOrdHashMap.elems logicalModels
+                        InsOrdHashMap.keys (_lmmSelectPermissions logicalModel)
+
+                      nativeQueryRoles = do
+                        nativeQuery <- InsOrdHashMap.elems nativeQueries
+                        concat . maybeToList $ InsOrdHashMap.keys <$> nativeQuery ^? nqmReturns . _LMIInlineLogicalModel . ilmmSelectPermissions
+                   in tableRoles <> logicalModelRoles <> nativeQueryRoles
           inheritedRoleNames = InsOrdHashMap.keys inheritedRoles
           allRoleNames = sourceRoles <> HS.fromList (remoteSchemaRoles <> actionRoles <> inheritedRoleNames)
 
@@ -1193,10 +1215,12 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
 
       -- remote schemas
       let remoteSchemaInvalidationKeys = Inc.selectD #_ikRemoteSchemas invalidationKeys
-      remoteSchemaMap <- buildRemoteSchemas logger env -< ((remoteSchemaInvalidationKeys, orderedRoles, fmap encJToLBS . siRemotes <$> storedIntrospection), InsOrdHashMap.elems remoteSchemas)
+      remoteSchemaMap <-
+        buildRemoteSchemas logger env
+          -<
+            ((remoteSchemaInvalidationKeys, orderedRoles, fmap encJToLBS . siRemotes <$> storedIntrospection, _cdcSchemaSampledFeatureFlags dynamicConfig), InsOrdHashMap.elems remoteSchemas)
       let remoteSchemaCtxMap = HashMap.map fst remoteSchemaMap
           !defaultNC = _cdcDefaultNamingConvention dynamicConfig
-          !isNamingConventionEnabled = EFNamingConventions `elem` (_cdcExperimentalFeatures dynamicConfig)
 
       let backendInvalidationKeys = Inc.selectD #_ikBackends invalidationKeys
       backendCache <- resolveBackendCache -< (backendInvalidationKeys, BackendMap.elems backendConfigs)
@@ -1210,19 +1234,26 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
           Inc.keyed
             ( \_ exists ->
                 AB.dispatchAnyBackendArrow @BackendMetadata @BackendEventTrigger
-                  ( proc (backendInfoAndSourceMetadata :: BackendInfoAndSourceMetadata b, (dynamicConfig, invalidationKeys, storedIntrospection, defaultNC, isNamingConventionEnabled)) -> do
+                  ( proc (backendInfoAndSourceMetadata :: BackendInfoAndSourceMetadata b, (dynamicConfig, invalidationKeys, storedIntrospection, defaultNC)) -> do
                       let sourceMetadata = _bcasmSourceMetadata backendInfoAndSourceMetadata
                           sourceName = _smName sourceMetadata
                           sourceInvalidationsKeys = Inc.selectD #_ikSources invalidationKeys
                           sourceIntrospection = HashMap.lookup sourceName =<< siBackendIntrospection <$> storedIntrospection
-                      maybeResolvedSource <- tryResolveSource -< (sourceInvalidationsKeys, encJToLBS <$> sourceIntrospection, backendInfoAndSourceMetadata)
+                      maybeResolvedSource <-
+                        tryResolveSource
+                          -<
+                            ( sourceInvalidationsKeys,
+                              encJToLBS <$> sourceIntrospection,
+                              backendInfoAndSourceMetadata,
+                              _cdcSchemaSampledFeatureFlags dynamicConfig
+                            )
                       case maybeResolvedSource of
                         Nothing -> returnA -< Nothing
                         Just (sourceConfig, source) -> do
                           let metadataInvalidationKey = Inc.selectD #_ikMetadata invalidationKeys
                               (tableInputs, _, _) = unzip3 $ map mkTableInputs $ InsOrdHashMap.elems $ _smTables sourceMetadata
                               scNamingConvention = _scNamingConvention $ _smCustomization sourceMetadata
-                              !namingConv = if isNamingConventionEnabled then fromMaybe defaultNC scNamingConvention else HasuraCase
+                              !namingConv = fromMaybe defaultNC scNamingConvention
                           tablesCoreInfo <-
                             buildTableCache
                               -<
@@ -1261,7 +1292,7 @@ buildSchemaCacheRule logger env mSchemaRegistryContext = proc (MetadataWithResou
                                 $ PartiallyResolvedSource sourceMetadata sourceConfig source tablesCoreInfo eventTriggerInfoMaps
                   )
                   -<
-                    (exists, (dynamicConfig, invalidationKeys, storedIntrospection, defaultNC, isNamingConventionEnabled))
+                    (exists, (dynamicConfig, invalidationKeys, storedIntrospection, defaultNC))
             )
           |)
           (HashMap.fromList $ InsOrdHashMap.toList backendInfoAndSourceMetadata)

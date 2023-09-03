@@ -499,21 +499,25 @@ initialiseAppContext ::
   ServeOptions Hasura ->
   AppInit ->
   m (AppStateRef Hasura)
-initialiseAppContext env serveOptions@ServeOptions {..} AppInit {..} = do
+initialiseAppContext env serveOptions AppInit {..} = do
   appEnv@AppEnv {..} <- askAppEnv
   let cacheStaticConfig = buildCacheStaticConfig appEnv
       Loggers _ logger pgLogger = appEnvLoggers
-      sqlGenCtx = initSQLGenCtx soExperimentalFeatures soStringifyNum soDangerousBooleanCollapse soRemoteNullForwardingPolicy
-      cacheDynamicConfig =
-        CacheDynamicConfig
-          soInferFunctionPermissions
-          soEnableRemoteSchemaPermissions
-          sqlGenCtx
-          soExperimentalFeatures
-          soDefaultNamingConvention
-          soMetadataDefaults
-          soApolloFederationStatus
-          soCloseWebsocketsOnMetadataChangeStatus
+
+  -- Build the RebuildableAppContext.
+  -- (See note [Hasura Application State].)
+  rebuildableAppCtxE <-
+    liftIO
+      $ runExceptT
+        ( buildRebuildableAppContext
+            (logger, appEnvManager)
+            serveOptions
+            appEnvCheckFeatureFlag
+            env
+        )
+  !rebuildableAppCtx <- onLeft rebuildableAppCtxE $ \e -> throwErrExit InvalidEnvironmentVariableOptionsError $ T.unpack $ qeError e
+
+  let cacheDynamicConfig = buildCacheDynamicConfig (lastBuiltAppContext rebuildableAppCtx)
 
   -- Create the schema cache
   rebuildableSchemaCache <-
@@ -527,12 +531,6 @@ initialiseAppContext env serveOptions@ServeOptions {..} AppInit {..} = do
       cacheDynamicConfig
       appEnvManager
       Nothing
-
-  -- Build the RebuildableAppContext.
-  -- (See note [Hasura Application State].)
-  rebuildableAppCtxE <- liftIO $ runExceptT (buildRebuildableAppContext (logger, appEnvManager) serveOptions env)
-  !rebuildableAppCtx <- onLeft rebuildableAppCtxE $ \e -> throwErrExit InvalidEnvironmentVariableOptionsError $ T.unpack $ qeError e
-
   -- Initialise the 'AppStateRef' from 'RebuildableSchemaCacheRef' and 'RebuildableAppContext'.
   initialiseAppStateRef aiTLSAllowListRef Nothing appEnvServerMetrics rebuildableSchemaCache rebuildableAppCtx
 
@@ -650,6 +648,7 @@ initLockedEventsCtx =
 newtype AppM a = AppM (ReaderT AppEnv (TraceT IO) a)
   deriving newtype
     ( Functor,
+      MonadFail, -- only due to https://gitlab.haskell.org/ghc/ghc/-/issues/15681
       Applicative,
       Monad,
       MonadIO,
@@ -679,8 +678,10 @@ instance HasCacheStaticConfig AppM where
 instance MonadTrace AppM where
   newTraceWith c p n (AppM a) = AppM $ newTraceWith c p n a
   newSpanWith i n (AppM a) = AppM $ newSpanWith i n a
-  currentContext = AppM currentContext
   attachMetadata = AppM . attachMetadata
+
+instance MonadTraceContext AppM where
+  currentContext = AppM currentContext
 
 instance ProvidesNetwork AppM where
   askHTTPManager = asks appEnvManager
@@ -892,6 +893,7 @@ data ShutdownAction
 runHGEServer ::
   forall m impl.
   ( MonadIO m,
+    MonadFail m, -- only due to https://gitlab.haskell.org/ghc/ghc/-/issues/15681
     MonadFix m,
     MonadMask m,
     MonadStateless IO m,
@@ -900,7 +902,6 @@ runHGEServer ::
     HttpLog m,
     HasAppEnv m,
     HasCacheStaticConfig m,
-    HasFeatureFlagChecker m,
     ConsoleRenderer m,
     MonadVersionAPIWithExtraData m,
     MonadMetadataApiAuthorization m,
@@ -988,6 +989,7 @@ runHGEServer setupHook appStateRef initTime startupStatusHook consoleType ekgSto
 mkHGEServer ::
   forall m impl.
   ( MonadIO m,
+    MonadFail m, -- only due to https://gitlab.haskell.org/ghc/ghc/-/issues/15681
     MonadFix m,
     MonadMask m,
     MonadStateless IO m,
@@ -996,7 +998,6 @@ mkHGEServer ::
     HttpLog m,
     HasAppEnv m,
     HasCacheStaticConfig m,
-    HasFeatureFlagChecker m,
     ConsoleRenderer m,
     MonadVersionAPIWithExtraData m,
     MonadMetadataApiAuthorization m,

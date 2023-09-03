@@ -115,9 +115,12 @@ instance Backend 'BigQuery where
 
   defaultTriggerOnReplication = Nothing
 
+  getColVals _ _ _ _ _ _ = throw500 "getColVals: not implemented for the BigQuery backend"
+
 instance HasSourceConfiguration 'BigQuery where
   type SourceConfig 'BigQuery = BigQuery.BigQuerySourceConfig
   type SourceConnConfiguration 'BigQuery = BigQuery.BigQueryConnSourceConfig
   sourceConfigNumReadReplicas = const 0 -- not supported
   sourceConfigConnectonTemplateEnabled = const False -- not supported
+  sourceSupportsColumnRedaction = const True
   sourceConfigBackendSourceKind _sourceConfig = BigQueryKind

@@ -76,7 +76,8 @@ mkMutationPlan ::
   ( MonadError QErr m,
     MonadReader r m,
     Has API.ScalarTypesCapabilities r,
-    Has SessionVariables r
+    Has SessionVariables r,
+    MonadIO m
   ) =>
   MutationDB 'DataConnector Void (UnpreparedValue 'DataConnector) ->
   m (Plan API.MutationRequest API.MutationResponse)
@@ -88,50 +89,66 @@ translateMutationDB ::
   ( MonadError QErr m,
     MonadReader r m,
     Has API.ScalarTypesCapabilities r,
-    Has SessionVariables r
+    Has SessionVariables r,
+    MonadIO m
   ) =>
   MutationDB 'DataConnector Void (UnpreparedValue 'DataConnector) ->
   m API.MutationRequest
 translateMutationDB = \case
   MDBInsert insert -> do
-    (insertOperation, (tableRelationships, redactionExpressionState, tableInsertSchemas)) <-
-      flip runStateT (mempty, RedactionExpressionState mempty, mempty) $ translateInsert insert
+    (insertOperation, (tableRelationships, redactionExpressionState, API.InterpolatedQueries interpolatedQueries, tableInsertSchemas)) <-
+      flip runStateT (mempty, RedactionExpressionState mempty, mempty, mempty) $ translateInsert insert
+    unless (null interpolatedQueries) do
+      -- TODO: See if we can allow this in mutations
+      throw400 NotSupported "translateMutationDB: Native Queries not supported in insert operations."
     let apiTableInsertSchema =
           unTableInsertSchemas tableInsertSchemas
             & HashMap.toList
             & fmap (\(tableName, TableInsertSchema {..}) -> API.TableInsertSchema tableName _tisPrimaryKey _tisFields)
-    let apiTableRelationships = Set.fromList $ uncurry API.TableRelationships <$> rights (map eitherKey (HashMap.toList (unTableRelationships tableRelationships)))
+    let apiTableRelationships = Set.fromList $ API.RTable . uncurry API.TableRelationships <$> mapMaybe tableKey (HashMap.toList (unTableRelationships tableRelationships))
     pure
       $ API.MutationRequest
-        { _mrTableRelationships = apiTableRelationships,
+        { _mrRelationships = apiTableRelationships,
           _mrRedactionExpressions = translateRedactionExpressions redactionExpressionState,
           _mrInsertSchema = Set.fromList apiTableInsertSchema,
           _mrOperations = [API.InsertOperation insertOperation]
         }
   MDBUpdate update -> do
-    (updateOperations, (tableRelationships, redactionExpressionState)) <-
-      flip runStateT (mempty, RedactionExpressionState mempty) $ translateUpdate update
+    (updateOperations, (tableRelationships, redactionExpressionState, API.InterpolatedQueries interpolatedQueries)) <-
+      flip runStateT (mempty, RedactionExpressionState mempty, mempty) $ translateUpdate update
+
+    unless (null interpolatedQueries) do
+      -- TODO: See if we can allow this in mutations
+      throw400 NotSupported "translateMutationDB: Native Queries not supported in update operations."
+
     let apiTableRelationships =
           Set.fromList
-            $ uncurry API.TableRelationships
-            <$> rights (map eitherKey (HashMap.toList (unTableRelationships tableRelationships)))
+            $ API.RTable
+            . uncurry API.TableRelationships
+            <$> mapMaybe tableKey (HashMap.toList (unTableRelationships tableRelationships))
     pure
       $ API.MutationRequest
-        { _mrTableRelationships = apiTableRelationships,
+        { _mrRelationships = apiTableRelationships,
           _mrRedactionExpressions = translateRedactionExpressions redactionExpressionState,
           _mrInsertSchema = mempty,
           _mrOperations = API.UpdateOperation <$> updateOperations
         }
   MDBDelete delete -> do
-    (deleteOperation, (tableRelationships, redactionExpressionState)) <-
-      flip runStateT (mempty, RedactionExpressionState mempty) $ translateDelete delete
+    (deleteOperation, (tableRelationships, redactionExpressionState, API.InterpolatedQueries interpolatedQueries)) <-
+      flip runStateT (mempty, RedactionExpressionState mempty, mempty) $ translateDelete delete
+
+    unless (null interpolatedQueries) do
+      -- TODO: See if we can allow this in mutations
+      throw400 NotSupported "translateMutationDB: Native Queries not supported in delete operations."
+
     let apiTableRelationships =
           Set.fromList
-            $ uncurry API.TableRelationships
-            <$> rights (map eitherKey (HashMap.toList (unTableRelationships tableRelationships)))
+            $ API.RTable
+            . uncurry API.TableRelationships
+            <$> mapMaybe tableKey (HashMap.toList (unTableRelationships tableRelationships))
     pure
       $ API.MutationRequest
-        { _mrTableRelationships = apiTableRelationships,
+        { _mrRelationships = apiTableRelationships,
           _mrRedactionExpressions = translateRedactionExpressions redactionExpressionState,
           _mrInsertSchema = mempty,
           _mrOperations = [API.DeleteOperation deleteOperation]
@@ -139,19 +156,21 @@ translateMutationDB = \case
   MDBFunction _returnsSet _select ->
     throw400 NotSupported "translateMutationDB: function mutations not implemented for the Data Connector backend."
 
-eitherKey :: (API.TargetName, c) -> Either (API.FunctionName, c) (API.TableName, c)
-eitherKey (API.TNFunction f, x) = Left (f, x)
-eitherKey (API.TNTable t, x) = Right (t, x)
+tableKey :: (API.TargetName, c) -> Maybe (API.TableName, c)
+tableKey (API.TNTable t, x) = Just (t, x)
+tableKey _ = Nothing
 
 translateInsert ::
   ( MonadState state m,
     Has TableRelationships state,
     Has RedactionExpressionState state,
     Has TableInsertSchemas state,
+    Has API.InterpolatedQueries state,
     MonadError QErr m,
     MonadReader r m,
     Has API.ScalarTypesCapabilities r,
-    Has SessionVariables r
+    Has SessionVariables r,
+    MonadIO m
   ) =>
   AnnotatedInsert 'DataConnector Void (UnpreparedValue 'DataConnector) ->
   m API.InsertMutationOperation
@@ -244,10 +263,12 @@ translateUpdate ::
   ( MonadState state m,
     Has TableRelationships state,
     Has RedactionExpressionState state,
+    Has API.InterpolatedQueries state,
     MonadError QErr m,
     MonadReader r m,
     Has API.ScalarTypesCapabilities r,
-    Has SessionVariables r
+    Has SessionVariables r,
+    MonadIO m
   ) =>
   AnnotatedUpdateG 'DataConnector Void (UnpreparedValue 'DataConnector) ->
   m [API.UpdateMutationOperation]
@@ -260,9 +281,11 @@ translateUpdateBatch ::
   ( MonadState state m,
     Has TableRelationships state,
     Has RedactionExpressionState state,
+    Has API.InterpolatedQueries state,
     MonadError QErr m,
     MonadReader r m,
     Has API.ScalarTypesCapabilities r,
+    MonadIO m,
     Has SessionVariables r
   ) =>
   AnnotatedUpdateG 'DataConnector Void (UnpreparedValue 'DataConnector) ->
@@ -315,9 +338,11 @@ translateDelete ::
   ( MonadState state m,
     Has TableRelationships state,
     Has RedactionExpressionState state,
+    Has API.InterpolatedQueries state,
     MonadError QErr m,
     MonadReader r m,
     Has API.ScalarTypesCapabilities r,
+    MonadIO m,
     Has SessionVariables r
   ) =>
   AnnDelG 'DataConnector Void (UnpreparedValue 'DataConnector) ->
@@ -339,10 +364,12 @@ translateMutationOutputToReturningFields ::
   ( MonadState state m,
     Has TableRelationships state,
     Has RedactionExpressionState state,
+    Has API.InterpolatedQueries state,
     MonadError QErr m,
     MonadReader r m,
     Has API.ScalarTypesCapabilities r,
-    Has SessionVariables r
+    Has SessionVariables r,
+    MonadIO m
   ) =>
   API.TableName ->
   MutationOutputG 'DataConnector Void (UnpreparedValue 'DataConnector) ->
@@ -357,10 +384,12 @@ translateMutField ::
   ( MonadState state m,
     Has TableRelationships state,
     Has RedactionExpressionState state,
+    Has API.InterpolatedQueries state,
     MonadError QErr m,
     MonadReader r m,
     Has API.ScalarTypesCapabilities r,
-    Has SessionVariables r
+    Has SessionVariables r,
+    MonadIO m
   ) =>
   API.TableName ->
   FieldName ->

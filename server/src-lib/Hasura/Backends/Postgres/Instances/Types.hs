@@ -164,6 +164,8 @@ instance
 
   resolveConnectionTemplate = Postgres.pgResolveConnectionTemplate
 
+  getColVals = Postgres.getPGColValues
+
 instance
   ( HasTag ('Postgres pgKind)
   ) =>
@@ -173,6 +175,7 @@ instance
   type SourceConnConfiguration ('Postgres pgKind) = Postgres.PostgresConnConfiguration
   sourceConfigNumReadReplicas = Postgres.sourceConfigNumReadReplicas
   sourceConfigConnectonTemplateEnabled = Postgres.sourceConfigConnectonTemplateEnabled
+  sourceSupportsColumnRedaction = const True
   sourceConfigBackendSourceKind _sourceConfig =
     case backendTag @('Postgres pgKind) of
       PostgresVanillaTag -> PostgresVanillaKind

@@ -530,7 +530,7 @@ List of experimental features to be enabled.
 | **Flag**            | `--experimental-features <FEATURES>`                                                                                                                                                                                                                              |
 | **Env var**         | `HASURA_GRAPHQL_EXPERIMENTAL_FEATURES`                                                                                                                                                                                                                            |
 | **Accepted values** | String (Comma-separated list)                                                                                                                                                                                                                                     |
-| **Options**         | `inherited_roles`, `optimize_permission_filters`, `naming_convention`, `streaming_subscriptions`, `apollo_federation`, `hide_update_many_fields`, `bigquery_string_numeric_input`, `hide_aggregation_predicates`, `hide_stream_fields`, `disable_postgres_arrays` |
+| **Options**         | `inherited_roles`, `optimize_permission_filters`, `naming_convention` (deprecated), `streaming_subscriptions`, `apollo_federation`, `hide_update_many_fields`, `bigquery_string_numeric_input`, `hide_aggregation_predicates`, `hide_stream_fields`, `disable_postgres_arrays` |
 | **Default**         | `null`                                                                                                                                                                                                                                                            |
 | **Supported in**    | CE, Enterprise Edition, Cloud                                                                                                                                                                                                                                     |
 
@@ -645,7 +645,7 @@ The [maximum cache size](/caching/enterprise-caching.mdx), measured in MB, for q
 | **Env var**         | `HASURA_GRAPHQL_MAX_CACHE_SIZE`                                                                   |
 | **Accepted values** | Integer (Representing cache size measured in MB)                                                  |
 | **Default**         | `1`                                                                                               |
-| **Supported in**    | **Enterprise Edition**, **Cloud**: Standard / Professional tier is set to `100` MB as the default |
+| **Supported in**    | **Enterprise Edition**, **Cloud**: Professional tier is set to `100` MB as the default |
 
 ### Metadata Database Extension Schema
 

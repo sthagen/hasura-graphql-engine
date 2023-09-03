@@ -142,6 +142,7 @@ newtype Handler m a = Handler (ReaderT HandlerCtx (ExceptT QErr m) a)
       MonadBaseControl b,
       MonadReader HandlerCtx,
       MonadError QErr,
+      Tracing.MonadTraceContext,
       MonadTrace,
       HasAppEnv,
       HasCacheStaticConfig,
@@ -489,7 +490,6 @@ v1MetadataHandler ::
     MonadEventLogCleanup m,
     HasAppEnv m,
     HasCacheStaticConfig m,
-    HasFeatureFlagChecker m,
     ProvidesNetwork m,
     MonadGetPolicies m,
     UserInfoM m
@@ -768,6 +768,7 @@ data HasuraApp = HasuraApp
 mkWaiApp ::
   forall m impl.
   ( MonadIO m,
+    MonadFail m, -- only due to https://gitlab.haskell.org/ghc/ghc/-/issues/15681
     MonadFix m,
     MonadStateless IO m,
     LA.Forall (LA.Pure m),
@@ -776,7 +777,6 @@ mkWaiApp ::
     HttpLog m,
     HasAppEnv m,
     HasCacheStaticConfig m,
-    HasFeatureFlagChecker m,
     UserAuthentication m,
     MonadMetadataApiAuthorization m,
     E.MonadGQLExecutionCheck m,
@@ -826,7 +826,6 @@ httpApp ::
     HttpLog m,
     HasAppEnv m,
     HasCacheStaticConfig m,
-    HasFeatureFlagChecker m,
     UserAuthentication m,
     MonadMetadataApiAuthorization m,
     E.MonadGQLExecutionCheck m,

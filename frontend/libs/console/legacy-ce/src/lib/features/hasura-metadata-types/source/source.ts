@@ -103,15 +103,28 @@ export type {
 } from './storedProcedure';
 export type { LocalArrayRelationship, LocalObjectRelationship } from './table';
 
-export type BulkKeepGoingResponse = [
+export type MetadataError = {
+  code: string;
+  error: string;
+  path: string;
+};
+export type BulkKeepGoingResponse = (
   | {
       message: 'success';
     }
+  | MetadataError
+)[];
+
+export type BulkAtomicResponse =
   | {
-      code: string;
-      error: string;
-      path: string;
+      message: 'success';
     }
-];
+  | MetadataError;
+
+export const isBulkAtomicResponseError = (
+  response: BulkAtomicResponse
+): response is MetadataError => {
+  return 'error' in response;
+};
 
 export { NativeQueryRelationship } from './nativeQuery';
