@@ -78,8 +78,9 @@ import Hasura.Metadata.Class
 import Hasura.Prelude
 import Hasura.QueryTags
 import Hasura.RQL.Types.Common (MetricsConfig (_mcAnalyzeQueryVariables))
+import Hasura.RQL.Types.OpenTelemetry (getOtelTracesPropagator)
 import Hasura.RQL.Types.ResultCustomization
-import Hasura.RQL.Types.SchemaCache (scApiLimits, scMetricsConfig)
+import Hasura.RQL.Types.SchemaCache (SchemaCache (scOpenTelemetryConfig), scApiLimits, scMetricsConfig)
 import Hasura.RemoteSchema.SchemaCache
 import Hasura.SQL.AnyBackend qualified as AB
 import Hasura.Server.AppStateRef
@@ -488,6 +489,7 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
   let gqlOpType = G._todType queryParts
       opName = getOpNameFromParsedReq reqParsed
       maybeOperationName = _unOperationName <$> opName
+      tracesPropagator = getOtelTracesPropagator $ scOpenTelemetryConfig sc
   for_ maybeOperationName $ \nm ->
     -- https://opentelemetry.io/docs/reference/specification/trace/semantic_conventions/instrumentation/graphql/
     Tracing.attachMetadata [("graphql.operation.name", unName nm)]
@@ -549,17 +551,17 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
                               genSql
                               resolvedConnectionTemplate
                       finalResponse <-
-                        RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q
+                        RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q tracesPropagator
                       pure $ AnnotatedResponsePart telemTimeIO_DT Telem.Local finalResponse []
                     E.ExecStepRemote rsi resultCustomizer gqlReq remoteJoins -> do
                       logQueryLog logger $ QueryLog q Nothing requestId QueryLogKindRemoteSchema
-                      runRemoteGQ requestId q fieldName userInfo reqHdrs rsi resultCustomizer gqlReq remoteJoins
+                      runRemoteGQ requestId q fieldName userInfo reqHdrs rsi resultCustomizer gqlReq remoteJoins tracesPropagator
                     E.ExecStepAction actionExecPlan _ remoteJoins -> do
                       logQueryLog logger $ QueryLog q Nothing requestId QueryLogKindAction
                       (time, (resp, _)) <- doQErr $ do
                         (time, (resp, hdrs)) <- EA.runActionExecution userInfo actionExecPlan
                         finalResponse <-
-                          RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q
+                          RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q tracesPropagator
                         pure (time, (finalResponse, hdrs))
                       pure $ AnnotatedResponsePart time Telem.Empty resp []
                     E.ExecStepRaw json -> do
@@ -628,19 +630,19 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
                               genSql
                               resolvedConnectionTemplate
                       finalResponse <-
-                        RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q
+                        RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q tracesPropagator
                       pure $ AnnotatedResponsePart telemTimeIO_DT Telem.Local finalResponse []
                     E.ExecStepAction actionExecPlan _ remoteJoins -> do
                       logQueryLog logger $ QueryLog q Nothing requestId QueryLogKindAction
                       (time, (resp, hdrs)) <- doQErr $ do
                         (time, (resp, hdrs)) <- EA.runActionExecution userInfo actionExecPlan
                         finalResponse <-
-                          RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q
+                          RJ.processRemoteJoins requestId logger agentLicenseKey env reqHdrs userInfo resp remoteJoins q tracesPropagator
                         pure (time, (finalResponse, hdrs))
                       pure $ AnnotatedResponsePart time Telem.Empty resp $ fromMaybe [] hdrs
                     E.ExecStepRemote rsi resultCustomizer gqlReq remoteJoins -> do
                       logQueryLog logger $ QueryLog q Nothing requestId QueryLogKindRemoteSchema
-                      runRemoteGQ requestId q fieldName userInfo reqHdrs rsi resultCustomizer gqlReq remoteJoins
+                      runRemoteGQ requestId q fieldName userInfo reqHdrs rsi resultCustomizer gqlReq remoteJoins tracesPropagator
                     E.ExecStepRaw json -> do
                       logQueryLog logger $ QueryLog q Nothing requestId QueryLogKindIntrospection
                       buildRaw json
@@ -796,12 +798,13 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
       ResultCustomizer ->
       GQLReqOutgoing ->
       Maybe RJ.RemoteJoins ->
+      Tracing.HttpPropagator ->
       ExceptT (Either GQExecError QErr) (ExceptT () m) AnnotatedResponsePart
-    runRemoteGQ requestId reqUnparsed fieldName userInfo reqHdrs rsi resultCustomizer gqlReq remoteJoins = Tracing.newSpan ("Remote schema query for root field " <>> fieldName) $ do
+    runRemoteGQ requestId reqUnparsed fieldName userInfo reqHdrs rsi resultCustomizer gqlReq remoteJoins tracesPropagator = Tracing.newSpan ("Remote schema query for root field " <>> fieldName) $ do
       env <- liftIO $ acEnvironment <$> getAppContext appStateRef
       (telemTimeIO_DT, _respHdrs, resp) <-
         doQErr
-          $ E.execRemoteGQ env userInfo reqHdrs (rsDef rsi) gqlReq
+          $ E.execRemoteGQ env tracesPropagator userInfo reqHdrs (rsDef rsi) gqlReq
       value <- hoist lift $ extractFieldFromResponse fieldName resultCustomizer resp
       finalResponse <-
         doQErr
@@ -816,6 +819,7 @@ onStart enabledLogTypes agentLicenseKey serverEnv wsConn shouldCaptureVariables 
             (encJFromOrderedValue value)
             remoteJoins
             reqUnparsed
+            tracesPropagator
       return $ AnnotatedResponsePart telemTimeIO_DT Telem.Remote finalResponse []
 
     WSServerEnv
@@ -1102,8 +1106,8 @@ onPing :: (MonadIO m) => WSConn -> Maybe PingPongPayload -> m ()
 onPing wsConn mPayload =
   liftIO $ sendMsg wsConn (SMPong mPayload)
 
-onStop :: (MonadIO m) => WSServerEnv impl -> WSConn -> StopMsg -> IO GranularPrometheusMetricsState -> m ()
-onStop serverEnv wsConn (StopMsg opId) granularPrometheusMetricsState = liftIO $ do
+onStop :: (Tracing.MonadTraceContext m, MonadIO m) => WSServerEnv impl -> WSConn -> StopMsg -> IO GranularPrometheusMetricsState -> m ()
+onStop serverEnv wsConn (StopMsg opId) granularPrometheusMetricsState = do
   -- When a stop message is received for an operation, it may not be present in OpMap
   -- in these cases:
   -- 1. If the operation is a query/mutation - as we remove the operation from the
@@ -1111,7 +1115,7 @@ onStop serverEnv wsConn (StopMsg opId) granularPrometheusMetricsState = liftIO $
   -- 2. A misbehaving client
   -- 3. A bug on our end
   stopOperation serverEnv wsConn opId granularPrometheusMetricsState
-    $ L.unLogger logger
+    $ L.unLoggerTracing logger
     $ L.UnstructuredLog L.LevelDebug
     $ fromString
     $ "Received STOP for an operation that we have no record for: "
@@ -1120,19 +1124,19 @@ onStop serverEnv wsConn (StopMsg opId) granularPrometheusMetricsState = liftIO $
   where
     logger = _wseLogger serverEnv
 
-stopOperation :: WSServerEnv impl -> WSConn -> OperationId -> IO GranularPrometheusMetricsState -> IO () -> IO ()
+stopOperation :: (MonadIO m) => WSServerEnv impl -> WSConn -> OperationId -> IO GranularPrometheusMetricsState -> m () -> m ()
 stopOperation serverEnv wsConn opId granularPrometheusMetricsState logWhenOpNotExist = do
   opM <- liftIO $ STM.atomically $ STMMap.lookup opId opMap
   case opM of
     Just (subscriberDetails, operationName) -> do
-      logWSEvent logger wsConn $ EOperation $ opDet operationName
+      liftIO $ logWSEvent logger wsConn $ EOperation $ opDet operationName
       case subscriberDetails of
         LiveQuerySubscriber lqId ->
-          ES.removeLiveQuery logger (_wseServerMetrics serverEnv) (_wsePrometheusMetrics serverEnv) subscriptionState lqId granularPrometheusMetricsState operationName
+          liftIO $ ES.removeLiveQuery logger (_wseServerMetrics serverEnv) (_wsePrometheusMetrics serverEnv) subscriptionState lqId granularPrometheusMetricsState operationName
         StreamingQuerySubscriber streamSubscriberId ->
-          ES.removeStreamingQuery logger (_wseServerMetrics serverEnv) (_wsePrometheusMetrics serverEnv) subscriptionState streamSubscriberId granularPrometheusMetricsState operationName
+          liftIO $ ES.removeStreamingQuery logger (_wseServerMetrics serverEnv) (_wsePrometheusMetrics serverEnv) subscriptionState streamSubscriberId granularPrometheusMetricsState operationName
     Nothing -> logWhenOpNotExist
-  STM.atomically $ STMMap.delete opId opMap
+  liftIO $ STM.atomically $ STMMap.delete opId opMap
   where
     logger = _wseLogger serverEnv
     subscriptionState = _wseSubscriptionState serverEnv

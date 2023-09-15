@@ -6405,7 +6405,8 @@
                         "items": {
                             "enum": [
                                 "traces",
-                                "metrics"
+                                "metrics",
+                                "logs"
                             ],
                             "type": "string"
                         },
@@ -6454,6 +6455,10 @@
                         },
                         "type": "array"
                     },
+                    "otlp_logs_endpoint": {
+                        "description": "Target URL to which the exporter is going to send logs. No default.",
+                        "type": "string"
+                    },
                     "otlp_metrics_endpoint": {
                         "description": "Target URL to which the exporter is going to send metrics. No default.",
                         "type": "string"
@@ -6475,6 +6480,21 @@
                         "description": "Attributes to send as the resource attributes of an export request. We currently only support string-valued attributes.",
                         "items": {
                             "$ref": "#/components/schemas/OtelNameValue"
+                        },
+                        "type": "array"
+                    },
+                    "traces_propagators": {
+                        "default": [
+                            "b3"
+                        ],
+                        "description": "List of propagators to inject and extract traces data from headers.",
+                        "items": {
+                            "description": "Possible trace propagators to use with OTLP",
+                            "enum": [
+                                "b3",
+                                "tracecontext"
+                            ],
+                            "type": "string"
                         },
                         "type": "array"
                     }

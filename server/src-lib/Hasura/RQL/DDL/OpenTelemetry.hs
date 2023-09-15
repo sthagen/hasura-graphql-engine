@@ -9,6 +9,7 @@ where
 import Control.Lens ((.~))
 import Data.Bifunctor (first)
 import Data.Environment (Environment)
+import Data.List.Extended (uniques)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text qualified as Text
@@ -94,15 +95,27 @@ parseOtelExporterConfig env enabledDataTypes OtelExporterConfig {..} = do
       | OtelMetrics `Set.member` enabledDataTypes ->
           mkExportReq rawMetricsEndpoint
     _ -> pure Nothing -- disabled
+  _oteleiLogsBaseRequest <- case _oecLogsEndpoint of
+    Nothing
+      | OtelLogs `Set.member` enabledDataTypes ->
+          Left (err400 InvalidParams "Logs export is enabled but logs endpoint missing")
+    Just rawLogsEndpoint
+      | OtelLogs `Set.member` enabledDataTypes ->
+          mkExportReq rawLogsEndpoint
+    _ -> pure Nothing -- disabled
   pure
     $ OtelExporterInfo
       { _oteleiMetricsBaseRequest,
         _oteleiTracesBaseRequest,
+        _oteleiLogsBaseRequest,
         _oteleiResourceAttributes =
           Map.fromList
             $ map
               (\NameValue {nv_name, nv_value} -> (nv_name, nv_value))
-              _oecResourceAttributes
+              _oecResourceAttributes,
+        _oteleiTracesPropagator =
+          mkOtelTracesPropagator
+            $ uniques (_oecTracesPropagators <> defaultOtelExporterTracesPropagators)
       }
 
 -- Smart constructor. Consistent with defaults.
