@@ -487,7 +487,8 @@ initialiseAppEnv env BasicConnectionInfo {..} serveOptions@ServeOptions {..} liv
           appEnvSchemaPollInterval = soSchemaPollInterval,
           appEnvLicenseKeyCache = Nothing,
           appEnvMaxTotalHeaderLength = soMaxTotalHeaderLength,
-          appEnvTriggersErrorLogLevelStatus = soTriggersErrorLogLevelStatus
+          appEnvTriggersErrorLogLevelStatus = soTriggersErrorLogLevelStatus,
+          appEnvAsyncActionsFetchBatchSize = soAsyncActionsFetchBatchSize
         }
     )
 
@@ -699,12 +700,12 @@ instance HttpLog AppM where
 
   buildExtraHttpLogMetadata _ _ = ()
 
-  logHttpError logger loggingSettings userInfoM reqId waiReq req qErr headers _ =
+  logHttpError logger loggingSettings userInfoM reqId waiReq req qErr headers _ _ =
     unLoggerTracing logger
       $ mkHttpLog
       $ mkHttpErrorLogContext userInfoM loggingSettings reqId waiReq req qErr Nothing Nothing headers
 
-  logHttpSuccess logger loggingSettings userInfoM reqId waiReq reqBody response compressedResponse qTime cType headers (CommonHttpLogMetadata rb batchQueryOpLogs, ()) =
+  logHttpSuccess logger loggingSettings userInfoM reqId waiReq reqBody response compressedResponse qTime cType headers (CommonHttpLogMetadata rb batchQueryOpLogs, ()) _ =
     unLoggerTracing logger
       $ mkHttpLog
       $ mkHttpAccessLogContext userInfoM loggingSettings reqId waiReq reqBody (BL.length response) compressedResponse qTime cType headers rb batchQueryOpLogs
@@ -817,7 +818,7 @@ instance MonadMetadataStorage AppM where
   deleteScheduledEvent a b = runInSeparateTx $ deleteScheduledEventTx a b
 
   insertAction a b c d = runInSeparateTx $ insertActionTx a b c d
-  fetchUndeliveredActionEvents = runInSeparateTx fetchUndeliveredActionEventsTx
+  fetchUndeliveredActionEvents a = runInSeparateTx $ fetchUndeliveredActionEventsTx a
   setActionStatus a b = runInSeparateTx $ setActionStatusTx a b
   fetchActionResponse = runInSeparateTx . fetchActionResponseTx
   clearActionData = runInSeparateTx . clearActionDataTx
@@ -1312,6 +1313,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
           (acAsyncActionsFetchInterval <$> getAppContext appStateRef)
           (leActionEvents lockedEventsCtx)
           Nothing
+          appEnvAsyncActionsFetchBatchSize
 
       -- start a background thread to handle async action live queries
       void
