@@ -3654,6 +3654,12 @@
                     "template": {
                         "type": "string"
                     },
+                    "template_variables": {
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/TemplateVariableSource"
+                        },
+                        "type": "object"
+                    },
                     "timeout": {
                         "oneOf": [
                             {
@@ -7353,7 +7359,7 @@
                 "description": "https://hasura.io/docs/latest/graphql/core/api-reference/syntax-defs.html#pgsourceconnectioninfo",
                 "properties": {
                     "database_url": {
-                        "description": "The database connection URL as a string, as an environment variable, or as connection parameters.",
+                        "description": "The database connection URL as a string, from an environment variable, as connection parameters, or dynamically read from a file at connect time.",
                         "oneOf": [
                             {
                                 "type": "string"
@@ -9236,6 +9242,37 @@
                 ],
                 "type": "object"
             },
+            "TemplateVariableDynamicFromFile": {
+                "properties": {
+                    "filepath": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "enum": [
+                            "dynamic_from_file"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "filepath",
+                    "type"
+                ],
+                "type": "object"
+            },
+            "TemplateVariableSource": {
+                "discriminator": {
+                    "mapping": {
+                        "dynamic_from_file": "TemplateVariableDynamicFromFile"
+                    },
+                    "propertyName": "type"
+                },
+                "oneOf": [
+                    {
+                        "$ref": "#/components/schemas/TemplateVariableDynamicFromFile"
+                    }
+                ]
+            },
             "TlsAllow": {
                 "properties": {
                     "host": {
@@ -9386,7 +9423,30 @@
             "UrlConfFromParams": {
                 "properties": {
                     "connection_parameters": {
-                        "$ref": "#/components/schemas/PGConnectionParams"
+                        "oneOf": [
+                            {
+                                "properties": {
+                                    "Left": {
+                                        "$ref": "#/components/schemas/PGConnectionParams"
+                                    }
+                                },
+                                "required": [
+                                    "Left"
+                                ],
+                                "type": "object"
+                            },
+                            {
+                                "properties": {
+                                    "Right": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "Right"
+                                ],
+                                "type": "object"
+                            }
+                        ]
                     }
                 },
                 "required": [
