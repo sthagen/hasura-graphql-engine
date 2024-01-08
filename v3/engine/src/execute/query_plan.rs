@@ -5,8 +5,7 @@ use lang_graphql as gql;
 use lang_graphql::ast::common as ast;
 use ndc_client;
 use serde_json as json;
-use std::collections::HashMap;
-use tracing_util::{set_attribute_on_active_span, AttributeVisibility};
+use tracing_util::{set_attribute_on_active_span, AttributeVisibility, Traceable};
 
 use super::error;
 use super::ir::commands;
@@ -19,11 +18,11 @@ use super::remote_joins::types::{JoinId, JoinLocations, Location, MonotonicCount
 use crate::metadata::resolved::{self, subgraph};
 use crate::schema::GDS;
 
-pub type QueryPlan<'n, 's> = IndexMap<ast::Alias, NodeQueryPlan<'n, 's>>;
+pub type QueryPlan<'n, 's, 'ir> = IndexMap<ast::Alias, NodeQueryPlan<'n, 's, 'ir>>;
 
 /// Query plan of individual root field or node
 #[derive(Debug)]
-pub enum NodeQueryPlan<'n, 's> {
+pub enum NodeQueryPlan<'n, 's, 'ir> {
     /// __typename field on query root
     TypeName { type_name: ast::TypeName },
     /// __schema field
@@ -40,30 +39,33 @@ pub enum NodeQueryPlan<'n, 's> {
         role: Role,
     },
     /// NDC query to be executed
-    NDCQueryExecution(NDCQueryExecution<'n, 's>),
+    NDCQueryExecution(NDCQueryExecution<'s, 'ir>),
     /// NDC query for Relay 'node' to be executed
-    RelayNodeSelect(Option<NDCQueryExecution<'n, 's>>),
+    RelayNodeSelect(Option<NDCQueryExecution<'s, 'ir>>),
     /// NDC mutation to be executed
-    NDCMutationExecution(NDCMutationExecution<'n, 's>),
+    NDCMutationExecution(NDCMutationExecution<'n, 's, 'ir>),
 }
 
 #[derive(Debug)]
-pub struct NDCQueryExecution<'n, 's> {
+pub struct NDCQueryExecution<'s, 'ir> {
     pub execution_tree: ExecutionTree<'s>,
     pub execution_span_attribute: String,
     pub field_span_attribute: String,
-    pub process_response_as: ProcessResponseAs<'s>,
-    pub selection_set: &'n normalized_ast::SelectionSet<'s, GDS>,
+    pub process_response_as: ProcessResponseAs<'ir>,
+    // This selection set can either be owned by the IR structures or by the normalized query request itself.
+    // We use the more restrictive lifetime `'ir` here which allows us to construct this struct using the selection
+    // set either from the IR or from the normalized query request.
+    pub selection_set: &'ir normalized_ast::SelectionSet<'s, GDS>,
 }
 
 #[derive(Debug)]
-pub struct NDCMutationExecution<'n, 's> {
+pub struct NDCMutationExecution<'n, 's, 'ir> {
     pub query: ndc_client::models::MutationRequest,
     pub join_locations: JoinLocations<(RemoteJoin<'s>, JoinId)>,
     pub data_connector: &'s resolved::data_connector::DataConnector,
     pub execution_span_attribute: String,
     pub field_span_attribute: String,
-    pub process_response_as: ProcessResponseAs<'s>,
+    pub process_response_as: ProcessResponseAs<'ir>,
     pub selection_set: &'n normalized_ast::SelectionSet<'s, GDS>,
 }
 
@@ -79,8 +81,8 @@ pub struct ExecutionNode<'s> {
     pub data_connector: &'s resolved::data_connector::DataConnector,
 }
 
-#[derive(Debug)]
-pub enum ProcessResponseAs<'s> {
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProcessResponseAs<'ir> {
     Object {
         is_nullable: bool,
     },
@@ -88,12 +90,12 @@ pub enum ProcessResponseAs<'s> {
         is_nullable: bool,
     },
     CommandResponse {
-        command_name: &'s subgraph::Qualified<open_dds::commands::CommandName>,
-        type_container: &'s ast::TypeContainer<ast::TypeName>,
+        command_name: &'ir subgraph::Qualified<open_dds::commands::CommandName>,
+        type_container: &'ir ast::TypeContainer<ast::TypeName>,
     },
 }
 
-impl ProcessResponseAs<'_> {
+impl<'ir> ProcessResponseAs<'ir> {
     pub fn is_nullable(&self) -> bool {
         match self {
             ProcessResponseAs::Object { is_nullable } => *is_nullable,
@@ -103,9 +105,9 @@ impl ProcessResponseAs<'_> {
     }
 }
 
-pub fn generate_query_plan<'n, 's>(
-    ir: &'s IndexMap<ast::Alias, root_field::RootField<'n, 's>>,
-) -> Result<QueryPlan<'n, 's>, error::Error> {
+pub fn generate_query_plan<'n, 's, 'ir>(
+    ir: &'ir IndexMap<ast::Alias, root_field::RootField<'n, 's>>,
+) -> Result<QueryPlan<'n, 's, 'ir>, error::Error> {
     let mut query_plan = IndexMap::new();
     for (alias, field) in ir.into_iter() {
         let field_plan = match field {
@@ -117,37 +119,28 @@ pub fn generate_query_plan<'n, 's>(
     Ok(query_plan)
 }
 
-fn plan_mutation<'n, 's>(
-    ir: &'s root_field::MutationRootField<'n, 's>,
-) -> Result<NodeQueryPlan<'n, 's>, error::Error> {
+fn plan_mutation<'n, 's, 'ir>(
+    ir: &'ir root_field::MutationRootField<'n, 's>,
+) -> Result<NodeQueryPlan<'n, 's, 'ir>, error::Error> {
     let plan = match ir {
         root_field::MutationRootField::TypeName { type_name } => NodeQueryPlan::TypeName {
             type_name: type_name.clone(),
         },
-        root_field::MutationRootField::CommandRepresentation { ir, selection_set } => {
-            let proc_name = match ir.ndc_source {
-                open_dds::commands::DataConnectorCommand::Procedure(ref proc_name) => Ok(proc_name),
-                open_dds::commands::DataConnectorCommand::Function(_) => {
-                    Err(error::InternalEngineError::InternalGeneric {
-                        description: "unexpected function for command in Mutation root field"
-                            .into(),
-                    })
-                }
-            }?;
+        root_field::MutationRootField::ProcedureBasedCommand { ir, selection_set } => {
             let mut join_id_counter = MonotonicCounter::new();
             let (ndc_ir, join_locations) =
-                commands::ir_to_ndc_mutation_ir(proc_name, ir, &mut join_id_counter)?;
+                commands::ir_to_ndc_mutation_ir(ir.procedure_name, ir, &mut join_id_counter)?;
             let join_locations_ids = assign_with_join_ids(join_locations)?;
             NodeQueryPlan::NDCMutationExecution(NDCMutationExecution {
                 query: ndc_ir,
                 join_locations: join_locations_ids,
-                data_connector: &ir.data_connector,
+                data_connector: ir.command_info.data_connector,
                 selection_set,
                 execution_span_attribute: "execute_command".into(),
-                field_span_attribute: ir.field_name.to_string(),
+                field_span_attribute: ir.command_info.field_name.to_string(),
                 process_response_as: ProcessResponseAs::CommandResponse {
-                    command_name: &ir.command_name,
-                    type_container: ir.type_container,
+                    command_name: &ir.command_info.command_name,
+                    type_container: &ir.command_info.type_container,
                 },
             })
         }
@@ -155,9 +148,9 @@ fn plan_mutation<'n, 's>(
     Ok(plan)
 }
 
-fn plan_query<'n, 's>(
-    ir: &'s root_field::QueryRootField<'n, 's>,
-) -> Result<NodeQueryPlan<'n, 's>, error::Error> {
+fn plan_query<'n, 's, 'ir>(
+    ir: &'ir root_field::QueryRootField<'n, 's>,
+) -> Result<NodeQueryPlan<'n, 's, 'ir>, error::Error> {
     let mut counter = MonotonicCounter::new();
     let query_plan = match ir {
         root_field::QueryRootField::TypeName { type_name } => NodeQueryPlan::TypeName {
@@ -221,24 +214,13 @@ fn plan_query<'n, 's>(
             }
             None => NodeQueryPlan::RelayNodeSelect(None),
         },
-        root_field::QueryRootField::CommandRepresentation { ir, selection_set } => {
-            let function_name = match ir.ndc_source {
-                open_dds::commands::DataConnectorCommand::Function(ref function_name) => {
-                    Ok(function_name)
-                }
-                open_dds::commands::DataConnectorCommand::Procedure(_) => {
-                    Err(error::InternalEngineError::InternalGeneric {
-                        description: "unexpected procedure for command in Query root field".into(),
-                    })
-                }
-            }?;
-            let (ndc_ir, join_locations) =
-                commands::ir_to_ndc_query_ir(function_name, ir, &mut counter)?;
+        root_field::QueryRootField::FunctionBasedCommand { ir, selection_set } => {
+            let (ndc_ir, join_locations) = commands::ir_to_ndc_query_ir(ir, &mut counter)?;
             let join_locations_ids = assign_with_join_ids(join_locations)?;
             let execution_tree = ExecutionTree {
                 root_node: ExecutionNode {
                     query: ndc_ir,
-                    data_connector: &ir.data_connector,
+                    data_connector: ir.command_info.data_connector,
                 },
                 remote_executions: join_locations_ids,
             };
@@ -246,10 +228,10 @@ fn plan_query<'n, 's>(
                 execution_tree,
                 selection_set,
                 execution_span_attribute: "execute_command".into(),
-                field_span_attribute: ir.field_name.to_string(),
+                field_span_attribute: ir.command_info.field_name.to_string(),
                 process_response_as: ProcessResponseAs::CommandResponse {
-                    command_name: &ir.command_name,
-                    type_container: ir.type_container,
+                    command_name: &ir.command_info.command_name,
+                    type_container: &ir.command_info.type_container,
                 },
             })
         }
@@ -257,7 +239,7 @@ fn plan_query<'n, 's>(
     Ok(query_plan)
 }
 
-fn generate_execution_tree<'s>(ir: &'s ModelSelection) -> Result<ExecutionTree<'s>, error::Error> {
+fn generate_execution_tree<'s>(ir: &ModelSelection<'s>) -> Result<ExecutionTree<'s>, error::Error> {
     let mut counter = MonotonicCounter::new();
     let (ndc_ir, join_locations) = model_selection::ir_to_ndc_ir(ir, &mut counter)?;
     let join_locations_with_ids = assign_with_join_ids(join_locations)?;
@@ -282,7 +264,7 @@ fn zip_with_join_ids(
     join_locations: JoinLocations<RemoteJoin<'_>>,
     mut join_ids: JoinLocations<JoinId>,
 ) -> Result<JoinLocations<(RemoteJoin<'_>, JoinId)>, error::Error> {
-    let mut new_locations = HashMap::new();
+    let mut new_locations = IndexMap::new();
     for (key, location) in join_locations.locations {
         let join_id_location =
             join_ids
@@ -330,7 +312,7 @@ fn assign_join_ids<'s>(
             };
             (key.to_string(), new_location)
         })
-        .collect::<HashMap<_, _>>();
+        .collect::<IndexMap<_, _>>();
     JoinLocations {
         locations: new_locations,
     }
@@ -370,6 +352,14 @@ impl<'s> RemoteJoinCounter<'s> {
 pub struct RootFieldResult {
     pub is_nullable: bool,
     pub result: Result<json::Value, error::Error>,
+}
+
+impl Traceable for RootFieldResult {
+    type ErrorType<'a> = <Result<json::Value, error::Error> as Traceable>::ErrorType<'a>;
+
+    fn get_error(&self) -> Option<Self::ErrorType<'_>> {
+        Traceable::get_error(&self.result)
+    }
 }
 
 impl RootFieldResult {
@@ -413,59 +403,102 @@ impl ExecuteQueryResult {
     }
 }
 
-pub async fn execute_query_plan<'n, 's>(
+async fn execute_field_plan<'n, 's, 'ir>(
     http_client: &reqwest::Client,
-    query_plan: QueryPlan<'n, 's>,
+    field_plan: NodeQueryPlan<'n, 's, 'ir>,
+) -> RootFieldResult {
+    let tracer = tracing_util::global_tracer();
+    tracer
+        .in_span_async(
+            "execute_field_plan",
+            tracing_util::SpanVisibility::User,
+            || {
+                Box::pin(async {
+                    match field_plan {
+                        NodeQueryPlan::TypeName { type_name } => {
+                            set_attribute_on_active_span(
+                                AttributeVisibility::Default,
+                                "field",
+                                "__typename",
+                            );
+                            RootFieldResult::new(
+                                &false, // __typename: String! ; the __typename field is not nullable
+                                resolve_type_name(type_name),
+                            )
+                        }
+                        NodeQueryPlan::TypeField {
+                            selection_set,
+                            schema,
+                            type_name,
+                            role: namespace,
+                        } => {
+                            set_attribute_on_active_span(
+                                AttributeVisibility::Default,
+                                "field",
+                                "__type",
+                            );
+                            RootFieldResult::new(
+                                &true, // __type(name: String!): __Type ; the type field is nullable
+                                resolve_type_field(selection_set, schema, &type_name, &namespace),
+                            )
+                        }
+                        NodeQueryPlan::SchemaField {
+                            role: namespace,
+                            selection_set,
+                            schema,
+                        } => {
+                            set_attribute_on_active_span(
+                                AttributeVisibility::Default,
+                                "field",
+                                "__schema",
+                            );
+                            RootFieldResult::new(
+                                &false, // __schema: __Schema! ; the schema field is not nullable
+                                resolve_schema_field(selection_set, schema, &namespace),
+                            )
+                        }
+                        NodeQueryPlan::NDCQueryExecution(ndc_query) => RootFieldResult::new(
+                            &ndc_query.process_response_as.is_nullable(),
+                            resolve_ndc_query_execution(http_client, ndc_query).await,
+                        ),
+                        NodeQueryPlan::NDCMutationExecution(ndc_query) => RootFieldResult::new(
+                            &ndc_query.process_response_as.is_nullable(),
+                            resolve_ndc_mutation_execution(http_client, ndc_query).await,
+                        ),
+                        NodeQueryPlan::RelayNodeSelect(optional_query) => RootFieldResult::new(
+                            &optional_query.as_ref().map_or(true, |ndc_query| {
+                                ndc_query.process_response_as.is_nullable()
+                            }),
+                            resolve_relay_node_select(http_client, optional_query).await,
+                        ),
+                    }
+                })
+            },
+        )
+        .await
+}
+
+pub async fn execute_query_plan<'n, 's, 'ir>(
+    http_client: &reqwest::Client,
+    query_plan: QueryPlan<'n, 's, 'ir>,
 ) -> ExecuteQueryResult {
     let mut root_fields = IndexMap::new();
+
+    let mut tasks: Vec<_> = Vec::with_capacity(query_plan.capacity());
+
     for (alias, field_plan) in query_plan.into_iter() {
-        let field_result: RootFieldResult = match field_plan {
-            NodeQueryPlan::TypeName { type_name } => {
-                set_attribute_on_active_span(AttributeVisibility::Default, "field", "__typename");
-                RootFieldResult::new(
-                    &false, // __typename: String! ; the __typename field is not nullable
-                    resolve_type_name(type_name),
-                )
-            }
-            NodeQueryPlan::TypeField {
-                selection_set,
-                schema,
-                type_name,
-                role: namespace,
-            } => {
-                set_attribute_on_active_span(AttributeVisibility::Default, "field", "__type");
-                RootFieldResult::new(
-                    &true, // __type(name: String!): __Type ; the type field is nullable
-                    resolve_type_field(selection_set, schema, &type_name, &namespace),
-                )
-            }
-            NodeQueryPlan::SchemaField {
-                role: namespace,
-                selection_set,
-                schema,
-            } => {
-                set_attribute_on_active_span(AttributeVisibility::Default, "field", "__schema");
-                RootFieldResult::new(
-                    &false, // __schema: __Schema! ; the schema field is not nullable
-                    resolve_schema_field(selection_set, schema, &namespace),
-                )
-            }
-            NodeQueryPlan::NDCQueryExecution(ndc_query) => RootFieldResult::new(
-                &ndc_query.process_response_as.is_nullable(),
-                resolve_ndc_query_execution(http_client, ndc_query).await,
-            ),
-            NodeQueryPlan::NDCMutationExecution(ndc_query) => RootFieldResult::new(
-                &ndc_query.process_response_as.is_nullable(),
-                resolve_ndc_mutation_execution(http_client, ndc_query).await,
-            ),
-            NodeQueryPlan::RelayNodeSelect(optional_query) => RootFieldResult::new(
-                &optional_query.as_ref().map_or(true, |ndc_query| {
-                    ndc_query.process_response_as.is_nullable()
-                }),
-                resolve_relay_node_select(http_client, optional_query).await,
-            ),
-        };
-        root_fields.insert(alias.clone(), field_result);
+        // We are not running the field plans parallely here, we are just running them concurrently on a single thread.
+        // To run the field plans parallely, we will need to use tokio::spawn for each field plan.
+        let task = async { (alias, execute_field_plan(http_client, field_plan).await) };
+
+        tasks.push(task);
+    }
+
+    let executed_root_fields = futures::future::join_all(tasks).await;
+
+    for executed_root_field in executed_root_fields.into_iter() {
+        let (alias, root_field) = executed_root_field;
+        root_fields.insert(alias, root_field);
     }
 
     ExecuteQueryResult { root_fields }
@@ -540,7 +573,7 @@ async fn resolve_ndc_query_execution(
 
 async fn resolve_ndc_mutation_execution(
     http_client: &reqwest::Client,
-    ndc_query: NDCMutationExecution<'_, '_>,
+    ndc_query: NDCMutationExecution<'_, '_, '_>,
 ) -> Result<json::Value, error::Error> {
     let NDCMutationExecution {
         query,

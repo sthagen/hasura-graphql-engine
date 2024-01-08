@@ -1,4 +1,3 @@
-use hasura_authn_core::Role;
 use lang_graphql::{
     ast::common::{self as ast, TypeName},
     mk_name,
@@ -10,14 +9,19 @@ use std::{
     fmt::Display,
 };
 
-use open_dds::{commands, models, types};
+use open_dds::{arguments::ArgumentName, commands, models, types};
 
-use crate::metadata::{
-    resolved,
-    resolved::{
-        model::SelectPermission,
+use crate::{
+    metadata::resolved::{
+        self,
+        data_connector::DataConnector,
         subgraph::{Qualified, QualifiedTypeReference},
     },
+    schema::types::resolved::{
+        subgraph::{deserialize_qualified_btreemap, serialize_qualified_btreemap},
+        types::TypeMapping,
+    },
+    utils::HashMapWithJsonKey,
 };
 use strum_macros::Display;
 
@@ -45,10 +49,6 @@ pub struct GlobalID {
 pub struct NodeFieldTypeNameMapping {
     pub type_name: Qualified<types::CustomTypeName>,
     pub model_source: Option<resolved::model::ModelSource>,
-    /// Select permissions of the model that is tied to the
-    /// `type_name` and the model that has `globalIDSource`
-    /// set to `true`.
-    pub model_select_permissions: HashMap<Role, SelectPermission>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -69,6 +69,18 @@ pub enum ModelFilterArgument {
 pub enum ModelOrderByDirection {
     Asc,
     Desc,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+/// Common details to generate a command annotation.
+pub struct CommandSourceDetail {
+    pub data_connector: DataConnector,
+    #[serde(
+        serialize_with = "serialize_qualified_btreemap",
+        deserialize_with = "deserialize_qualified_btreemap"
+    )]
+    pub type_mappings: BTreeMap<Qualified<types::CustomTypeName>, TypeMapping>,
+    pub argument_mappings: HashMap<ArgumentName, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Display)]
@@ -92,11 +104,19 @@ pub enum RootFieldAnnotation {
         kind: RootFieldKind,
         name: Qualified<models::ModelName>,
     },
-    Command {
+    FunctionCommand {
         name: Qualified<commands::CommandName>,
         underlying_object_typename: Option<Qualified<types::CustomTypeName>>,
         // A command may/may not have a source
-        source: Option<resolved::command::CommandSource>,
+        source: Option<CommandSourceDetail>,
+        function_name: Option<commands::FunctionName>,
+    },
+    ProcedureCommand {
+        name: Qualified<commands::CommandName>,
+        underlying_object_typename: Option<Qualified<types::CustomTypeName>>,
+        // A command may/may not have a source
+        source: Option<CommandSourceDetail>,
+        procedure_name: Option<commands::ProcedureName>,
     },
 }
 
@@ -119,6 +139,7 @@ pub enum OutputAnnotation {
         global_id_fields: Vec<types::FieldName>,
     },
     RelationshipToModel(output_type::relationship::ModelRelationshipAnnotation),
+    RelationshipToCommand(output_type::relationship::CommandRelationshipAnnotation),
     RelayNodeInterfaceID {
         typename_mappings: HashMap<ast::TypeName, Vec<types::FieldName>>,
     },
@@ -182,9 +203,16 @@ pub enum Annotation {
     Input(InputAnnotation),
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Display)]
 pub enum NamespaceAnnotation {
     Filter(resolved::model::FilterPermission),
+    /// The `NodeFieldTypeMappings` contains a Hashmap of typename to the filter permission.
+    /// While executing the `node` field, the `id` field is supposed to be decoded and after
+    /// decoding, a typename will be obtained. We need to use that typename to look up the
+    /// Hashmap to get the appropriate `resolved::model::FilterPermission`.
+    NodeFieldTypeMappings(
+        HashMapWithJsonKey<Qualified<types::CustomTypeName>, resolved::model::FilterPermission>,
+    ),
 }
 
 #[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]

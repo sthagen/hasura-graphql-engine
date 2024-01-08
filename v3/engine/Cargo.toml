@@ -15,7 +15,7 @@ thiserror = "1.0"
 hasura-authn-core = { path = "../hasura-authn-core" }
 lang-graphql = { path = "../lang-graphql" }
 tracing-util = { path = "../tracing-util" }
-ndc-client = { git = "https://github.com/hasura/ndc-spec.git", tag = "v0.1.0-rc.12" }
+ndc-client = { git = "https://github.com/hasura/ndc-spec.git", tag = "v0.1.0-rc.13" }
 open-dds = { path = "../open-dds" }
 # util = { path = "../util" }
 serde = "1.0.152"
@@ -33,7 +33,7 @@ strum = { version = "^0.25.0" }
 strum_macros = { version = "^0.25.2" }
 itertools = "0.10.5"
 url = "2.4.1"
-
+futures = "0.3.29"
 # dependencies for authentication and execute
 hasura-authn-webhook = { path = "../hasura-authn-webhook" }
 hasura-authn-jwt = { path = "../hasura-authn-jwt" }

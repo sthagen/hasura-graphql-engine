@@ -7,12 +7,18 @@ use open_dds::types::{CustomTypeName, FieldName};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 
+use super::commands::{self, ir_to_ndc_query_ir, FunctionBasedCommand};
 use super::model_selection::{self, ModelSelection};
-use super::relationship::{self, RelationshipInfo, RemoteRelationshipInfo};
+use super::relationship::{
+    self, LocalCommandRelationshipInfo, LocalModelRelationshipInfo, RemoteCommandRelationshipInfo,
+    RemoteModelRelationshipInfo,
+};
 use crate::execute::error;
 use crate::execute::global_id;
 use crate::execute::model_tracking::UsagesCounts;
-use crate::execute::remote_joins::types::{JoinLocations, MonotonicCounter};
+use crate::execute::remote_joins::types::{
+    JoinLocations, MonotonicCounter, RemoteJoinType, ResponseType, TargetField,
+};
 use crate::execute::remote_joins::types::{Location, RemoteJoin};
 use crate::metadata::resolved;
 use crate::metadata::resolved::subgraph::Qualified;
@@ -26,17 +32,26 @@ pub(crate) enum FieldSelection<'s> {
     Column {
         column: String,
     },
-    LocalRelationship {
+    ModelRelationshipLocal {
         query: ModelSelection<'s>,
         /// Relationship names needs to be unique across the IR. This field contains
         /// the uniquely generated relationship name. `ModelRelationshipAnnotation`
         /// contains a relationship name but that is the name from the metadata.
         name: String,
-        relationship_info: RelationshipInfo<'s>,
+        relationship_info: LocalModelRelationshipInfo<'s>,
     },
-    RemoteRelationship {
+    CommandRelationshipLocal {
+        ir: FunctionBasedCommand<'s>,
+        name: String,
+        relationship_info: LocalCommandRelationshipInfo<'s>,
+    },
+    ModelRelationshipRemote {
         ir: ModelSelection<'s>,
-        relationship_info: RemoteRelationshipInfo<'s>,
+        relationship_info: RemoteModelRelationshipInfo<'s>,
+    },
+    CommandRelationshipRemote {
+        ir: FunctionBasedCommand<'s>,
+        relationship_info: RemoteCommandRelationshipInfo<'s>,
     },
 }
 
@@ -147,7 +162,20 @@ pub(crate) fn generate_selection_set_ir<'s>(
                 OutputAnnotation::RelationshipToModel(relationship_annotation) => {
                     fields.insert(
                         field.alias.to_string(),
-                        relationship::generate_relationship_ir(
+                        relationship::generate_model_relationship_ir(
+                            field,
+                            relationship_annotation,
+                            data_connector,
+                            type_mappings,
+                            session_variables,
+                            usage_counts,
+                        )?,
+                    );
+                }
+                OutputAnnotation::RelationshipToCommand(relationship_annotation) => {
+                    fields.insert(
+                        field.alias.to_string(),
+                        relationship::generate_command_relationship_ir(
                             field,
                             relationship_annotation,
                             data_connector,
@@ -171,6 +199,7 @@ pub(crate) fn generate_selection_set_ir<'s>(
 }
 
 /// Convert selection set IR (`ResultSelectionSet`) into NDC fields
+#[allow(irrefutable_let_patterns)]
 pub(crate) fn process_selection_set_ir<'s>(
     model_selection: &ResultSelectionSet<'s>,
     join_id_counter: &mut MonotonicCounter,
@@ -193,7 +222,7 @@ pub(crate) fn process_selection_set_ir<'s>(
                     },
                 );
             }
-            FieldSelection::LocalRelationship {
+            FieldSelection::ModelRelationshipLocal {
                 query,
                 name,
                 relationship_info: _,
@@ -216,25 +245,68 @@ pub(crate) fn process_selection_set_ir<'s>(
                 }
                 ndc_fields.insert(alias.to_string(), ndc_field);
             }
-            FieldSelection::RemoteRelationship {
+            FieldSelection::CommandRelationshipLocal {
+                ir,
+                name,
+                relationship_info: _,
+            } => {
+                let (relationship_query, jl) =
+                    commands::ir_to_ndc_query(&ir.command_info, join_id_counter)?;
+
+                let relationship_arguments: BTreeMap<_, _> = ir
+                    .command_info
+                    .arguments
+                    .iter()
+                    .map(|(argument_name, argument_value)| {
+                        (
+                            argument_name.clone(),
+                            ndc::models::RelationshipArgument::Literal {
+                                value: argument_value.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+
+                let ndc_field = ndc::models::Field::Relationship {
+                    query: Box::new(relationship_query),
+                    relationship: name.to_string(),
+                    arguments: relationship_arguments,
+                };
+
+                if !jl.locations.is_empty() {
+                    join_locations.locations.insert(
+                        alias.clone(),
+                        Location {
+                            join_node: None,
+                            rest: jl,
+                        },
+                    );
+                }
+                ndc_fields.insert(alias.to_string(), ndc_field);
+            }
+            FieldSelection::ModelRelationshipRemote {
                 ir,
                 relationship_info,
             } => {
                 // For all the left join fields, create an alias and inject
                 // them into the NDC IR
-                let mut join_columns = HashMap::new();
+                let mut join_mapping = HashMap::new();
                 for ((src_field_alias, src_field), target_field) in &relationship_info.join_mapping
                 {
                     let lhs_alias = make_hasura_phantom_field(&src_field.column);
+
                     ndc_fields.insert(
                         lhs_alias.clone(),
                         ndc::models::Field::Column {
                             column: src_field.column.clone(),
                         },
                     );
-                    join_columns.insert(
+                    join_mapping.insert(
                         src_field_alias.clone(),
-                        (lhs_alias.clone(), target_field.clone()),
+                        (
+                            lhs_alias.clone(),
+                            TargetField::ModelField(target_field.clone()),
+                        ),
                     );
                 }
                 // Construct the `JoinLocations` tree
@@ -243,7 +315,55 @@ pub(crate) fn process_selection_set_ir<'s>(
                 let rj_info = RemoteJoin {
                     target_ndc_ir: ndc_ir,
                     target_data_connector: ir.data_connector,
-                    join_columns,
+                    join_mapping,
+                    process_response_as: ResponseType::Array { is_nullable: true },
+                    remote_join_type: RemoteJoinType::ToModel,
+                };
+                join_locations.locations.insert(
+                    alias.clone(),
+                    Location {
+                        join_node: Some(rj_info),
+                        rest: sub_join_locations,
+                    },
+                );
+            }
+            FieldSelection::CommandRelationshipRemote {
+                ir,
+                relationship_info,
+            } => {
+                // For all the left join fields, create an alias and inject
+                // them into the NDC IR
+                let mut join_mapping = HashMap::new();
+                for ((src_field_alias, src_field), target_field) in &relationship_info.join_mapping
+                {
+                    let lhs_alias = make_hasura_phantom_field(&src_field.column);
+
+                    ndc_fields.insert(
+                        lhs_alias.clone(),
+                        ndc::models::Field::Column {
+                            column: src_field.column.clone(),
+                        },
+                    );
+                    join_mapping.insert(
+                        src_field_alias.clone(),
+                        (
+                            lhs_alias.clone(),
+                            TargetField::CommandField(target_field.clone()),
+                        ),
+                    );
+                }
+                // Construct the `JoinLocations` tree
+                let (ndc_ir, sub_join_locations) = ir_to_ndc_query_ir(ir, join_id_counter)?;
+                let rj_info = RemoteJoin {
+                    target_ndc_ir: ndc_ir,
+                    target_data_connector: ir.command_info.data_connector,
+                    join_mapping,
+                    process_response_as: ResponseType::Command {
+                        // TODO: fix and remove clone()
+                        command_name: ir.command_info.command_name.clone(),
+                        type_container: ir.command_info.type_container.clone(),
+                    },
+                    remote_join_type: RemoteJoinType::ToCommand,
                 };
                 join_locations.locations.insert(
                     alias.clone(),
@@ -271,20 +391,32 @@ pub(crate) fn collect_relationships(
     for field in selection.fields.values() {
         match field {
             FieldSelection::Column { .. } => (),
-            FieldSelection::LocalRelationship {
+            FieldSelection::ModelRelationshipLocal {
                 query,
                 name,
                 relationship_info,
             } => {
                 relationships.insert(
                     name.to_string(),
-                    relationship::process_relationship_definition(relationship_info)?,
+                    relationship::process_model_relationship_definition(relationship_info)?,
                 );
                 collect_relationships(&query.selection, relationships)?;
             }
+            FieldSelection::CommandRelationshipLocal {
+                ir,
+                name,
+                relationship_info,
+            } => {
+                relationships.insert(
+                    name.to_string(),
+                    relationship::process_command_relationship_definition(relationship_info)?,
+                );
+                collect_relationships(&ir.command_info.selection, relationships)?;
+            }
             // we ignore remote relationships as we are generating relationship
             // definition for one data connector
-            FieldSelection::RemoteRelationship { .. } => (),
+            FieldSelection::ModelRelationshipRemote { .. } => (),
+            FieldSelection::CommandRelationshipRemote { .. } => (),
         };
     }
     Ok(())

@@ -107,10 +107,29 @@ async fn start_engine(server: &ServerOptions) -> Result<(), StartupError> {
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
 
+    let explain_route = Router::new()
+        .route("/v1/explain", post(handle_explain_request))
+        .layer(axum::middleware::from_fn(
+            hasura_authn_core::resolve_session,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            authentication_middleware,
+        ))
+        .layer(axum::middleware::from_fn(
+            explain_request_tracing_middleware,
+        ))
+        // *PLEASE DO NOT ADD ANY MIDDLEWARE
+        // BEFORE THE `explain_request_tracing_middleware`*
+        // Refer to it for more details.
+        .layer(TraceLayer::new_for_http())
+        .with_state(state.clone());
+
     let app = Router::new()
         // serve graphiql at root
         .route("/", get(graphiql))
-        .merge(graphql_route);
+        .merge(graphql_route)
+        .merge(explain_route);
 
     let addr = format!("0.0.0.0:{}", server.port.unwrap_or(3000));
 
@@ -137,6 +156,28 @@ async fn graphql_request_tracing_middleware<B: Send>(
 ) -> axum::response::Result<axum::response::Response> {
     let tracer = tracing_util::global_tracer();
     let path = "/graphql";
+
+    Ok(tracer
+        .in_span_async(path, SpanVisibility::User, || {
+            Box::pin(async move {
+                let response = next.run(request).await;
+                TraceableHttpResponse::new(response, path)
+            })
+        })
+        .await
+        .response)
+}
+
+/// Middleware to start tracing of the `/v1/explain` request.
+/// This middleware must be active for the entire duration
+/// of the request i.e. this middleware should be the
+/// entry point and the exit point of the GraphQL request.
+async fn explain_request_tracing_middleware<B: Send>(
+    request: Request<B>,
+    next: Next<B>,
+) -> axum::response::Result<axum::response::Response> {
+    let tracer = tracing_util::global_tracer();
+    let path = "/v1/explain";
 
     Ok(tracer
         .in_span_async(path, SpanVisibility::User, || {
@@ -261,9 +302,32 @@ async fn handle_request(
     response.0
 }
 
+async fn handle_explain_request(
+    State(state): State<Arc<EngineState>>,
+    Extension(session): Extension<Session>,
+    Json(request): Json<gql::http::RawRequest>,
+) -> engine::execute::explain::types::ExplainResponse {
+    let tracer = tracing_util::global_tracer();
+    let response = tracer
+        .in_span_async("handle_explain_request", SpanVisibility::User, || {
+            Box::pin(engine::execute::explain::execute_explain(
+                &state.http_client,
+                &state.schema,
+                &session,
+                request,
+            ))
+        })
+        .await;
+
+    // Set the span as error if the response contains an error
+    set_status_on_current_span(&response);
+    response
+}
+
 fn read_schema(metadata_path: &PathBuf) -> Result<gql::schema::Schema<GDS>, String> {
-    let metadata = std::fs::read_to_string(metadata_path).map_err(|e| e.to_string())?;
-    engine::build::build_schema(&metadata).map_err(|e| e.to_string())
+    let raw_metadata = std::fs::read_to_string(metadata_path).map_err(|e| e.to_string())?;
+    let metadata = serde_json::from_str(&raw_metadata).map_err(|e| e.to_string())?;
+    engine::build::build_schema(metadata).map_err(|e| e.to_string())
 }
 
 fn read_auth_config(path: &PathBuf) -> Result<AuthConfig, String> {

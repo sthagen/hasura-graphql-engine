@@ -5,7 +5,6 @@ use open_dds::{
     types::CustomTypeName,
 };
 use serde::{Deserialize, Serialize};
-use serde_json as json;
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -33,13 +32,13 @@ pub struct GDS {
 }
 
 impl GDS {
-    pub fn new(schema: &str) -> Result<Self, Error> {
-        let user_metadata: open_dds::Metadata = json::from_str(schema)?;
+    pub fn new(user_metadata: open_dds::Metadata) -> Result<Self, Error> {
         let resolved_metadata = resolve_metadata(user_metadata)?;
         Ok(GDS {
             metadata: resolved_metadata,
         })
     }
+
     pub fn build_schema(&self) -> std::result::Result<gql_schema::Schema<GDS>, Error> {
         gql_schema::build::build_schema(self)
     }
@@ -158,11 +157,6 @@ impl gql_schema::SchemaContext for GDS {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("parsing metadata failed: {error}")]
-    ParseError {
-        #[source]
-        error: json::Error,
-    },
     #[error("metadata is not consistent: {error}")]
     ResolveError {
         #[source]
@@ -199,7 +193,9 @@ pub enum Error {
         type_name: ast::TypeName,
     },
     #[error("internal error while building schema, command not found: {command_name}")]
-    InternalCommandNotFound { command_name: CommandName },
+    InternalCommandNotFound {
+        command_name: Qualified<CommandName>,
+    },
     #[error("Cannot generate select_many API for model {model_name} since order_by_expression isn't defined")]
     NoOrderByExpression { model_name: Qualified<ModelName> },
     #[error("No graphql type name has been defined for scalar type: {type_name}")]
@@ -229,6 +225,12 @@ pub enum Error {
     ExpectedTypeToBeObject {
         type_name: Qualified<CustomTypeName>,
     },
+    #[error("Cannot have a function based command backed by a procedure or vice versa. Found for command {command_name:}")]
+    IncorrectCommandBacking {
+        command_name: Qualified<CommandName>,
+    },
+    #[error("relationships to procedure based commands are not supported")]
+    RelationshipsToProcedureBasedCommandsAreNotSupported,
 }
 
 impl From<ast::InvalidGraphQlName> for Error {
@@ -240,12 +242,6 @@ impl From<ast::InvalidGraphQlName> for Error {
 impl From<ResolveMetadataError> for Error {
     fn from(error: ResolveMetadataError) -> Self {
         Error::ResolveError { error }
-    }
-}
-
-impl From<json::Error> for Error {
-    fn from(error: json::Error) -> Self {
-        Error::ParseError { error }
     }
 }
 

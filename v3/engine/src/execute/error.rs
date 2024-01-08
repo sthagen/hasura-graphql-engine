@@ -17,8 +17,14 @@ use super::types::Annotation;
 
 #[derive(Error, Debug)]
 pub enum InternalDeveloperError {
-    #[error("no source data connector specified for field {field_name} of type {type_name}")]
+    #[error("No source data connector specified for field {field_name} of type {type_name}")]
     NoSourceDataConnector {
+        type_name: ast::TypeName,
+        field_name: ast::Name,
+    },
+
+    #[error("No function/procedure specified for command field {field_name} of type {type_name}")]
+    NoFunctionOrProcedure {
         type_name: ast::TypeName,
         field_name: ast::Name,
     },
@@ -46,7 +52,6 @@ pub enum InternalDeveloperError {
         type_name: Qualified<CustomTypeName>,
         relationship_name: RelationshipName,
     },
-
     #[error("Field mapping not found for the field {field_name:} of type {type_name:} while executing the relationship {relationship_name:}")]
     FieldMappingNotFoundForRelationship {
         type_name: Qualified<CustomTypeName>,
@@ -59,6 +64,14 @@ pub enum InternalDeveloperError {
 
     #[error("unexpected response from data connector: {summary}")]
     BadGDCResponse { summary: String },
+
+    // Since explain and execute follow the same code-path. The types allow the following illegal responses. However,
+    // these should never happen.
+    #[error("illegal response: execute query returned explain response")]
+    ExecuteReturnedExplainResponse,
+
+    #[error("illegal response: explain query returned execute response")]
+    ExplainReturnedExecuteResponse,
 }
 
 #[derive(Error, Debug)]
@@ -89,6 +102,11 @@ pub enum InternalEngineError {
 
     #[error("expected filter predicate but filter predicate namespaced annotation not found")]
     FilterPermissionAnnotationNotFound,
+
+    #[error("expected namespace annotation type {namespace_annotation_type} but not found")]
+    // Running into this error means that the GDS field was not annotated with the correct
+    // namespace annotation while building the metadata.
+    ExpectedNamespaceAnnotationNotFound { namespace_annotation_type: String },
 
     #[error("internal error: {description}")]
     InternalGeneric { description: String },
@@ -143,6 +161,8 @@ pub enum Error {
     },
     #[error("{0}")]
     InternalError(#[from] InternalError),
+    #[error("explain error: {0}")]
+    ExplainError(String),
 }
 
 impl Error {
@@ -179,7 +199,11 @@ impl From<ndc_client::apis::Error> for Error {
         if let ndc_client::apis::Error::ConnectorError(err) = &ndc_error {
             if matches!(
                 err.status,
-                StatusCode::OK | StatusCode::FORBIDDEN | StatusCode::CONFLICT
+                // We forward the errors with status code 200 (OK), 403(FORBIDDEN), 409(CONFLICT) and 422(UNPROCESSABLE_ENTITY)
+                StatusCode::OK
+                    | StatusCode::FORBIDDEN
+                    | StatusCode::CONFLICT
+                    | StatusCode::UNPROCESSABLE_ENTITY
             ) {
                 return Error::NDCExpected {
                     connector_error: err.clone(),
@@ -206,9 +230,7 @@ fn render_ndc_error(error: &ndc_client::apis::Error) -> String {
             "connector returned status code {0} with message: {1}",
             err.status, err.error_response.message,
         ),
-        ndc_client::apis::Error::InvalidConnectorUrl(err) => {
-            format!("invalid connector url: {err}")
-        }
+        ndc_client::apis::Error::InvalidBaseURL => "invalid connector base URL".to_string(),
     }
 }
 

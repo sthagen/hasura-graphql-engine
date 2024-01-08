@@ -1,12 +1,16 @@
 use lang_graphql::ast::common as ast;
-use lang_graphql::schema as gql_schema;
+use lang_graphql::schema::{self as gql_schema};
+use open_dds::commands::DataConnectorCommand;
 use open_dds::{
     relationships,
     types::{CustomTypeName, InbuiltType},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use self::relationship::{ModelRelationshipAnnotation, ModelTargetSource};
+use self::relationship::{
+    CommandRelationshipAnnotation, CommandTargetSource, ModelRelationshipAnnotation,
+    ModelTargetSource,
+};
 use super::inbuilt_type::base_type_container_for_inbuilt_type;
 use super::Annotation;
 use crate::metadata::resolved::subgraph::{
@@ -17,6 +21,7 @@ use crate::metadata::resolved::{
     self,
     types::{mk_name, TypeRepresentation},
 };
+use crate::schema::commands::generate_command_argument;
 use crate::schema::permissions;
 use crate::schema::query_root::select_many::generate_select_many_arguments;
 use crate::schema::{Role, GDS};
@@ -167,10 +172,70 @@ fn object_type_fields(
                 let graphql_field_name = relationship_field_name.clone();
 
                 let relationship_field = match &relationship.target {
-                    resolved::relationship::RelationshipTarget::Command { .. } => {
-                        return Err(Error::InternalUnsupported {
-                            summary: "Relationships to commands aren't supported".into(),
-                        });
+                    resolved::relationship::RelationshipTarget::Command {
+                        command_name,
+                        target_type,
+                        mappings,
+                    } => {
+                        let relationship_output_type = get_output_type(gds, builder, target_type)?;
+
+                        let command = gds.metadata.commands.get(command_name).ok_or_else(|| {
+                            Error::InternalCommandNotFound {
+                                command_name: command_name.clone(),
+                            }
+                        })?;
+
+                        let mut arguments_with_mapping = HashSet::new();
+                        for argument_mapping in mappings {
+                            arguments_with_mapping.insert(&argument_mapping.argument_name);
+                        }
+
+                        // generate argument fields for the command arguments which are not mapped to
+                        // any type fields, so that they can be exposed in the relationship field schema
+                        let mut arguments = HashMap::new();
+                        for (argument_name, argument_type) in &command.arguments {
+                            if !arguments_with_mapping.contains(argument_name) {
+                                let (field_name, input_field) = generate_command_argument(
+                                    gds,
+                                    builder,
+                                    command,
+                                    argument_name,
+                                    argument_type,
+                                )?;
+                                arguments.insert(field_name, input_field);
+                            }
+                        }
+
+                        builder.conditional_namespaced(
+                            gql_schema::Field::<GDS>::new(
+                                graphql_field_name.clone(),
+                                None,
+                                Annotation::Output(super::OutputAnnotation::RelationshipToCommand(
+                                    CommandRelationshipAnnotation {
+                                        source_type: relationship.source.clone(),
+                                        relationship_name: relationship.name.clone(),
+                                        command_name: command_name.clone(),
+                                        target_source: CommandTargetSource::new(
+                                            command,
+                                            relationship,
+                                        )?,
+                                        target_type: target_type.clone(),
+                                        underlying_object_typename: command
+                                            .underlying_object_typename
+                                            .clone(),
+                                        mappings: mappings.clone(),
+                                    },
+                                )),
+                                relationship_output_type,
+                                arguments,
+                                gql_schema::DeprecationStatus::NotDeprecated,
+                            ),
+                            permissions::get_command_relationship_namespace_annotations(
+                                command,
+                                object_type_representation,
+                                mappings,
+                            ),
+                        )
                     }
                     resolved::relationship::RelationshipTarget::Model {
                         model_name,
@@ -311,13 +376,14 @@ pub fn output_type_schema(
                         type_name: type_name.clone(),
                     });
                 }
-                interfaces.insert(
-                    node_interface_type(builder),
-                    builder.conditional_namespaced(
-                        (),
-                        permissions::get_node_interface_annotations(object_type_representation),
-                    ),
-                );
+                let node_interface_annotations =
+                    permissions::get_node_interface_annotations(object_type_representation);
+                if !node_interface_annotations.is_empty() {
+                    interfaces.insert(
+                        node_interface_type(builder),
+                        builder.conditional_namespaced((), node_interface_annotations),
+                    );
+                }
                 Ok(gql_schema::TypeInfo::Object(gql_schema::Object::new(
                     builder,
                     graphql_type_name,

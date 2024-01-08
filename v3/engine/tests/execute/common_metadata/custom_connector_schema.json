@@ -254,6 +254,26 @@
                   }
                 },
                 {
+                  "name": "get_movie_by_id",
+                  "description": "Get movie by ID",
+                  "arguments": {
+                    "movie_id": {
+                      "description": "the id of the movie to fetch",
+                      "type": {
+                        "type": "named",
+                        "name": "Int"
+                      }
+                    }
+                  },
+                  "result_type": {
+                    "type": "nullable",
+                    "underlying_type": {
+                      "type": "named",
+                      "name": "movie"
+                    }
+                  }
+                },
+                {
                   "name": "get_actors_by_name",
                   "description": "Get actors by name",
                   "arguments": {
@@ -324,6 +344,29 @@
                     },
                     "upper_bound": {
                       "description": "the upper bound for movie id",
+                      "type": {
+                        "type": "named",
+                        "name": "Int"
+                      }
+                    }
+                  },
+                  "result_type": {
+                    "type": "nullable",
+                    "underlying_type": {
+                      "type": "array",
+                      "element_type": {
+                        "type": "named",
+                        "name": "actor"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "get_actors_by_movie_id",
+                  "description": "Get all actors from a movie by movie ID",
+                  "arguments": {
+                    "movie_id": {
+                      "description": "the id of the movie to fetch the actors from",
                       "type": {
                         "type": "named",
                         "name": "Int"

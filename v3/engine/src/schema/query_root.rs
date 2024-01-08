@@ -6,7 +6,10 @@ use std::collections::HashMap;
 
 use crate::metadata::resolved::subgraph;
 use crate::schema::commands;
+use crate::schema::query_root::node_field::relay_node_field;
 use crate::schema::{mk_typename, GDS};
+
+use self::node_field::RelayNodeFieldOutput;
 
 pub mod node_field;
 pub mod select_many;
@@ -42,29 +45,28 @@ pub fn query_root_schema(
             ) {
                 let command_field_name = command_graphql_api.root_field_name.clone();
                 let (field_name, field) =
-                    commands::command_field(gds, builder, command, command_field_name)?;
+                    commands::function_command_field(gds, builder, command, command_field_name)?;
+
                 fields.insert(field_name, field);
             }
         }
     }
 
-    let node_field::RelayNodeFieldOutput {
-        relay_node_gql_field: node_field,
-        relay_node_permissions: roles_implementing_node_interface,
-    } = node_field::relay_node_field(gds, builder)?;
+    let RelayNodeFieldOutput {
+        relay_node_gql_field,
+        relay_node_field_permissions,
+    } = relay_node_field(gds, builder)?;
     if fields
         .insert(
-            node_field.name.clone(),
-            // Instead of allowing all, here we should conditionally
-            // allow roles whose atleast one object implement the
-            // global ID.
-            builder.conditional_namespaced(node_field.clone(), roles_implementing_node_interface),
+            relay_node_gql_field.name.clone(),
+            builder
+                .conditional_namespaced(relay_node_gql_field.clone(), relay_node_field_permissions),
         )
         .is_some()
     {
         return Err(
             crate::schema::Error::DuplicateFieldNameGeneratedInObjectType {
-                field_name: node_field.name,
+                field_name: relay_node_gql_field.name,
                 type_name: subgraph::Qualified::new(
                     "-".to_string(),
                     CustomTypeName("Query".to_string()),
@@ -72,6 +74,7 @@ pub fn query_root_schema(
             },
         );
     };
+
     Ok(gql_schema::Object::new(
         builder,
         type_name,
