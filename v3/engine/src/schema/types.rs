@@ -32,6 +32,7 @@ use self::output_type::relationship::{
 pub mod inbuilt_type;
 pub mod input_type;
 pub mod output_type;
+pub mod scalar_type;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct GlobalID {
@@ -162,7 +163,10 @@ pub enum ModelInputAnnotation {
     ModelFilterArgument {
         field: ModelFilterArgument,
     },
-    ModelFilterScalarExpression,
+    ComparisonOperation {
+        operator: String,
+    },
+    IsNullOperation,
     ModelOrderByExpression,
     ModelOrderByArgument {
         ndc_column: String,
@@ -224,8 +228,12 @@ pub enum NamespaceAnnotation {
 
 #[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum TypeId {
-    QueryRoot,
-    MutationRoot,
+    QueryRoot {
+        graphql_type_name: ast::TypeName,
+    },
+    MutationRoot {
+        graphql_type_name: ast::TypeName,
+    },
     OutputType {
         gds_type_name: Qualified<types::CustomTypeName>,
         graphql_type_name: ast::TypeName,
@@ -255,8 +263,11 @@ pub enum TypeId {
         scalar_type_name: String,
         graphql_type_name: ast::TypeName,
         operators: Vec<(ast::Name, QualifiedTypeReference)>,
+        is_null_operator_name: ast::Name,
     },
-    OrderByEnumType,
+    OrderByEnumType {
+        graphql_type_name: ast::TypeName,
+    },
 }
 
 impl Display for TypeId {
@@ -268,8 +279,8 @@ impl Display for TypeId {
 impl TypeId {
     pub fn to_type_name(&self) -> ast::TypeName {
         match self {
-            TypeId::QueryRoot => ast::TypeName(mk_name!("Query")),
-            TypeId::MutationRoot => ast::TypeName(mk_name!("Mutation")),
+            TypeId::QueryRoot { graphql_type_name } => graphql_type_name.clone(),
+            TypeId::MutationRoot { graphql_type_name } => graphql_type_name.clone(),
             TypeId::OutputType {
                 graphql_type_name, ..
             } => graphql_type_name.clone(),
@@ -290,7 +301,9 @@ impl TypeId {
             TypeId::ModelOrderByExpression {
                 graphql_type_name, ..
             } => graphql_type_name.clone(),
-            TypeId::OrderByEnumType => ast::TypeName(mk_name!("order_by")),
+            TypeId::OrderByEnumType {
+                graphql_type_name, ..
+            } => graphql_type_name.clone(),
         }
     }
 }
