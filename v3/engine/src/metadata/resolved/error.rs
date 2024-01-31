@@ -405,7 +405,7 @@ pub enum Error {
         argument_name: ArgumentName,
         relationship_name: RelationshipName,
     },
-    #[error("The target data connector {data_connector_name} for relationship {relationship_name} on type {type_name} does not support the foreach capability")]
+    #[error("The target data connector {data_connector_name} for relationship {relationship_name} on type {type_name} does not support the variables capability")]
     RelationshipTargetDoesNotSupportForEach {
         type_name: Qualified<CustomTypeName>,
         relationship_name: RelationshipName,
@@ -419,10 +419,6 @@ pub enum Error {
     },
     #[error("model {model_name:} with arguments is unsupported as a global ID source")]
     ModelWithArgumentsAsGlobalIdSource { model_name: Qualified<ModelName> },
-    #[error("capabilities for the data connector {data_connector:} have not been defined")]
-    MissingDataConnectorCapabilities {
-        data_connector: Qualified<DataConnectorName>,
-    },
     #[error("An error occurred while mapping arguments in the model {model_name:} to the collection {collection_name:} in the data connector {data_connector_name:}: {error:}")]
     ModelCollectionArgumentMappingError {
         data_connector_name: Qualified<DataConnectorName>,
