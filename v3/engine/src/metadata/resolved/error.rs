@@ -190,8 +190,8 @@ pub enum Error {
         model_name: Qualified<ModelName>,
         field_name: FieldName,
     },
-    #[error("comparison for array field {field_name:} of model {model_name:} used in {comparison_location} is unsupported")]
-    UncomparableArrayFieldType {
+    #[error("comparison for non-scalar field {field_name:} of model {model_name:} used in {comparison_location} is unsupported")]
+    UncomparableNonScalarFieldType {
         comparison_location: String,
         model_name: Qualified<ModelName>,
         field_name: FieldName,
@@ -545,7 +545,7 @@ pub enum TypeMappingValidationError {
     #[error(
         "the type {unknown_ndc_field_type_name:} is not defined as an object type in the connector's schema. This type is referenced by the field {ndc_field_name:} in the connector's schema type {ndc_type_name:}, which is mapped to the field {field_name:} in the type {type_name:}"
     )]
-    UnknownNdcFieldType {
+    UnknownNdcFieldObjectType {
         type_name: Qualified<CustomTypeName>,
         field_name: FieldName,
         ndc_type_name: String,
