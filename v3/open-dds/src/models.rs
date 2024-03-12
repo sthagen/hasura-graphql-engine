@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
-use derive_more::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     arguments::{ArgumentDefinition, ArgumentName},
-    commands::TypeMapping,
     data_connector::DataConnectorName,
     impl_JsonSchema_with_OpenDd_for,
     traits::{OpenDd, OpenDdDeserializeError},
@@ -31,7 +29,9 @@ impl_JsonSchema_with_OpenDd_for!(ModelName);
 
 /// The definition of a data model.
 /// A data model is a collection of objects of a particular type. Models can support one or more CRUD operations.
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(tag = "version", content = "definition")]
+#[serde(rename_all = "camelCase")]
 #[opendd(as_versioned_with_definition, json_schema(title = "Model"))]
 pub enum Model {
     V1(ModelV1),
@@ -45,7 +45,8 @@ impl Model {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
 #[opendd(json_schema(title = "ModelV1", example = "ModelV1::example"))]
 /// The definition of a data model.
 /// A data model is a collection of objects of a particular type. Models can support one or more CRUD operations.
@@ -62,8 +63,8 @@ pub struct ModelV1 {
     pub arguments: Vec<ArgumentDefinition>,
     /// The source configuration for this model.
     pub source: Option<ModelSource>,
-    /// A list of fields that can be used to filter the objects in this model.
-    pub filterable_fields: Vec<FilterableField>,
+    /// The boolean expression type that should be used to perform filtering on this model.
+    pub filter_expression_type: Option<CustomTypeName>,
     /// A list of fields that can be used to order the objects in this model.
     pub orderable_fields: Vec<OrderableField>,
     /// Configuration for how this model should appear in the GraphQL schema.
@@ -83,43 +84,9 @@ impl ModelV1 {
           "source": {
             "dataConnectorName": "data_connector",
             "collection": "articles",
-            "typeMapping": {
-              "article": {
-                "fieldMapping": {
-                  "article_id": {
-                    "column": "id"
-                  },
-                  "title": {
-                    "column": "title"
-                  },
-                  "author_id": {
-                    "column": "author_id"
-                  }
-                }
-              }
-            },
             "argumentMapping": {}
           },
-          "filterableFields": [
-            {
-              "fieldName": "article_id",
-              "operators": {
-                "enableAll": true
-              }
-            },
-            {
-              "fieldName": "title",
-              "operators": {
-                "enableAll": true
-              }
-            },
-            {
-              "fieldName": "author_id",
-              "operators": {
-                "enableAll": true
-              }
-            }
-          ],
+          "filterExpressionType": "Article_bool_exp",
           "orderableFields": [
             {
               "fieldName": "article_id",
@@ -154,8 +121,6 @@ impl ModelV1 {
                     "queryRootField": "ArticleMany",
                     "description": "Description for the select many ArticleMany"
                 },
-                "argumentsInputType": null,
-                "filterExpressionType": "Article_Where_Exp",
                 "orderByExpressionType": "Article_Order_By"
             },
             "description": "Description for the model Articles"
@@ -163,7 +128,8 @@ impl ModelV1 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
 #[opendd(json_schema(title = "ModelSource", example = "ModelSource::example"))]
 /// Description of how a model maps to a particular data connector
 pub struct ModelSource {
@@ -172,11 +138,6 @@ pub struct ModelSource {
 
     /// The collection in the data connector that backs this model.
     pub collection: String,
-
-    /// How the various types used in this model correspond to
-    /// entities in the data connector.
-    #[opendd(default, json_schema(default_exp = "serde_json::json!({})"))]
-    pub type_mapping: HashMap<CustomTypeName, TypeMapping>,
 
     // Mapping from model argument names to data connector table argument names.
     #[opendd(default)]
@@ -188,29 +149,14 @@ impl ModelSource {
         serde_json::json!(
             {
               "dataConnectorName": "data_connector",
-              "collection": "articles",
-              "typeMapping": {
-                "article": {
-                  "fieldMapping": {
-                    "article_id": {
-                      "column": "id"
-                    },
-                    "title": {
-                      "column": "title"
-                    },
-                    "author_id": {
-                      "column": "author_id"
-                    }
-                  }
-                }
-              },
-              "argumentMapping": {}
+              "collection": "articles"
             }
         )
     }
 }
 
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
 #[opendd(json_schema(
     title = "ModelGraphQlDefinition",
     example = "ModelGraphQlDefinition::example"
@@ -225,8 +171,6 @@ pub struct ModelGraphQlDefinition {
     pub select_many: Option<SelectManyGraphQlDefinition>,
     /// The type name of the input type used to hold the arguments of the model.
     pub arguments_input_type: Option<GraphQlTypeName>,
-    /// The type name of the filter boolean expression input type.
-    pub filter_expression_type: Option<GraphQlTypeName>,
     /// The type name of the order by expression input type.
     pub order_by_expression_type: Option<GraphQlTypeName>,
 }
@@ -247,15 +191,14 @@ impl ModelGraphQlDefinition {
                 "queryRootField": "ArticleMany",
                 "description": "Description for the select many ArticleMany"
             },
-            "argumentsInputType": null,
-            "filterExpressionType": "Article_Where_Exp",
             "orderByExpressionType": "Article_Order_By"
         })
     }
 }
 
 /// The definition of the GraphQL API for selecting a unique row/object from a model.
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
 #[opendd(json_schema(title = "SelectUniqueGraphQlDefinition"))]
 pub struct SelectUniqueGraphQlDefinition {
     /// The name of the query root field for this API.
@@ -268,7 +211,8 @@ pub struct SelectUniqueGraphQlDefinition {
 }
 
 /// The definition of the GraphQL API for selecting rows from a model.
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
 #[opendd(json_schema(title = "SelectManyGraphQlDefinition"))]
 pub struct SelectManyGraphQlDefinition {
     /// The name of the query root field for this API.
@@ -276,15 +220,6 @@ pub struct SelectManyGraphQlDefinition {
     /// The description of the select many graphql definition of the model.
     /// Gets added to the description of the select many root field of the model in the graphql schema.
     pub description: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-#[opendd(json_schema(title = "FilterableField"))]
-pub struct FilterableField {
-    pub field_name: FieldName,
-    pub operators: EnableAllOrSpecific<OperatorName>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
@@ -333,8 +268,3 @@ pub enum OrderByDirection {
     Asc,
     Desc,
 }
-
-#[derive(
-    Display, Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema, PartialOrd, Ord, Hash,
-)]
-pub struct OperatorName(pub String);

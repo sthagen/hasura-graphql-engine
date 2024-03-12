@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +7,7 @@ use crate::{
     arguments::{ArgumentDefinition, ArgumentName},
     data_connector::DataConnectorName,
     impl_JsonSchema_with_OpenDd_for,
-    types::{CustomTypeName, FieldName, GraphQlFieldName, TypeReference},
+    types::{GraphQlFieldName, TypeReference},
 };
 
 /// The name of a command.
@@ -54,7 +53,9 @@ pub enum DataConnectorCommand {
 /// The definition of a command.
 /// A command is a user-defined operation which can take arguments and returns an output.
 /// The semantics of a command are opaque to the Open DD specification.
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(tag = "version", content = "definition")]
+#[serde(rename_all = "camelCase")]
 #[opendd(as_versioned_with_definition, json_schema(title = "Command"))]
 pub enum Command {
     V1(CommandV1),
@@ -68,7 +69,8 @@ impl Command {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
 #[opendd(json_schema(title = "CommandV1", example = "CommandV1::example"))]
 /// Definition of an OpenDD Command, which is a custom operation that can take arguments and
 /// returns an output. The semantics of a command are opaque to OpenDD.
@@ -97,17 +99,8 @@ impl CommandV1 {
             "arguments": [],
             "source": {
                 "dataConnectorName": "data_connector",
-                    "dataConnectorCommand": {
-                        "function": "latest_article"
-                    },
-                "typeMapping": {
-                    "commandArticle": {
-                            "fieldMapping": {
-                                "article_id": {
-                                    "column": "id"
-                                }
-                            }
-                    }
+                "dataConnectorCommand": {
+                    "function": "latest_article"
                 },
                 "argumentMapping": {}
             },
@@ -120,7 +113,8 @@ impl CommandV1 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
 #[opendd(json_schema(title = "CommandSource", example = "CommandSource::example"))]
 /// Description of how a command maps to a particular data connector
 pub struct CommandSource {
@@ -129,11 +123,6 @@ pub struct CommandSource {
 
     /// The function/procedure in the data connector that backs this command.
     pub data_connector_command: DataConnectorCommand,
-
-    /// How the various types used in this command correspond to
-    /// entities in the data connector.
-    #[opendd(default, json_schema(default_exp = "serde_json::json!({})"))]
-    pub type_mapping: HashMap<CustomTypeName, TypeMapping>,
 
     /// Mapping from command argument names to data connector table argument names.
     #[opendd(default, json_schema(default_exp = "serde_json::json!({})"))]
@@ -147,7 +136,6 @@ impl CommandSource {
             "dataConnectorCommand": {
                 "function": "latest_article"
             },
-            "typeMapping": {},
             "argumentMapping": {}
         })
     }
@@ -162,7 +150,8 @@ pub enum GraphQlRootFieldKind {
     Mutation,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, opendds_derive::OpenDd)]
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
 #[opendd(json_schema(
     title = "CommandGraphQlDefinition",
     example = "CommandGraphQlDefinition::example"
@@ -182,17 +171,4 @@ impl CommandGraphQlDefinition {
             "rootFieldKind": "Query"
         })
     }
-}
-
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
-#[opendd(json_schema(title = "TypeMapping"))]
-pub struct TypeMapping {
-    pub field_mapping: IndexMap<FieldName, FieldMapping>,
-}
-
-#[derive(Clone, Debug, PartialEq, opendds_derive::OpenDd)]
-#[opendd(json_schema(title = "ObjectFieldMapping"))]
-pub struct FieldMapping {
-    pub column: String,
-    // TODO: Map field arguments
 }
