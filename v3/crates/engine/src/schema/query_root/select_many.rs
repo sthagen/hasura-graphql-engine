@@ -8,6 +8,7 @@ use lang_graphql::schema as gql_schema;
 use std::collections::HashMap;
 
 use crate::metadata::resolved;
+use crate::schema::mk_deprecation_status;
 use crate::schema::{
     model_arguments,
     model_filter::get_where_expression_input_field,
@@ -110,13 +111,13 @@ pub(crate) fn select_many_field(
             model_arguments::get_model_arguments_input_field(builder, model)?;
 
         let name = model_arguments_input.name.clone();
-        if arguments
-            .insert(
-                name.clone(),
-                builder.allow_all_namespaced(model_arguments_input, None),
-            )
-            .is_some()
-        {
+
+        let model_arguments = builder.conditional_namespaced(
+            model_arguments_input,
+            permissions::get_select_permissions_namespace_annotations(model),
+        );
+
+        if arguments.insert(name.clone(), model_arguments).is_some() {
             return Err(crate::schema::Error::GraphQlArgumentConflict {
                 argument_name: name,
                 field_name: query_root_field,
@@ -143,7 +144,7 @@ pub(crate) fn select_many_field(
             )),
             field_type,
             arguments,
-            gql_schema::DeprecationStatus::NotDeprecated,
+            mk_deprecation_status(&select_many.deprecated),
         ),
         permissions::get_select_permissions_namespace_annotations(model),
     );

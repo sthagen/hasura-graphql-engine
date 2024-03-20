@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::metadata::resolved;
 use crate::metadata::resolved::types::mk_name;
 use crate::schema::types::output_type::get_object_type_representation;
-use crate::schema::GDS;
+use crate::schema::{mk_deprecation_status, GDS};
 use crate::schema::{
     model_arguments, permissions,
     types::{
@@ -48,6 +48,7 @@ pub(crate) fn select_one_field(
             None,
             gql_schema::DeprecationStatus::NotDeprecated,
         );
+
         arguments.insert(
             argument.name.clone(),
             builder.allow_all_namespaced(argument, None),
@@ -72,6 +73,12 @@ pub(crate) fn select_one_field(
     let object_type_representation = get_object_type_representation(gds, &model.data_type)?;
     let output_typename = get_custom_output_type(gds, builder, &model.data_type)?;
 
+    let field_annotations = permissions::get_select_one_namespace_annotations(
+        model,
+        object_type_representation,
+        select_unique,
+    );
+
     let field = builder.conditional_namespaced(
         gql_schema::Field::new(
             query_root_field.clone(),
@@ -86,13 +93,9 @@ pub(crate) fn select_one_field(
             )),
             ast::TypeContainer::named_null(output_typename),
             arguments,
-            gql_schema::DeprecationStatus::NotDeprecated,
+            mk_deprecation_status(&select_unique.deprecated),
         ),
-        permissions::get_select_one_namespace_annotations(
-            model,
-            object_type_representation,
-            select_unique,
-        ),
+        field_annotations,
     );
     Ok((query_root_field, field))
 }
