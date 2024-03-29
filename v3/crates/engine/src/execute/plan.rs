@@ -27,8 +27,17 @@ use crate::schema::GDS;
 
 pub type QueryPlan<'n, 's, 'ir> = IndexMap<ast::Alias, NodeQueryPlan<'n, 's, 'ir>>;
 
+/// Unlike a query, the root nodes of a mutation aren't necessarily independent. Specifically, the
+/// GraphQL specification says that each root mutation must be executed sequentially. Moreover, if
+/// we want to, say, insert a parent _and_ children in one query, we want the ability to make
+/// transactional requests. In a mutation plan, we group nodes by connector, allowing us to issue
+/// transactional commands to connectors whose capabilities allow for transactional mutations.
+/// Otherwise, we can just send them one-by-one (though still sequentially).
 pub struct MutationPlan<'n, 's, 'ir> {
-    pub nodes: IndexMap<ast::Alias, NDCMutationExecution<'n, 's, 'ir>>,
+    pub nodes: IndexMap<
+        resolved::data_connector::DataConnectorLink,
+        IndexMap<ast::Alias, NDCMutationExecution<'n, 's, 'ir>>,
+    >,
     pub type_names: IndexMap<ast::Alias, ast::TypeName>,
 }
 
@@ -184,9 +193,13 @@ pub fn generate_request_plan<'n, 's, 'ir>(
                             .insert(alias.clone(), type_name.clone());
                     }
                     root_field::MutationRootField::ProcedureBasedCommand { selection_set, ir } => {
+                        let plan = plan_mutation(selection_set, ir)?;
+
                         mutation_plan
                             .nodes
-                            .insert(alias.clone(), plan_mutation(selection_set, ir)?);
+                            .entry(plan.data_connector.clone())
+                            .or_default()
+                            .insert(alias.clone(), plan);
                     }
                 };
 
@@ -377,13 +390,11 @@ fn zip_with_join_ids<'s, 'ir>(
 ) -> Result<JoinLocations<(RemoteJoin<'s, 'ir>, JoinId)>, error::Error> {
     let mut new_locations = IndexMap::new();
     for (key, location) in join_locations.locations {
-        let join_id_location =
-            join_ids
-                .locations
-                .remove(&key)
-                .ok_or(error::InternalEngineError::InternalGeneric {
-                    description: "unexpected; could not find {key} in join ids tree".to_string(),
-                })?;
+        let join_id_location = join_ids.locations.swap_remove(&key).ok_or(
+            error::InternalEngineError::InternalGeneric {
+                description: "unexpected; could not find {key} in join ids tree".to_string(),
+            },
+        )?;
         let new_node = match (location.join_node, join_id_location.join_node) {
             (JoinNode::Remote(rj), JoinNode::Remote(join_id)) => {
                 Ok(JoinNode::Remote((rj, join_id)))
@@ -728,11 +739,13 @@ pub async fn execute_mutation_plan<'n, 's, 'ir>(
         ));
     }
 
-    for (alias, field_plan) in mutation_plan.nodes.into_iter() {
-        executed_root_fields.push((
-            alias,
-            execute_mutation_field_plan(http_client, field_plan, project_id.clone()).await,
-        ));
+    for (_, mutation_group) in mutation_plan.nodes {
+        for (alias, field_plan) in mutation_group {
+            executed_root_fields.push((
+                alias,
+                execute_mutation_field_plan(http_client, field_plan, project_id.clone()).await,
+            ));
+        }
     }
 
     for executed_root_field in executed_root_fields.into_iter() {
