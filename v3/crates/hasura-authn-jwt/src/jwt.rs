@@ -310,6 +310,7 @@ pub struct JWTHeaderLocation {
 #[schemars(title = "JWTTokenLocation")]
 pub enum JWTTokenLocation {
     /// Get the bearer token from the `Authorization` header.
+    #[schemars(title = "JWTBearerAuthorizationLocation")]
     BearerAuthorization,
     /// Get the token from the Cookie header under the specified cookie name.
     Cookie(JWTCookieLocation),
@@ -1081,7 +1082,7 @@ mod tests {
     #[tokio::test]
     // This test emulates scenarios where multiple JWKs are present and only the correct encoded JWT is used to decode the Hasura claims
     async fn test_jwk() {
-        let mut server = mockito::Server::new();
+        let mut server = mockito::Server::new_async().await;
 
         let url = server.url();
 

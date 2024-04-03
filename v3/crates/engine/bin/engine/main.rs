@@ -1,10 +1,11 @@
 use std::fmt::Display;
+use std::net;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
     body::HttpBody,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{HeaderMap, Request},
     middleware::Next,
     response::{Html, IntoResponse},
@@ -26,6 +27,8 @@ use hasura_authn_jwt::jwt;
 use hasura_authn_webhook::webhook;
 use lang_graphql as gql;
 
+const DEFAULT_PORT: u16 = 3000;
+
 #[derive(Parser)]
 #[command(version = VERSION)]
 struct ServerOptions {
@@ -36,7 +39,7 @@ struct ServerOptions {
     #[arg(long, value_name = "AUTHN_CONFIG_FILE", env = "AUTHN_CONFIG_PATH")]
     authn_config_path: PathBuf,
     #[arg(long, value_name = "SERVER_PORT", env = "PORT")]
-    port: Option<i32>,
+    port: Option<u16>,
 }
 
 struct EngineState {
@@ -165,21 +168,26 @@ async fn start_engine(server: &ServerOptions) -> Result<(), StartupError> {
 
     let health_route = Router::new().route("/health", get(handle_health));
 
+    const MB: usize = 1_048_576;
+
     let app = Router::new()
         // serve graphiql at root
         .route("/", get(graphiql))
         .merge(graphql_route)
         .merge(explain_route)
-        .merge(health_route);
+        .merge(health_route)
+        .layer(DefaultBodyLimit::max(10 * MB)); // Set request payload limit to 10 MB
 
-    let addr = format!("0.0.0.0:{}", server.port.unwrap_or(3000));
-
-    let log = format!("starting server on {addr}");
+    // The "unspecified" IPv6 address will match any IPv4 or IPv6 address.
+    let host = net::IpAddr::V6(net::Ipv6Addr::UNSPECIFIED);
+    let port = server.port.unwrap_or(DEFAULT_PORT);
+    let address = net::SocketAddr::new(host, port);
+    let log = format!("starting server on {address}");
     println!("{log}");
     add_event_on_active_span(log);
 
     // run it with hyper on `addr`
-    axum::Server::bind(&addr.as_str().parse().unwrap())
+    axum::Server::bind(&address)
         .serve(app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await
