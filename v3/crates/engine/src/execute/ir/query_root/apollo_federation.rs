@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use hasura_authn_core::SessionVariables;
 use lang_graphql::{ast::common as ast, normalized_ast};
-use ndc_client::models as ndc_models;
+use ndc_models;
 use open_dds::types::CustomTypeName;
 use serde::Serialize;
 
@@ -159,7 +159,9 @@ pub(crate) fn entities_ir<'n, 's>(
             let new_selection_set = field.selection_set.filter_field_calls_by_typename(typename);
 
             let filter_clauses = ResolvedFilterExpression {
-                expressions: filter_clause_expressions,
+                expression: Some(ndc_models::Expression::And {
+                    expressions: filter_clause_expressions,
+                }),
                 relationships: BTreeMap::new(),
             };
             let mut usage_counts = UsagesCounts::new();
