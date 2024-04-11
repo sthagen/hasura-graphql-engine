@@ -19,6 +19,7 @@ use tracing_util::{
     TraceableError, TraceableHttpResponse,
 };
 
+use base64::engine::Engine;
 use engine::{
     authentication::{AuthConfig, AuthConfig::V1 as V1AuthConfig, AuthModeConfig},
     execute::HttpContext,
@@ -29,6 +30,8 @@ use hasura_authn_jwt::auth as jwt_auth;
 use hasura_authn_jwt::jwt;
 use hasura_authn_webhook::webhook;
 use lang_graphql as gql;
+use std::hash;
+use std::hash::{Hash, Hasher};
 
 const DEFAULT_PORT: u16 = 3000;
 
@@ -39,6 +42,12 @@ const MB: usize = 1_048_576;
 struct ServerOptions {
     #[arg(long, value_name = "METADATA_FILE", env = "METADATA_PATH")]
     metadata_path: PathBuf,
+    #[arg(
+        long,
+        value_name = "INTROSPECTION_METADATA_FILE",
+        env = "INTROSPECTION_METADATA_FILE"
+    )]
+    introspection_metadata: Option<String>,
     #[arg(long, value_name = "OTLP_ENDPOINT", env = "OTLP_ENDPOINT")]
     otlp_endpoint: Option<String>,
     #[arg(long, value_name = "AUTHN_CONFIG_FILE", env = "AUTHN_CONFIG_PATH")]
@@ -58,9 +67,9 @@ async fn main() {
     let server = ServerOptions::parse();
 
     let tracer = tracing_util::start_tracer(
-        server.otlp_endpoint.clone(),
+        server.otlp_endpoint.as_deref(),
         "graphql-engine",
-        env!("CARGO_PKG_VERSION").to_string(),
+        env!("CARGO_PKG_VERSION"),
     )
     .unwrap();
 
@@ -177,13 +186,32 @@ async fn start_engine(server: &ServerOptions) -> Result<(), StartupError> {
 
     let health_route = Router::new().route("/health", get(handle_health));
 
-    let app = Router::new()
+    let app_ = Router::new()
         // serve graphiql at root
         .route("/", get(graphiql))
         .merge(graphql_route)
         .merge(explain_route)
         .merge(health_route)
         .layer(DefaultBodyLimit::max(10 * MB)); // Set request payload limit to 10 MB
+
+    // If `--introspection-metadata` is specified we also serve the file indicated on `/metadata`
+    // and its hash on `/metadata-hash`. This is a temporary workaround to enable the console to
+    // interact with an engine process running locally (c.f running in the hasura cloud).
+    let app = match &server.introspection_metadata {
+        None => app_,
+        Some(file) => {
+            let file_owned = file.to_string();
+            let file_contents = tokio::fs::read_to_string(file_owned)
+                .await
+                .map_err(|err| StartupError::ReadSchema(err.into()))?;
+            let mut hasher = hash::DefaultHasher::new();
+            file_contents.as_str().hash(&mut hasher);
+            let hash = hasher.finish();
+            let base64_hash = base64::engine::general_purpose::STANDARD.encode(hash.to_ne_bytes());
+            app_.merge(Router::new().route("/metadata", get(|| async { file_contents })))
+                .merge(Router::new().route("/metadata-hash", get(|| async { base64_hash })))
+        }
+    };
 
     // The "unspecified" IPv6 address will match any IPv4 or IPv6 address.
     let host = net::IpAddr::V6(net::Ipv6Addr::UNSPECIFIED);
@@ -215,12 +243,11 @@ async fn handle_health() -> reqwest::StatusCode {
 async fn graphql_request_tracing_middleware<B: Send>(
     request: Request<B>,
     next: Next<B>,
-) -> axum::response::Result<axum::response::Response> {
+) -> axum::response::Response {
     use tracing_util::*;
     let tracer = global_tracer();
     let path = "/graphql";
-
-    Ok(tracer
+    tracer
         .in_span_async_with_parent_context(
             path,
             SpanVisibility::User,
@@ -238,7 +265,7 @@ async fn graphql_request_tracing_middleware<B: Send>(
             },
         )
         .await
-        .response)
+        .response
 }
 
 /// Middleware to start tracing of the `/v1/explain` request.
@@ -248,11 +275,10 @@ async fn graphql_request_tracing_middleware<B: Send>(
 async fn explain_request_tracing_middleware<B: Send>(
     request: Request<B>,
     next: Next<B>,
-) -> axum::response::Result<axum::response::Response> {
+) -> axum::response::Response {
     let tracer = tracing_util::global_tracer();
     let path = "/v1/explain";
-
-    Ok(tracer
+    tracer
         .in_span_async_with_parent_context(
             path,
             SpanVisibility::User,
@@ -265,7 +291,7 @@ async fn explain_request_tracing_middleware<B: Send>(
             },
         )
         .await
-        .response)
+        .response
 }
 
 #[derive(Debug, thiserror::Error)]

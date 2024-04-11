@@ -1,6 +1,15 @@
+use super::metadata::DataConnectorTypeMappings;
+use super::permission::{resolve_value_expression, ValueExpression};
+use super::relationship::RelationshipTarget;
+use super::stages::data_connectors;
+use super::typecheck;
+use super::types::{
+    collect_type_mapping_for_source, NdcColumnForComparison, ObjectBooleanExpressionType,
+    ObjectTypeRepresentation, ScalarTypeRepresentation, TypeMappingToCollect,
+};
 use crate::metadata::resolved::argument::get_argument_mappings;
-use crate::metadata::resolved::data_connector::get_simple_scalar;
-use crate::metadata::resolved::data_connector::{DataConnectorContext, DataConnectorLink};
+use crate::metadata::resolved::data_connector;
+use crate::metadata::resolved::data_connector::DataConnectorLink;
 use crate::metadata::resolved::error::{
     BooleanExpressionError, Error, GraphqlConfigError, RelationshipError,
 };
@@ -13,7 +22,6 @@ use crate::metadata::resolved::subgraph::{
 };
 use crate::metadata::resolved::types::store_new_graphql_type;
 use crate::metadata::resolved::types::{mk_name, FieldDefinition, TypeMapping};
-use crate::metadata::resolved::types::{ScalarTypeInfo, TypeRepresentation};
 use crate::schema::types::output_type::relationship::{
     ModelTargetSource, PredicateRelationshipAnnotation,
 };
@@ -34,15 +42,6 @@ use open_dds::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter;
-
-use super::metadata::DataConnectorTypeMappings;
-use super::permission::{resolve_value_expression, ValueExpression};
-use super::relationship::RelationshipTarget;
-use super::typecheck;
-use super::types::{
-    collect_type_mapping_for_source, NdcColumnForComparison, ObjectBooleanExpressionType,
-    ObjectTypeRepresentation, TypeMappingToCollect,
-};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct UniqueIdentifierField {
@@ -278,7 +277,7 @@ fn resolve_orderable_fields(
 pub fn resolve_model(
     subgraph: &str,
     model: &ModelV1,
-    types: &HashMap<Qualified<CustomTypeName>, TypeRepresentation>,
+    object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
     global_id_enabled_types: &mut HashMap<Qualified<CustomTypeName>, Vec<Qualified<ModelName>>>,
     apollo_federation_entity_enabled_types: &mut HashMap<
         Qualified<CustomTypeName>,
@@ -290,7 +289,7 @@ pub fn resolve_model(
         Qualified::new(subgraph.to_string(), model.object_type.to_owned());
     let qualified_model_name = Qualified::new(subgraph.to_string(), model.name.clone());
     let object_type_representation = get_model_object_type_representation(
-        types,
+        object_types,
         &qualified_object_type_name,
         &qualified_model_name,
     )?;
@@ -421,7 +420,7 @@ pub fn resolve_model(
 fn resolve_ndc_type(
     data_connector: &Qualified<DataConnectorName>,
     source_type: &ndc_models::Type,
-    scalars: &HashMap<&str, ScalarTypeInfo>,
+    scalars: &HashMap<&str, data_connectors::ScalarTypeInfo>,
     subgraph: &str,
 ) -> Result<QualifiedTypeReference, Error> {
     match source_type {
@@ -474,7 +473,7 @@ fn resolve_binary_operator(
     data_connector: &Qualified<DataConnectorName>,
     field_name: &FieldName,
     fields: &IndexMap<FieldName, FieldDefinition>,
-    scalars: &HashMap<&str, ScalarTypeInfo>,
+    scalars: &HashMap<&str, data_connectors::ScalarTypeInfo>,
     ndc_scalar_type: &ndc_models::ScalarType,
     subgraph: &str,
 ) -> Result<(String, QualifiedTypeReference), Error> {
@@ -516,9 +515,9 @@ fn resolve_model_predicate(
     model_predicate: &permissions::ModelPredicate,
     model: &Model,
     subgraph: &str,
-    data_connectors: &HashMap<Qualified<DataConnectorName>, DataConnectorContext>,
+    data_connectors: &data_connectors::DataConnectors,
     fields: &IndexMap<FieldName, FieldDefinition>,
-    types: &HashMap<Qualified<CustomTypeName>, TypeRepresentation>,
+    object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
     models: &IndexMap<Qualified<ModelName>, Model>,
     // type_representation: &TypeRepresentation,
 ) -> Result<ModelPredicate, Error> {
@@ -550,21 +549,26 @@ fn resolve_model_predicate(
                 })?;
                 // Determine ndc type of the field
                 let field_ndc_type = &field_mapping.column_type;
+
                 // Determine whether the ndc type is a simple scalar
                 // Get available scalars defined in the data connector
                 let scalars = &data_connectors
+                    .data_connectors
                     .get(&model_source.data_connector.name)
                     .ok_or(Error::UnknownModelDataConnector {
                         model_name: model.name.clone(),
                         data_connector: model_source.data_connector.name.clone(),
                     })?
                     .scalars;
+
                 // Get scalar type info from the data connector
-                let (_, scalar_type_info) = get_simple_scalar(field_ndc_type.clone(), scalars)
-                    .ok_or_else(|| Error::UnsupportedFieldInSelectPermissionsPredicate {
-                        field_name: field.clone(),
-                        model_name: model.name.clone(),
-                    })?;
+                let (_, scalar_type_info) =
+                    data_connector::get_simple_scalar(field_ndc_type.clone(), scalars).ok_or_else(
+                        || Error::UnsupportedFieldInSelectPermissionsPredicate {
+                            field_name: field.clone(),
+                            model_name: model.name.clone(),
+                        },
+                    )?;
 
                 let (resolved_operator, argument_type) = resolve_binary_operator(
                     operator,
@@ -621,8 +625,11 @@ fn resolve_model_predicate(
         }
         permissions::ModelPredicate::Relationship(RelationshipPredicate { name, predicate }) => {
             if let Some(nested_predicate) = predicate {
-                let object_type_representation =
-                    get_model_object_type_representation(types, &model.data_type, &model.name)?;
+                let object_type_representation = get_model_object_type_representation(
+                    object_types,
+                    &model.data_type,
+                    &model.name,
+                )?;
                 let relationship_field_name = mk_name(&name.0)?;
                 let relationship = &object_type_representation
                     .relationships
@@ -694,7 +701,7 @@ fn resolve_model_predicate(
                                     subgraph,
                                     data_connectors,
                                     &target_model.type_fields,
-                                    types,
+                                    object_types,
                                     models,
                                 )?;
 
@@ -732,7 +739,7 @@ fn resolve_model_predicate(
                 subgraph,
                 data_connectors,
                 fields,
-                types,
+                object_types,
                 models,
             )?;
             Ok(ModelPredicate::Not(Box::new(resolved_predicate)))
@@ -746,7 +753,7 @@ fn resolve_model_predicate(
                     subgraph,
                     data_connectors,
                     fields,
-                    types,
+                    object_types,
                     models,
                 )?);
             }
@@ -761,7 +768,7 @@ fn resolve_model_predicate(
                     subgraph,
                     data_connectors,
                     fields,
-                    types,
+                    object_types,
                     models,
                 )?);
             }
@@ -774,8 +781,8 @@ pub fn resolve_model_select_permissions(
     model: &Model,
     subgraph: &str,
     model_permissions: &ModelPermissionsV1,
-    data_connectors: &HashMap<Qualified<DataConnectorName>, DataConnectorContext>,
-    types: &HashMap<Qualified<CustomTypeName>, TypeRepresentation>,
+    data_connectors: &data_connectors::DataConnectors,
+    object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
     models: &IndexMap<Qualified<ModelName>, Model>,
 ) -> Result<HashMap<Role, SelectPermission>, Error> {
     let mut validated_permissions = HashMap::new();
@@ -788,7 +795,7 @@ pub fn resolve_model_select_permissions(
                     subgraph,
                     data_connectors,
                     &model.type_fields,
-                    types,
+                    object_types,
                     models,
                 )
                 .map(FilterPermission::Filter)?,
@@ -857,7 +864,7 @@ pub(crate) fn get_ndc_column_for_comparison<F: Fn() -> String>(
     model_data_type: &Qualified<CustomTypeName>,
     model_source: &ModelSource,
     field: &FieldName,
-    data_connectors: &HashMap<Qualified<DataConnectorName>, DataConnectorContext>,
+    data_connectors: &data_connectors::DataConnectors,
     comparison_location: F,
 ) -> Result<NdcColumnForComparison, Error> {
     // Get field mappings of model data type
@@ -869,6 +876,7 @@ pub(crate) fn get_ndc_column_for_comparison<F: Fn() -> String>(
             type_name: model_data_type.clone(),
             data_connector: model_source.data_connector.name.clone(),
         })?;
+
     // Determine field_mapping for the given field
     let field_mapping =
         field_mappings
@@ -878,10 +886,13 @@ pub(crate) fn get_ndc_column_for_comparison<F: Fn() -> String>(
                 field_name: field.clone(),
                 model_name: model_name.clone(),
             })?;
+
     // Determine ndc type of the field
     let field_ndc_type = &field_mapping.column_type;
+
     // Get available scalars defined in the data connector
     let scalars = &data_connectors
+        .data_connectors
         .get(&model_source.data_connector.name)
         .ok_or(Error::UnknownModelDataConnector {
             model_name: model_name.clone(),
@@ -890,7 +901,7 @@ pub(crate) fn get_ndc_column_for_comparison<F: Fn() -> String>(
         .scalars;
     // Determine whether the ndc type is a simple scalar and get scalar type info
     let (_field_ndc_type_scalar, scalar_type_info) =
-        get_simple_scalar(field_ndc_type.clone(), scalars).ok_or_else(|| {
+        data_connector::get_simple_scalar(field_ndc_type.clone(), scalars).ok_or_else(|| {
             Error::UncomparableNonScalarFieldType {
                 comparison_location: comparison_location(),
                 field_name: field.clone(),
@@ -931,7 +942,7 @@ pub fn resolve_model_graphql_api(
     model: &mut Model,
     subgraph: &str,
     existing_graphql_types: &mut HashSet<ast::TypeName>,
-    data_connectors: &HashMap<Qualified<DataConnectorName>, DataConnectorContext>,
+    data_connectors: &data_connectors::DataConnectors,
     model_description: &Option<String>,
     graphql_config: &GraphqlConfig,
 ) -> Result<(), Error> {
@@ -1072,7 +1083,9 @@ pub fn resolve_model_graphql_api(
                     return Ok(None);
                 };
                 let mut scalar_fields = HashMap::new();
+
                 let scalar_types = &data_connectors
+                    .data_connectors
                     .get(&model_source.data_connector.name)
                     .ok_or(Error::UnknownModelDataConnector {
                         model_name: model_name.clone(),
@@ -1101,7 +1114,10 @@ pub fn resolve_model_graphql_api(
                 for (field_name, field_mapping) in field_mappings.iter() {
                     // Generate comparison expression for fields mapped to simple scalar type
                     if let Some((scalar_type_name, scalar_type_info)) =
-                        get_simple_scalar(field_mapping.column_type.clone(), scalar_types)
+                        data_connector::get_simple_scalar(
+                            field_mapping.column_type.clone(),
+                            scalar_types,
+                        )
                     {
                         if let Some(graphql_type_name) =
                             &scalar_type_info.comparison_expression_name.clone()
@@ -1260,8 +1276,9 @@ pub fn resolve_model_source(
     model_source: &models::ModelSource,
     model: &mut Model,
     subgraph: &str,
-    data_connectors: &HashMap<Qualified<DataConnectorName>, DataConnectorContext>,
-    types: &HashMap<Qualified<CustomTypeName>, TypeRepresentation>,
+    data_connectors: &data_connectors::DataConnectors,
+    object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, ScalarTypeRepresentation>,
     data_connector_type_mappings: &DataConnectorTypeMappings,
 ) -> Result<(), Error> {
     if model.source.is_some() {
@@ -1274,6 +1291,7 @@ pub fn resolve_model_source(
         model_source.data_connector_name.clone(),
     );
     let data_connector_context = data_connectors
+        .data_connectors
         .get(&qualified_data_connector_name)
         .ok_or_else(|| Error::UnknownModelDataConnector {
             model_name: model.name.clone(),
@@ -1296,7 +1314,8 @@ pub fn resolve_model_source(
         &model.arguments,
         &model_source.argument_mapping,
         &source_collection.arguments,
-        types,
+        object_types,
+        scalar_types,
     )
     .map_err(|err| Error::ModelCollectionArgumentMappingError {
         data_connector_name: qualified_data_connector_name.clone(),
@@ -1318,7 +1337,8 @@ pub fn resolve_model_source(
             type_mapping_to_collect,
             data_connector_type_mappings,
             &qualified_data_connector_name,
-            types,
+            object_types,
+            scalar_types,
             &mut type_mappings,
         )
         .map_err(|error| Error::ModelTypeMappingCollectionError {
@@ -1361,7 +1381,7 @@ pub fn resolve_model_source(
     };
 
     let model_object_type =
-        get_model_object_type_representation(types, &model.data_type, &model.name)?;
+        get_model_object_type_representation(object_types, &model.data_type, &model.name)?;
 
     if let Some(global_id_source) = &mut model.global_id_source {
         for global_id_field in &model_object_type.global_id_fields {
@@ -1413,22 +1433,15 @@ pub fn resolve_model_source(
 /// `data_type`, it will throw an error if the type is not found to be an object
 /// or if the model has an unknown data type.
 pub(crate) fn get_model_object_type_representation<'s>(
-    types: &'s HashMap<Qualified<CustomTypeName>, TypeRepresentation>,
+    object_types: &'s HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
     data_type: &Qualified<CustomTypeName>,
     model_name: &Qualified<ModelName>,
 ) -> Result<&'s ObjectTypeRepresentation, crate::metadata::resolved::error::Error> {
-    let object_type_representation = match types.get(data_type) {
-        Some(TypeRepresentation::Object(object_type_representation)) => {
-            Ok(object_type_representation)
-        }
-        Some(type_rep) => Err(Error::InvalidTypeRepresentation {
-            model_name: model_name.clone(),
-            type_representation: type_rep.clone(),
-        }),
+    match object_types.get(data_type) {
+        Some(object_type_representation) => Ok(object_type_representation),
         None => Err(Error::UnknownModelDataType {
             model_name: model_name.clone(),
             data_type: data_type.clone(),
         }),
-    }?;
-    Ok(object_type_representation)
+    }
 }
