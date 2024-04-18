@@ -16,7 +16,7 @@ use schemars::schema::{Schema, SchemaObject};
 
 use schemars::JsonSchema;
 use serde::{de::Error as SerdeDeError, Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 use thiserror::Error;
 use tracing_util::{ErrorVisibility, SpanVisibility, TraceableError};
@@ -345,8 +345,7 @@ pub struct JWTConfig {
 
 impl JWTConfig {
     fn example() -> Self {
-        serde_json::from_str(
-            r#"
+        let value = json!(
             {
                 "key": {
                     "fixed": {
@@ -366,9 +365,8 @@ impl JWTConfig {
                     }
                 }
             }
-        "#,
-        )
-        .unwrap()
+        );
+        serde_json::from_value(value).unwrap()
     }
 }
 
@@ -457,6 +455,7 @@ async fn get_decoding_key_from_jwk_url(
                 Box::pin(async {
                     let jwk_request = http_client
                         .get(jwk_url)
+                        .headers(tracing_util::get_trace_headers())
                         .timeout(Duration::from_secs(60))
                         .build()
                         .map_err(InternalError::ReqwestError)?;
@@ -695,7 +694,6 @@ pub(crate) fn get_authorization_token(
 mod tests {
     use std::str::FromStr;
 
-    use indoc::indoc;
     use jsonwebkey as jwk;
     use jwk::{Algorithm::ES256, JsonWebKey};
     use jwt::{encode, EncodingKey};
@@ -705,27 +703,34 @@ mod tests {
 
     use super::*;
 
-    fn get_claims(hasura_claims: &serde_json::Value, insert_hasura_claims_at: &str) -> Claims {
-        let claims_str = r#"
-                            {
-                              "sub": "1234567890",
-                              "name": "John Doe",
-                              "iat": 1693439022,
-                              "exp": 1916239022,
-                              "https://hasura.io/jwt/claims": {}
-                            }"#;
-        let mut claims: serde_json::Value = serde_json::from_str(claims_str).unwrap();
-        *claims.pointer_mut(insert_hasura_claims_at).unwrap() = hasura_claims.clone();
-
-        serde_json::from_value(claims).unwrap()
+    fn get_claims(
+        hasura_claims: &serde_json::Value,
+        insert_hasura_claims_at: &str,
+    ) -> anyhow::Result<Claims> {
+        let mut claims_json = json!(
+            {
+                "sub": "1234567890",
+                "name": "John Doe",
+                "iat": 1693439022,
+                "exp": 1916239022,
+                "https://hasura.io/jwt/claims": {}
+            }
+        );
+        *claims_json
+            .pointer_mut(insert_hasura_claims_at)
+            .ok_or(anyhow::anyhow!(
+                "Could not find {insert_hasura_claims_at:?}"
+            ))? = hasura_claims.clone();
+        let claims = serde_json::from_value(claims_json)?;
+        Ok(claims)
     }
 
-    fn get_encoded_claims(alg: jwt::Algorithm) -> String {
+    fn get_encoded_claims(alg: jwt::Algorithm) -> anyhow::Result<String> {
         let hasura_claims = get_default_hasura_claims();
         let claims: Claims = get_claims(
-            &serde_json::to_value(hasura_claims.clone()).unwrap(),
+            &serde_json::to_value(hasura_claims)?,
             &DEFAULT_HASURA_CLAIMS_NAMESPACE_POINTER,
-        );
+        )?;
         let jwt_header = jwt::Header {
             alg,
             ..Default::default()
@@ -735,9 +740,8 @@ mod tests {
             &jwt_header,
             &claims,
             &EncodingKey::from_secret("token".as_ref()),
-        )
-        .unwrap();
-        encoded_claims
+        )?;
+        Ok(encoded_claims)
     }
 
     fn get_default_hasura_claims() -> HasuraClaims {
@@ -772,25 +776,19 @@ mod tests {
 
     #[test]
     // This test emulates scenarios where JWT location is supplied as different sources - Bearer token, Custom header and Cookie
-    fn test_jwt_header_source() {
+    fn test_jwt_header_source() -> anyhow::Result<()> {
         let mut header_map = HeaderMap::new();
 
         // Authorization header tests
 
-        header_map.insert(
-            AUTHORIZATION,
-            "Bearer my_authorization_token".parse().unwrap(),
-        );
+        header_map.insert(AUTHORIZATION, "Bearer my_authorization_token".parse()?);
 
         assert_eq!(
-            get_authorization_token(&JWTTokenLocation::BearerAuthorization, &header_map).unwrap(),
+            get_authorization_token(&JWTTokenLocation::BearerAuthorization, &header_map)?,
             "my_authorization_token"
         );
 
-        header_map.insert(
-            &AUTHORIZATION,
-            "Bearer_my_authorization_token".parse().unwrap(),
-        );
+        header_map.insert(&AUTHORIZATION, "Bearer_my_authorization_token".parse()?);
         assert_eq!(
             get_authorization_token(&JWTTokenLocation::BearerAuthorization, &header_map)
                 .unwrap_err()
@@ -800,34 +798,26 @@ mod tests {
 
         // Custom header tests
 
-        header_map.insert(
-            "custom-jwt-header",
-            "my_authorization_token".parse().unwrap(),
-        );
+        header_map.insert("custom-jwt-header", "my_authorization_token".parse()?);
         assert_eq!(
             get_authorization_token(
                 &JWTTokenLocation::Header(JWTHeaderLocation {
                     name: "custom-jwt-header".to_string()
                 }),
                 &header_map
-            )
-            .unwrap(),
+            )?,
             "my_authorization_token"
         );
 
         // Cookie tests
-        header_map.insert(
-            "Cookie",
-            "my_cookie=my_authorization_token".parse().unwrap(),
-        );
+        header_map.insert("Cookie", "my_cookie=my_authorization_token".parse()?);
         assert_eq!(
             get_authorization_token(
                 &JWTTokenLocation::Cookie(JWTCookieLocation {
                     name: "my_cookie".to_string()
                 }),
                 &header_map
-            )
-            .unwrap(),
+            )?,
             "my_authorization_token"
         );
 
@@ -842,15 +832,16 @@ mod tests {
             .to_string(),
             "JWT Authorization token source: cookie name non_existent_cookie not found in the Cookie header"
         );
+        Ok(())
     }
 
     #[tokio::test]
     // This test checks if the JSON claims are decoded correctly from the encoded JWT using HS256 algorithm
-    async fn test_jwt_encode_and_decode() {
+    async fn test_jwt_encode_and_decode() -> anyhow::Result<()> {
         let hasura_claims = get_default_hasura_claims();
-        let encoded_claims = get_encoded_claims(jwt::Algorithm::HS256);
+        let encoded_claims = get_encoded_claims(jwt::Algorithm::HS256)?;
 
-        let jwt_secret_config_str = indoc! {r#"
+        let jwt_secret_config_json = json!(
             {
                "key": {
                  "fixed": {
@@ -870,23 +861,22 @@ mod tests {
                   }
                }
             }
-            "#};
+        );
 
-        let jwt_config: JWTConfig = serde_json::from_str(jwt_secret_config_str).unwrap();
+        let jwt_config: JWTConfig = serde_json::from_value(jwt_secret_config_json)?;
 
         let http_client = reqwest::Client::new();
 
         let decoded_claims =
-            decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims)
-                .await
-                .unwrap();
-        assert_eq!(hasura_claims, decoded_claims)
+            decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims).await?;
+        assert_eq!(hasura_claims, decoded_claims);
+        Ok(())
     }
 
     #[tokio::test]
     // This test emulates if the stringified JSON claims are decoded correctly from the encoded JWT using HS256 algorithm
-    async fn test_jwt_stringified_hasura_claims() {
-        let jwt_secret_config_str = indoc! {r#"
+    async fn test_jwt_stringified_hasura_claims() -> anyhow::Result<()> {
+        let jwt_secret_config_value = json!(
             {
                "key": {
                  "fixed": {
@@ -906,16 +896,16 @@ mod tests {
                   }
                }
             }
-            "#};
+        );
 
-        let jwt_config = serde_json::from_str(jwt_secret_config_str).unwrap();
+        let jwt_config = serde_json::from_value(jwt_secret_config_value)?;
 
         let hasura_claims = get_default_hasura_claims();
-        let stringified_hasura_claims = serde_json::to_string(&hasura_claims).unwrap();
-        let claims: Claims = get_claims(
-            &serde_json::to_value(stringified_hasura_claims).unwrap(),
+        let stringified_hasura_claims = serde_json::to_string(&hasura_claims)?;
+        let claims = get_claims(
+            &serde_json::to_value(stringified_hasura_claims)?,
             &DEFAULT_HASURA_CLAIMS_NAMESPACE_POINTER,
-        );
+        )?;
         let alg = jwt::Algorithm::HS256;
         let jwt_header = jwt::Header {
             alg,
@@ -926,24 +916,22 @@ mod tests {
             &jwt_header,
             &claims,
             &EncodingKey::from_secret("token".as_ref()),
-        )
-        .unwrap();
+        )?;
 
         let http_client = reqwest::Client::new();
 
         let decoded_claims =
-            decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims)
-                .await
-                .unwrap();
-        assert_eq!(hasura_claims, decoded_claims)
+            decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims).await?;
+        assert_eq!(hasura_claims, decoded_claims);
+        Ok(())
     }
 
     #[tokio::test]
     // This test emulates a scenario where Hasura claims are present in a different namespace path
-    async fn test_jwt_claims_namespace_path() {
+    async fn test_jwt_claims_namespace_path() -> anyhow::Result<()> {
         let alg = jwt::Algorithm::HS256;
 
-        let jwt_secret_config_str = indoc! {r#"
+        let jwt_secret_config_json = json!(
             {
                "key": {
                  "fixed": {
@@ -963,26 +951,27 @@ mod tests {
                   }
                }
             }
-            "#};
+        );
 
-        let jwt_config = serde_json::from_str(jwt_secret_config_str).unwrap();
+        let jwt_config = serde_json::from_value(jwt_secret_config_json)?;
 
         let hasura_claims = get_default_hasura_claims();
-        let claims_str = r#"
-                            {
-                              "sub": "1234567890",
-                              "name": "John Doe",
-                              "iat": 1693439022,
-                              "exp": 1916239022,
-                              "foo": {
-                                 "hasuraClaims": {
-                                    "x-hasura-default-role": "user",
-                                    "x-hasura-allowed-roles": ["foo", "bar", "user"],
-                                    "x-hasura-user-id": "1"
-                                 }
-                              }
-                            }"#;
-        let claims: Claims = serde_json::from_str(claims_str).unwrap();
+        let claims_json = json!(
+            {
+                "sub": "1234567890",
+                "name": "John Doe",
+                "iat": 1693439022,
+                "exp": 1916239022,
+                "foo": {
+                    "hasuraClaims": {
+                        "x-hasura-default-role": "user",
+                        "x-hasura-allowed-roles": ["foo", "bar", "user"],
+                        "x-hasura-user-id": "1"
+                    }
+                }
+            }
+        );
+        let claims: Claims = serde_json::from_value(claims_json)?;
 
         let jwt_header = jwt::Header {
             alg,
@@ -992,24 +981,22 @@ mod tests {
             &jwt_header,
             &claims,
             &EncodingKey::from_secret("token".as_ref()),
-        )
-        .unwrap();
+        )?;
 
         let http_client = reqwest::Client::new();
 
         let decoded_claims =
-            decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims)
-                .await
-                .unwrap();
-        assert_eq!(hasura_claims, decoded_claims)
+            decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims).await?;
+        assert_eq!(hasura_claims, decoded_claims);
+        Ok(())
     }
 
     #[tokio::test]
     // This test emulates a scenario where each location of the Hasura claims is specified explicitly
-    async fn test_jwt_claims_mapping() {
+    async fn test_jwt_claims_mapping() -> anyhow::Result<()> {
         let alg = jwt::Algorithm::HS256;
 
-        let jwt_secret_config_str = indoc! {r#"
+        let jwt_secret_config_json = json!(
             {
                "key": {
                  "fixed": {
@@ -1041,24 +1028,25 @@ mod tests {
                   }
                }
             }
-            "#};
+        );
 
-        let jwt_config = serde_json::from_str(jwt_secret_config_str).unwrap();
+        let jwt_config = serde_json::from_value(jwt_secret_config_json)?;
 
         let hasura_claims = get_default_hasura_claims();
-        let claims_str = r#"
-                            {
-                              "sub": "1234567890",
-                              "name": "John Doe",
-                              "iat": 1693439022,
-                              "exp": 1916239022,
-                              "roles": [
-                                 "foo",
-                                 "bar",
-                                 "user"
-                              ]
-                            }"#;
-        let claims: Claims = serde_json::from_str(claims_str).unwrap();
+        let claims_json = json!(
+            {
+                "sub": "1234567890",
+                "name": "John Doe",
+                "iat": 1693439022,
+                "exp": 1916239022,
+                "roles": [
+                     "foo",
+                     "bar",
+                     "user"
+                ]
+            }
+        );
+        let claims: Claims = serde_json::from_value(claims_json)?;
         let jwt_header = jwt::Header {
             alg,
             ..Default::default()
@@ -1067,16 +1055,14 @@ mod tests {
             &jwt_header,
             &claims,
             &EncodingKey::from_secret("token".as_ref()),
-        )
-        .unwrap();
+        )?;
 
         let http_client = reqwest::Client::new();
 
         let decoded_claims =
-            decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims)
-                .await
-                .unwrap();
-        assert_eq!(hasura_claims, decoded_claims)
+            decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims).await?;
+        assert_eq!(hasura_claims, decoded_claims);
+        Ok(())
     }
 
     #[derive(Serialize)]
@@ -1086,7 +1072,8 @@ mod tests {
 
     #[tokio::test]
     // This test emulates scenarios where multiple JWKs are present and only the correct encoded JWT is used to decode the Hasura claims
-    async fn test_jwk() {
+    async fn test_jwk() -> anyhow::Result<()> {
+        let _ = tracing_util::start_tracer(None, "test_jwk", "0")?;
         let mut server = mockito::Server::new_async().await;
 
         let url = server.url();
@@ -1104,8 +1091,15 @@ mod tests {
         };
 
         // Create a mock
+        let non_empty = mockito::Matcher::Regex(".+".to_string());
         let mock = server
             .mock("GET", "/jwk")
+            // check W3C trace headrs are present
+            .match_header("traceparent", non_empty.clone())
+            .match_header("tracestate", mockito::Matcher::Any)
+            // check B3 trace headrs are present
+            .match_header("x-b3-traceid", non_empty.clone())
+            .match_header("x-b3-spanid", non_empty)
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_header("x-api-key", "1234")
@@ -1116,9 +1110,9 @@ mod tests {
         let hasura_claims = get_default_hasura_claims();
 
         let claims: Claims = get_claims(
-            &serde_json::to_value(hasura_claims.clone()).unwrap(),
+            &serde_json::to_value(&hasura_claims)?,
             &DEFAULT_HASURA_CLAIMS_NAMESPACE_POINTER,
-        );
+        )?;
 
         let mut jwt_header = jwt::Header::new(jwt::Algorithm::ES256);
         jwt_header.kid = Some("random_kid".to_string());
@@ -1126,43 +1120,40 @@ mod tests {
         let authorization_token_1 = jwt::encode(
             &jwt_header,
             &claims,
-            &EncodingKey::from_ec_pem(test_jwk_1.key.to_pem().as_bytes()).unwrap(),
-        )
-        .unwrap();
+            &EncodingKey::from_ec_pem(test_jwk_1.key.to_pem().as_bytes())?,
+        )?;
 
         let jwk_url = url + "/jwk";
 
-        let jwt_config_str = format!(
-            r#"
-             {{
-                "key": {{
-                   "jwkFromUrl": "{jwk_url}"
-                }},
-               "tokenLocation": {{
-                  "type": "BearerAuthorization"
-               }},
-               "claimsConfig": {{
-                  "namespace": {{
-                     "claimsFormat": "Json",
-                     "location": "/https:~1~1hasura.io~1jwt~1claims"
-                  }}
-               }}
-             }}"#
+        let jwt_config_json = json!(
+            {
+                "key": {
+                   "jwkFromUrl": jwk_url
+                },
+                "tokenLocation": {
+                   "type": "BearerAuthorization"
+                },
+                "claimsConfig": {
+                   "namespace": {
+                      "claimsFormat": "Json",
+                      "location": "/https:~1~1hasura.io~1jwt~1claims"
+                   }
+                }
+            }
         );
 
-        let jwt_config: JWTConfig = serde_json::from_str(&jwt_config_str).unwrap();
+        let jwt_config: JWTConfig = serde_json::from_value(jwt_config_json)?;
 
         let decoded_hasura_claims =
             decode_and_parse_hasura_claims(&http_client, jwt_config.clone(), authorization_token_1)
-                .await
-                .unwrap();
+                .await?;
 
         mock.assert();
 
         assert_eq!(hasura_claims, decoded_hasura_claims);
 
         let mut test_jwk_3 = jwk::JsonWebKey::new(jwk::Key::generate_p256());
-        test_jwk_3.set_algorithm(ES256).unwrap();
+        test_jwk_3.set_algorithm(ES256)?;
         test_jwk_3.key_id = Some("random_kid_3".to_string());
 
         let mut jwt_header_2 = jwt::Header::new(jwt::Algorithm::ES256);
@@ -1171,9 +1162,8 @@ mod tests {
         let authorization_token_2 = jwt::encode(
             &jwt_header_2,
             &claims,
-            &EncodingKey::from_ec_pem(test_jwk_3.key.to_pem().as_bytes()).unwrap(),
-        )
-        .unwrap();
+            &EncodingKey::from_ec_pem(test_jwk_3.key.to_pem().as_bytes())?,
+        )?;
 
         assert_eq!(
             decode_and_parse_hasura_claims(&http_client, jwt_config, authorization_token_2)
@@ -1182,196 +1172,198 @@ mod tests {
                 .to_string(),
             "Internal Error - No matching JWK found for the given kid: random_kid_3"
         );
+        Ok(())
     }
 
     #[tokio::test]
     // This test emulates encoding and decoding of JWTs with all the JWT algorithms supported by Hasura
-    async fn test_jwt_encode_and_decode_for_all_algorithms() {
+    async fn test_jwt_encode_and_decode_for_all_algorithms() -> anyhow::Result<()> {
         for alg in get_all_jwt_algorithms() {
             match alg {
                 jwt::Algorithm::HS256 => {
-                    let jwt_key_config = r#"
-                        "fixed":{
-                           "algorithm": "HS256",
-                           "key": {
-                              "value": "token"
-                           }
+                    let jwt_key_config = json!(
+                        {
+                            "fixed": {
+                               "algorithm": "HS256",
+                               "key": {
+                                  "value": "token"
+                               }
+                            }
                         }
-                        "#;
+                    );
                     helper_test_jwt_encode_decode(
-                        jwt_key_config,
+                        &jwt_key_config,
                         jwt::Header::new(jwt::Algorithm::HS256),
                         EncodingKey::from_secret("token".as_ref()),
                     )
-                    .await
+                    .await?;
                 }
                 jwt::Algorithm::HS384 => {
-                    let jwt_key_config = r#"
-                        "fixed":{
-                           "algorithm": "HS384",
-                           "key": {
-                              "value": "token"
-                           }
+                    let jwt_key_config = json!(
+                        {
+                            "fixed": {
+                               "algorithm": "HS384",
+                               "key": {
+                                  "value": "token"
+                               }
+                            }
                         }
-                        "#;
+                    );
                     helper_test_jwt_encode_decode(
-                        jwt_key_config,
+                        &jwt_key_config,
                         jwt::Header::new(jwt::Algorithm::HS384),
                         EncodingKey::from_secret("token".as_ref()),
                     )
-                    .await
+                    .await?;
                 }
                 jwt::Algorithm::HS512 => {
-                    let jwt_key_config = r#"
-                        "fixed":{
-                           "algorithm": "HS512",
-                           "key": {
-                              "value": "token"
-                           }
+                    let jwt_key_config = json!(
+                        {
+                            "fixed": {
+                               "algorithm": "HS512",
+                               "key": {
+                                  "value": "token"
+                               }
+                            }
                         }
-                        "#;
+                    );
                     helper_test_jwt_encode_decode(
-                        jwt_key_config,
+                        &jwt_key_config,
                         jwt::Header::new(jwt::Algorithm::HS512),
                         EncodingKey::from_secret("token".as_ref()),
                     )
-                    .await
+                    .await?;
                 }
                 jwt::Algorithm::ES256 => {
                     let mut test_jwk = jwk::JsonWebKey::new(jwk::Key::generate_p256());
-                    test_jwk.set_algorithm(ES256).unwrap();
+                    test_jwk.set_algorithm(ES256)?;
                     test_jwk.key_id = Some("random_kid".to_string());
                     let test_jwk_public_key = test_jwk
                         .key
                         .to_public()
-                        .unwrap()
+                        .ok_or(anyhow::anyhow!("not a public key"))?
                         .as_ref()
                         .clone()
                         .to_pem()
                         .replace('\n', "");
-                    let jwt_key_config = format!(
-                        r#"
-                        "fixed":{{
-                           "algorithm": "ES256",
-                           "key": {{ "value": "{test_jwk_public_key}" }}
-                        }}
-                        "#
+                    let jwt_key_config = json!(
+                        {
+                            "fixed": {
+                                "algorithm": "ES256",
+                                "key": { "value": test_jwk_public_key }
+                            }
+                        }
                     );
 
                     helper_test_jwt_encode_decode(
                         &jwt_key_config,
                         jwt::Header::new(jwt::Algorithm::ES256),
-                        EncodingKey::from_ec_pem(test_jwk.key.to_pem().as_bytes()).unwrap(),
+                        EncodingKey::from_ec_pem(test_jwk.key.to_pem().as_bytes())?,
                     )
-                    .await
+                    .await?;
                 }
                 jwt::Algorithm::RS256 => {
-                    let rsa = Rsa::generate(2048).unwrap();
-                    let pkey = PKey::from_rsa(rsa).unwrap();
-                    let pub_key = String::from_utf8(pkey.public_key_to_pem().unwrap())
-                        .unwrap()
-                        .replace('\n', "");
-                    let priv_key = pkey.private_key_to_pem_pkcs8().unwrap();
-                    let jwt_key_config = format!(
-                        r#"
-                        "fixed":{{
-                           "algorithm": "RS256",
-                           "key": {{ "value": "{pub_key}" }}
-                        }}
-                        "#
+                    let rsa = Rsa::generate(2048)?;
+                    let pkey = PKey::from_rsa(rsa)?;
+                    let pub_key = String::from_utf8(pkey.public_key_to_pem()?)?.replace('\n', "");
+                    let priv_key = pkey.private_key_to_pem_pkcs8()?;
+                    let jwt_key_config = json!(
+                        {
+                            "fixed": {
+                                "algorithm": "RS256",
+                                "key": { "value": pub_key }
+                            }
+                        }
                     );
 
                     helper_test_jwt_encode_decode(
                         &jwt_key_config,
                         jwt::Header::new(jwt::Algorithm::RS256),
-                        EncodingKey::from_rsa_pem(&priv_key).unwrap(),
+                        EncodingKey::from_rsa_pem(&priv_key)?,
                     )
-                    .await
+                    .await?;
                 }
                 jwt::Algorithm::RS384 => {
-                    let rsa = Rsa::generate(3072).unwrap();
-                    let pkey = PKey::from_rsa(rsa).unwrap();
-                    let pub_key = String::from_utf8(pkey.public_key_to_pem().unwrap())
-                        .unwrap()
-                        .replace('\n', "");
-                    let priv_key = pkey.private_key_to_pem_pkcs8().unwrap();
-                    let jwt_key_config = format!(
-                        r#"
-                        "fixed":{{
-                           "algorithm": "RS384",
-                           "key": {{ "value": "{pub_key}" }}
-                        }}
-                        "#
+                    let rsa = Rsa::generate(3072)?;
+                    let pkey = PKey::from_rsa(rsa)?;
+                    let pub_key = String::from_utf8(pkey.public_key_to_pem()?)?.replace('\n', "");
+                    let priv_key = pkey.private_key_to_pem_pkcs8()?;
+                    let jwt_key_config = json!(
+                        {
+                            "fixed": {
+                                "algorithm": "RS384",
+                                "key": { "value": pub_key }
+                            }
+                        }
                     );
 
                     helper_test_jwt_encode_decode(
                         &jwt_key_config,
                         jwt::Header::new(jwt::Algorithm::RS384),
-                        EncodingKey::from_rsa_pem(&priv_key).unwrap(),
+                        EncodingKey::from_rsa_pem(&priv_key)?,
                     )
-                    .await
+                    .await?;
                 }
                 jwt::Algorithm::RS512 => {
-                    let rsa = Rsa::generate(4096).unwrap();
-                    let pkey = PKey::from_rsa(rsa).unwrap();
-                    let pub_key = String::from_utf8(pkey.public_key_to_pem().unwrap())
-                        .unwrap()
-                        .replace('\n', "");
-                    let priv_key = pkey.private_key_to_pem_pkcs8().unwrap();
-                    let jwt_key_config = format!(
-                        r#"
-                        "fixed":{{
-                           "algorithm": "RS512",
-                           "key": {{ "value": "{pub_key}" }}
-                        }}
-                        "#
+                    let rsa = Rsa::generate(4096)?;
+                    let pkey = PKey::from_rsa(rsa)?;
+                    let pub_key = String::from_utf8(pkey.public_key_to_pem()?)?.replace('\n', "");
+                    let priv_key = pkey.private_key_to_pem_pkcs8()?;
+                    let jwt_key_config = json!(
+                        {
+                            "fixed": {
+                                "algorithm": "RS512",
+                                "key": { "value": pub_key }
+                            }
+                        }
                     );
 
                     helper_test_jwt_encode_decode(
                         &jwt_key_config,
                         jwt::Header::new(jwt::Algorithm::RS512),
-                        EncodingKey::from_rsa_pem(&priv_key).unwrap(),
+                        EncodingKey::from_rsa_pem(&priv_key)?,
                     )
-                    .await
+                    .await?;
                 }
                 // TODO: Add tests for ES384, PS256, PS384, PS512, EdDSA
                 _ => {}
             }
         }
+        Ok(())
     }
 
     async fn helper_test_jwt_encode_decode(
-        jwt_key_config: &str,
+        jwt_key_config: &serde_json::Value,
         jwt_header: jwt::Header,
         encoding_key: EncodingKey,
-    ) {
+    ) -> anyhow::Result<()> {
         let hasura_claims = get_default_hasura_claims();
         let claims: Claims = get_claims(
-            &serde_json::to_value(hasura_claims.clone()).unwrap(),
+            &serde_json::to_value(hasura_claims.clone())?,
             &DEFAULT_HASURA_CLAIMS_NAMESPACE_POINTER,
+        )?;
+        let encoded_claims = encode(&jwt_header, &claims, &encoding_key)?;
+        let jwt_secret_config_json = json!(
+            {
+                "key": jwt_key_config,
+                "tokenLocation": {
+                    "type": "BearerAuthorization"
+                },
+                "claimsConfig": {
+                    "namespace": {
+                        "claimsFormat": "Json",
+                        "location": "/https:~1~1hasura.io~1jwt~1claims"
+                    }
+                }
+            }
         );
-        let encoded_claims = encode(&jwt_header, &claims, &encoding_key).unwrap();
-        let jwt_secret_config_str = format!(
-            r#"
-             {{
-               "key": {{{jwt_key_config}}},
-               "tokenLocation": {{
-                  "type": "BearerAuthorization"
-               }},
-               "claimsConfig": {{
-                  "namespace": {{
-                     "claimsFormat": "Json",
-                     "location": "/https:~1~1hasura.io~1jwt~1claims"
-                  }}
-               }}
-             }}"#
-        );
-        let jwt_config: JWTConfig = serde_json::from_str(&jwt_secret_config_str).unwrap();
+        let jwt_config: JWTConfig = serde_json::from_value(jwt_secret_config_json)?;
         let http_client = reqwest::Client::new();
         let decoded_claims =
             decode_and_parse_hasura_claims(&http_client, jwt_config, encoded_claims)
                 .await
                 .unwrap();
-        assert_eq!(hasura_claims, decoded_claims)
+        assert_eq!(hasura_claims, decoded_claims);
+        Ok(())
     }
 }
