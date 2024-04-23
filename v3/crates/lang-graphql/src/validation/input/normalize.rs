@@ -33,28 +33,41 @@ pub fn normalize<'q, 's, S: schema::SchemaContext, V: ValueSource<'q, 's, S>>(
 ) -> Result<normalized::Value<'s, S>>
 where
     's: 'q,
+    V: std::fmt::Debug,
 {
     let normalized_value = match &location_type.type_().base {
-        ast::BaseType::Named(_) => match type_info {
-            schema::InputType::Scalar(scalar) => {
-                normalize_scalar_value(schema, namespace, context, location_type, value, scalar)
-            }
-            schema::InputType::Enum(enum_info) => {
-                normalize_enum_value(schema, namespace, context, location_type, value, enum_info)
-            }
-            schema::InputType::InputObject(input_object) => {
-                let normalized_object = normalize_input_object(
+        ast::BaseType::Named(_) => {
+            // If the value is `null` and the field is nullable return `null`
+            if value.is_null() && location_type.type_().nullable {
+                return Ok(normalized::Value::SimpleValue(
+                    normalized::SimpleValue::Null,
+                ));
+            };
+            match type_info {
+                schema::InputType::Scalar(scalar) => {
+                    normalize_scalar_value(schema, namespace, context, location_type, value, scalar)
+                }
+                schema::InputType::Enum(enum_info) => normalize_enum_value(
                     schema,
                     namespace,
                     context,
                     location_type,
                     value,
-                    input_object,
-                )?;
-                // Ok(normalized::Value::Object(normalized_object))
-                Ok(normalized_object)
+                    enum_info,
+                ),
+                schema::InputType::InputObject(input_object) => {
+                    let normalized_object = normalize_input_object(
+                        schema,
+                        namespace,
+                        context,
+                        location_type,
+                        value,
+                        input_object,
+                    )?;
+                    Ok(normalized_object)
+                }
             }
-        },
+        }
         ast::BaseType::List(wrapped_type) => {
             if value.is_null() {
                 Ok(normalized::Value::SimpleValue(
@@ -179,6 +192,7 @@ fn normalize_input_object<'q, 's, S: schema::SchemaContext, V: ValueSource<'q, '
 ) -> Result<normalized::Value<'s, S>>
 where
     's: 'q,
+    V: std::fmt::Debug,
 {
     // let (normalized_object, required_field_count) = value.fold_key_values(
     let normalized_object = value.fold_key_values(

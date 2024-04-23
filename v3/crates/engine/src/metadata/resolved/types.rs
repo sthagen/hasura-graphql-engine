@@ -1,17 +1,24 @@
+use super::stages::{
+    data_connector_scalar_types, data_connector_type_mappings, graphql_config, scalar_types,
+};
+use crate::metadata::resolved::boolean_expression;
+use crate::metadata::resolved::data_connector;
 use crate::metadata::resolved::error::{BooleanExpressionError, Error};
+
 use crate::metadata::resolved::relationship::Relationship;
 use crate::metadata::resolved::subgraph::{
     mk_qualified_type_reference, Qualified, QualifiedBaseType, QualifiedTypeName,
     QualifiedTypeReference,
 };
-
 use indexmap::IndexMap;
 use lang_graphql::ast::common as ast;
 use ndc_models;
 use open_dds::data_connector::DataConnectorName;
 use open_dds::identifier;
 use open_dds::models::EnableAllOrSpecific;
-use open_dds::permissions::{Role, TypeOutputPermission, TypePermissionsV1};
+use open_dds::permissions::{
+    FieldPreset, Role, TypeOutputPermission, TypePermissionsV1, ValueExpression,
+};
 use open_dds::types::{
     self, CustomTypeName, Deprecated, FieldName, ObjectBooleanExpressionTypeV1, ObjectTypeV1,
 };
@@ -20,28 +27,31 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 
 use super::ndc_validation::{get_underlying_named_type, NDCValidationError};
-use super::stages::data_connector_scalar_types;
-use super::stages::data_connector_type_mappings;
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, derive_more::Display)]
-#[display(fmt = "Display")]
-pub struct ScalarTypeRepresentation {
-    pub graphql_type_name: Option<ast::TypeName>,
-    pub description: Option<String>,
-}
+use super::typecheck;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, derive_more::Display)]
 #[display(fmt = "Display")]
 pub struct ObjectTypeRepresentation {
     pub fields: IndexMap<FieldName, FieldDefinition>,
     pub relationships: IndexMap<ast::Name, Relationship>,
-    pub type_permissions: HashMap<Role, TypeOutputPermission>,
+    /// permissions on this type, when it is used in an output context (e.g. as
+    /// a return type of Model or Command)
+    pub type_output_permissions: HashMap<Role, TypeOutputPermission>,
+    /// permissions on this type, when it is used in an input context (e.g. in
+    /// an argument type of Model or Command)
+    pub type_input_permissions: HashMap<Role, TypeInputPermission>,
     pub global_id_fields: Vec<FieldName>,
     pub apollo_federation_config: Option<ResolvedObjectApolloFederationConfig>,
     pub graphql_output_type_name: Option<ast::TypeName>,
     pub graphql_input_type_name: Option<ast::TypeName>,
     pub description: Option<String>,
     // TODO: add graphql_output_type_kind if we support creating interfaces.
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, derive_more::Display)]
+#[display(fmt = "Display")]
+pub struct TypeInputPermission {
+    pub field_presets: HashMap<FieldName, ValueExpression>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
@@ -76,13 +86,10 @@ pub struct ObjectBooleanExpressionType {
     pub name: Qualified<CustomTypeName>,
     pub object_type: Qualified<CustomTypeName>,
     pub data_connector_name: Qualified<DataConnectorName>,
+    pub data_connector_link: data_connector::DataConnectorLink,
     pub data_connector_object_type: String,
-    pub graphql: Option<ObjectBooleanExpressionTypeGraphQlConfiguration>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct ObjectBooleanExpressionTypeGraphQlConfiguration {
-    pub type_name: ast::TypeName,
+    pub type_mappings: BTreeMap<Qualified<types::CustomTypeName>, TypeMapping>,
+    pub graphql: Option<boolean_expression::BooleanExpression>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, derive_more::Display)]
@@ -253,7 +260,8 @@ pub fn resolve_object_type(
         fields: resolved_fields,
         relationships: IndexMap::new(),
         global_id_fields: resolved_global_id_fields,
-        type_permissions: HashMap::new(),
+        type_output_permissions: HashMap::new(),
+        type_input_permissions: HashMap::new(),
         graphql_output_type_name: graphql_type_name,
         graphql_input_type_name,
         description: object_type_definition.description.clone(),
@@ -265,7 +273,7 @@ pub fn resolve_object_type(
 /// we do not want to store our types like this, but occasionally it is useful
 /// for pattern matching
 pub enum TypeRepresentation<'a> {
-    Scalar(&'a ScalarTypeRepresentation),
+    Scalar(&'a scalar_types::ScalarTypeRepresentation),
     Object(&'a ObjectTypeRepresentation),
 }
 
@@ -273,7 +281,7 @@ pub enum TypeRepresentation<'a> {
 pub fn get_type_representation<'a>(
     custom_type_name: &Qualified<CustomTypeName>,
     object_types: &'a HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
-    scalar_types: &'a HashMap<Qualified<CustomTypeName>, ScalarTypeRepresentation>,
+    scalar_types: &'a HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
 ) -> Result<TypeRepresentation<'a>, Error> {
     match object_types.get(custom_type_name) {
         Some(object_type_representation) => {
@@ -306,7 +314,7 @@ pub fn get_underlying_object_type(
 // check that `custom_type_name` exists in `scalar_types`
 pub fn get_underlying_scalar_type(
     custom_type_name: &Qualified<CustomTypeName>,
-    scalar_types: &HashMap<Qualified<CustomTypeName>, ScalarTypeRepresentation>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
 ) -> Result<Qualified<CustomTypeName>, Error> {
     scalar_types
         .get(custom_type_name)
@@ -346,11 +354,72 @@ pub fn resolve_output_type_permission(
                 }
             }
             if object_type_representation
-                .type_permissions
+                .type_output_permissions
                 .insert(type_permission.role.clone(), output.clone())
                 .is_some()
             {
                 return Err(Error::DuplicateOutputTypePermissions {
+                    type_name: type_permissions.type_name.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn resolve_input_type_permission(
+    object_type_representation: &mut ObjectTypeRepresentation,
+    type_permissions: &TypePermissionsV1,
+) -> Result<(), Error> {
+    for type_permission in &type_permissions.permissions {
+        if let Some(input) = &type_permission.input {
+            let mut resolved_field_presets = HashMap::new();
+            for FieldPreset {
+                field: field_name,
+                value,
+            } in input.field_presets.iter()
+            {
+                // check if the field exists on this type
+                match object_type_representation.fields.get(field_name) {
+                    Some(field_definition) => {
+                        // check if the value is provided typechecks
+                        match &value {
+                            ValueExpression::SessionVariable(_) => Ok(()),
+                            ValueExpression::Literal(json_value) => {
+                                typecheck::typecheck_qualified_type_reference(
+                                    &field_definition.field_type,
+                                    json_value,
+                                )
+                            }
+                        }
+                        .map_err(|type_error| {
+                            Error::FieldPresetTypeError {
+                                field_name: field_name.clone(),
+                                type_name: type_permissions.type_name.clone(),
+                                type_error,
+                            }
+                        })?;
+                    }
+                    None => {
+                        return Err(Error::UnknownFieldInInputPermissionsDefinition {
+                            field_name: field_name.clone(),
+                            type_name: type_permissions.type_name.clone(),
+                        });
+                    }
+                }
+                resolved_field_presets.insert(field_name.clone(), value.clone());
+            }
+            if object_type_representation
+                .type_input_permissions
+                .insert(
+                    type_permission.role.clone(),
+                    TypeInputPermission {
+                        field_presets: resolved_field_presets,
+                    },
+                )
+                .is_some()
+            {
+                return Err(Error::DuplicateInputTypePermissions {
                     type_name: type_permissions.type_name.clone(),
                 });
             }
@@ -364,9 +433,11 @@ pub(crate) fn resolve_object_boolean_expression_type(
     object_boolean_expression: &ObjectBooleanExpressionTypeV1,
     subgraph: &str,
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
-    object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
     data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
+    object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
     existing_graphql_types: &mut HashSet<ast::TypeName>,
+    graphql_config: &graphql_config::GraphqlConfig,
 ) -> Result<ObjectBooleanExpressionType, Error> {
     // name of the boolean expression
     let qualified_name = Qualified::new(
@@ -475,26 +546,88 @@ pub(crate) fn resolve_object_boolean_expression_type(
                 });
     }
 
+    let boolean_expression_type =
+        Qualified::new(subgraph.to_string(), object_boolean_expression.name.clone());
+
+    let object_type = Qualified::new(
+        subgraph.to_string(),
+        object_boolean_expression.object_type.clone(),
+    );
+
+    let data_connector_name = Qualified::new(
+        subgraph.to_string(),
+        object_boolean_expression.data_connector_name.clone(),
+    );
+
+    // Collect type mappings.
+    let mut type_mappings = BTreeMap::new();
+
+    let type_mapping_to_collect = TypeMappingToCollect {
+        type_name: &object_type,
+        ndc_object_type_name: object_boolean_expression
+            .data_connector_object_type
+            .as_str(),
+    };
+    collect_type_mapping_for_source(
+        &type_mapping_to_collect,
+        data_connector_type_mappings,
+        &qualified_data_connector_name,
+        object_types,
+        scalar_types,
+        &mut type_mappings,
+    )
+    .map_err(|error| {
+        Error::from(
+            BooleanExpressionError::BooleanExpressionTypeMappingCollectionError {
+                boolean_expression_type: boolean_expression_type.clone(),
+                error,
+            },
+        )
+    })?;
+
     // validate graphql config
-    let graphql_config = object_boolean_expression
+    let boolean_expression_graphql_config = object_boolean_expression
         .graphql
         .as_ref()
-        .map(|graphql_config| {
+        .map(|object_boolean_graphql_config| {
             let graphql_type_name =
-                mk_name(graphql_config.type_name.0.as_ref()).map(ast::TypeName)?;
+                mk_name(object_boolean_graphql_config.type_name.0.as_ref()).map(ast::TypeName)?;
+
             store_new_graphql_type(existing_graphql_types, Some(&graphql_type_name))?;
-            Ok::<_, Error>(ObjectBooleanExpressionTypeGraphQlConfiguration {
-                type_name: graphql_type_name,
-            })
+
+            let type_mapping = type_mappings
+                .get(&Qualified::new(
+                    subgraph.to_string(),
+                    object_boolean_expression.object_type.clone(),
+                ))
+                .unwrap();
+
+            boolean_expression::resolve_boolean_expression(
+                &boolean_expression_type,
+                &data_connector_name,
+                graphql_type_name.clone(),
+                subgraph,
+                data_connectors,
+                type_mapping,
+                graphql_config,
+            )
         })
         .transpose()?;
 
+    let data_connector_link = data_connector::DataConnectorLink::new(
+        data_connector_name,
+        data_connector_context.inner.url.clone(),
+        data_connector_context.inner.headers,
+    )?;
+
     let resolved_boolean_expression = ObjectBooleanExpressionType {
         name: qualified_name.clone(),
+        type_mappings,
         object_type: qualified_object_type_name.clone(),
         data_connector_name: qualified_data_connector_name,
+        data_connector_link,
         data_connector_object_type: object_boolean_expression.data_connector_object_type.clone(),
-        graphql: graphql_config,
+        graphql: boolean_expression_graphql_config,
     };
     Ok(resolved_boolean_expression)
 }
@@ -546,7 +679,7 @@ pub(crate) fn collect_type_mapping_for_source(
     data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
     data_connector_name: &Qualified<DataConnectorName>,
     object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
-    scalar_types: &HashMap<Qualified<CustomTypeName>, ScalarTypeRepresentation>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
     collected_mappings: &mut BTreeMap<Qualified<CustomTypeName>, TypeMapping>,
 ) -> Result<(), TypeMappingCollectionError> {
     let type_mapping = data_connector_type_mappings

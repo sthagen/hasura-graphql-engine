@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use thiserror::Error;
 
 use crate::metadata::resolved::argument::ArgumentMappingError;
@@ -278,6 +277,7 @@ pub enum Error {
         filter_expression_data_connector_object_type: String,
     },
     // Permission errors
+    // Type Output Permissions
     #[error("unsupported type in output type permissions definition: {type_name:}; only object types are supported")]
     UnsupportedTypeInOutputPermissions { type_name: CustomTypeName },
     #[error("multiple output type permissions have been defined for type: {type_name:}")]
@@ -291,6 +291,25 @@ pub enum Error {
         field_name: FieldName,
         type_name: CustomTypeName,
     },
+    // Type Input Permissions
+    #[error("unsupported type in input type permissions definition: {type_name:}; only object types are supported")]
+    UnsupportedTypeInInputPermissions { type_name: CustomTypeName },
+    #[error("unknown field '{field_name:}' used in output permissions of type '{type_name:}'")]
+    UnknownFieldInInputPermissionsDefinition {
+        field_name: FieldName,
+        type_name: CustomTypeName,
+    },
+    #[error("multiple input type permissions have been defined for type: {type_name:}")]
+    DuplicateInputTypePermissions { type_name: CustomTypeName },
+    #[error(
+        "Type error in field preset of {field_name:}, for input type permissions definition of type {type_name:}: {type_error:}"
+    )]
+    FieldPresetTypeError {
+        field_name: FieldName,
+        type_name: CustomTypeName,
+        type_error: typecheck::TypecheckError,
+    },
+
     #[error("unknown model used in model select permissions definition: {model_name:}")]
     UnknownModelInModelSelectPermissions { model_name: Qualified<ModelName> },
     #[error("multiple select permissions defined for model: {model_name:}")]
@@ -586,6 +605,11 @@ pub enum BooleanExpressionError {
         data_connector_object_type: String,
         data_connector: Qualified<DataConnectorName>,
     },
+    #[error("{error:} in boolean expression type {boolean_expression_type:}")]
+    BooleanExpressionTypeMappingCollectionError {
+        boolean_expression_type: Qualified<CustomTypeName>,
+        error: TypeMappingCollectionError,
+    },
     #[error("the following object boolean expression type is defined more than once: {name:}")]
     DuplicateObjectBooleanExpressionTypeDefinition { name: Qualified<CustomTypeName> },
     #[error("unknown object boolean expression type {name:} is used in model {model:}")]
@@ -700,7 +724,7 @@ pub enum TypeMappingValidationError {
     },
     #[error(
         "the following fields in field mappings of type {type_name:} are unknown: {}",
-        comma_separate_field_names(field_names)
+        field_names.join(", ")
     )]
     UnknownSourceFields {
         type_name: Qualified<CustomTypeName>,
@@ -745,8 +769,4 @@ pub enum TypeMappingValidationError {
     },
     #[error("ndc validation error: {0}")]
     NDCValidationError(NDCValidationError),
-}
-
-fn comma_separate_field_names(argument_names: &[FieldName]) -> String {
-    argument_names.iter().map(|a| a.0.as_str()).join(", ")
 }

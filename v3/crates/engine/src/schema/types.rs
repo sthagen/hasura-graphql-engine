@@ -9,14 +9,21 @@ use std::{
     fmt::Display,
 };
 
-use open_dds::{arguments::ArgumentName, commands, models, types};
+use open_dds::{
+    arguments::ArgumentName,
+    commands, models,
+    types::{self},
+};
 
 use crate::{
     metadata::resolved::{
         self,
         data_connector::DataConnectorLink,
         permission::ValueExpression,
-        subgraph::{Qualified, QualifiedTypeReference},
+        subgraph::{
+            deserialize_non_string_key_btreemap, serialize_non_string_key_btreemap, Qualified,
+            QualifiedTypeReference,
+        },
         types::NdcColumnForComparison,
     },
     schema::types::resolved::{
@@ -193,10 +200,6 @@ pub enum ModelInputAnnotation {
         argument_type: QualifiedTypeReference,
         ndc_table_argument: Option<String>,
     },
-    ModelFilterExpression,
-    ModelFilterArgument {
-        field: ModelFilterArgument,
-    },
     ComparisonOperation {
         operator: String,
     },
@@ -219,6 +222,13 @@ pub enum ModelInputAnnotation {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Display)]
+/// Annotations of the input types/fields related to boolean expressions.
+pub enum BooleanExpressionAnnotation {
+    BooleanExpression,
+    BooleanExpressionArgument { field: ModelFilterArgument },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Display)]
 /// Annotations for Relay input arguments/types.
 pub enum RelayInputAnnotation {
     NodeFieldIdArgument,
@@ -238,6 +248,7 @@ pub enum InputAnnotation {
         field_name: types::FieldName,
         field_type: QualifiedTypeReference,
     },
+    BooleanExpression(BooleanExpressionAnnotation),
     CommandArgument {
         argument_type: QualifiedTypeReference,
         ndc_func_proc_argument: Option<String>,
@@ -266,13 +277,28 @@ pub enum Annotation {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 /// Preset arguments for models or commands
 pub struct ArgumentPresets {
-    pub argument_presets: BTreeMap<ArgumentName, (QualifiedTypeReference, ValueExpression)>,
+    #[serde(
+        serialize_with = "serialize_non_string_key_btreemap",
+        deserialize_with = "deserialize_non_string_key_btreemap"
+    )]
+    pub argument_presets: BTreeMap<ArgumentNameAndPath, (QualifiedTypeReference, ValueExpression)>,
 }
 
 impl Display for ArgumentPresets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.argument_presets, f)
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// Argument name with optional field path, if part of the argument has to be
+/// preset
+pub struct ArgumentNameAndPath {
+    /// Name of the ndc function/procedure argument
+    pub ndc_argument_name: Option<String>,
+    /// Optional path of field names to traverse to get to a field, in case of
+    /// complex input object types
+    pub field_path: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Display)]
@@ -319,14 +345,14 @@ pub enum TypeId {
         gds_type_name: Qualified<types::CustomTypeName>,
         graphql_type_name: ast::TypeName,
     },
+    InputObjectBooleanExpressionType {
+        gds_type_name: Qualified<types::CustomTypeName>,
+        graphql_type_name: ast::TypeName,
+    },
     NodeRoot,
     ModelArgumentsInput {
         model_name: Qualified<models::ModelName>,
         type_name: ast::TypeName,
-    },
-    ModelBooleanExpression {
-        model_name: Qualified<models::ModelName>,
-        graphql_type_name: ast::TypeName,
     },
     ModelOrderByExpression {
         model_name: Qualified<models::ModelName>,
@@ -374,7 +400,7 @@ impl TypeId {
             } => graphql_type_name.clone(),
             TypeId::NodeRoot => ast::TypeName(mk_name!("Node")),
             TypeId::ModelArgumentsInput { type_name, .. } => type_name.clone(),
-            TypeId::ModelBooleanExpression {
+            TypeId::InputObjectBooleanExpressionType {
                 graphql_type_name, ..
             } => graphql_type_name.clone(),
             TypeId::ScalarTypeComparisonExpression {

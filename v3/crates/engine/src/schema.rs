@@ -1,5 +1,6 @@
 use lang_graphql::schema as gql_schema;
 use lang_graphql::{ast::common as ast, mk_name};
+use open_dds::types::FieldName;
 use open_dds::{
     commands::CommandName,
     models::ModelName,
@@ -19,6 +20,7 @@ use crate::metadata::{
 use self::types::{PossibleApolloFederationTypes, RootFieldAnnotation};
 
 pub mod apollo_federation;
+pub mod boolean_expression;
 pub mod commands;
 pub mod model_arguments;
 pub mod model_filter;
@@ -105,6 +107,15 @@ impl gql_schema::SchemaContext for GDS {
                 gds_type_name,
                 graphql_type_name,
             ),
+            types::TypeId::InputObjectBooleanExpressionType {
+                gds_type_name,
+                graphql_type_name,
+            } => boolean_expression::build_boolean_expression_input_schema(
+                self,
+                builder,
+                graphql_type_name,
+                gds_type_name,
+            ),
             types::TypeId::NodeRoot => Ok(gql_schema::TypeInfo::Interface(
                 relay::node_interface_schema(builder, self)?,
             )),
@@ -113,15 +124,6 @@ impl gql_schema::SchemaContext for GDS {
                 type_name,
             } => model_arguments::build_model_arguments_input_schema(
                 self, builder, type_name, model_name,
-            ),
-            types::TypeId::ModelBooleanExpression {
-                model_name,
-                graphql_type_name,
-            } => model_filter::build_model_filter_expression_input_schema(
-                self,
-                builder,
-                graphql_type_name,
-                model_name,
             ),
             types::TypeId::ScalarTypeComparisonExpression {
                 scalar_type_name: _,
@@ -223,6 +225,10 @@ pub enum Error {
         "internal error while building schema, filter_expression for model not found: {model_name}"
     )]
     InternalModelFilterExpressionNotFound { model_name: Qualified<ModelName> },
+    #[error("internal error while building schema, boolean expression not found: {type_name}")]
+    InternalBooleanExpressionNotFound {
+        type_name: Qualified<CustomTypeName>,
+    },
     #[error(
         "Conflicting argument names {argument_name} for field {field_name} of type {type_name}"
     )]
@@ -276,6 +282,12 @@ pub enum Error {
     },
     #[error("relationships to procedure based commands are not supported")]
     RelationshipsToProcedureBasedCommandsAreNotSupported,
+
+    #[error("internal error: type mapping or field mapping not found for type {type_name:} and field {field_name:}")]
+    InternalMappingNotFound {
+        type_name: Qualified<CustomTypeName>,
+        field_name: FieldName,
+    },
 }
 
 impl From<ast::InvalidGraphQlName> for Error {

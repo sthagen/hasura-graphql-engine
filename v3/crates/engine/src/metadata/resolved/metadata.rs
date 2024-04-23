@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use hasura_authn_core::Role;
 use indexmap::IndexMap;
 use lang_graphql::ast::common as ast;
 use serde::{Deserialize, Serialize};
@@ -8,31 +9,32 @@ use open_dds::{commands::CommandName, models::ModelName, types::CustomTypeName};
 
 use crate::metadata::resolved::command;
 
+use super::types::resolve_input_type_permission;
 use crate::metadata::resolved::error::{BooleanExpressionError, Error};
 use crate::metadata::resolved::model::{
     resolve_model, resolve_model_graphql_api, resolve_model_select_permissions,
     resolve_model_source, Model,
 };
 use crate::metadata::resolved::relationship::resolve_relationship;
+use crate::metadata::resolved::stages::{
+    data_connector_scalar_types, data_connector_type_mappings, graphql_config, scalar_types,
+};
 use crate::metadata::resolved::subgraph::Qualified;
 use crate::metadata::resolved::types::{
     resolve_object_boolean_expression_type, resolve_output_type_permission,
-    ObjectBooleanExpressionType, ObjectTypeRepresentation, ScalarTypeRepresentation,
-};
-
-use crate::metadata::resolved::stages::{
-    data_connector_scalar_types, data_connector_type_mappings, graphql_config,
+    ObjectBooleanExpressionType, ObjectTypeRepresentation,
 };
 
 /// Resolved and validated metadata for a project. Used internally in the v3 server.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Metadata {
     pub object_types: HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
-    pub scalar_types: HashMap<Qualified<CustomTypeName>, ScalarTypeRepresentation>,
+    pub scalar_types: HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
     pub models: IndexMap<Qualified<ModelName>, Model>,
     pub commands: IndexMap<Qualified<CommandName>, command::Command>,
     pub boolean_expression_types: HashMap<Qualified<CustomTypeName>, ObjectBooleanExpressionType>,
     pub graphql_config: graphql_config::GlobalGraphqlConfig,
+    pub roles: Vec<Role>,
 }
 
 /*******************
@@ -49,7 +51,7 @@ pub fn resolve_metadata(
     >,
     data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
     object_types: HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
-    scalar_types: &HashMap<Qualified<CustomTypeName>, ScalarTypeRepresentation>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
 ) -> Result<Metadata, Error> {
     // resolve type permissions
@@ -61,7 +63,9 @@ pub fn resolve_metadata(
         data_connectors,
         data_connector_type_mappings,
         &object_types,
+        scalar_types,
         &mut existing_graphql_types,
+        graphql_config,
     )?;
 
     // resolve models
@@ -130,6 +134,8 @@ pub fn resolve_metadata(
         &mut models,
     )?;
 
+    let roles = collect_all_roles(&object_types, &models, &commands);
+
     Ok(Metadata {
         scalar_types: scalar_types.clone(),
         object_types,
@@ -137,7 +143,40 @@ pub fn resolve_metadata(
         commands,
         boolean_expression_types,
         graphql_config: graphql_config.global.clone(),
+        roles,
     })
+}
+
+/// Gather all roles from various permission objects.
+fn collect_all_roles(
+    object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
+    models: &IndexMap<Qualified<ModelName>, Model>,
+    commands: &IndexMap<Qualified<CommandName>, command::Command>,
+) -> Vec<Role> {
+    let mut roles = Vec::new();
+    for object_type in object_types.values() {
+        for role in object_type.type_output_permissions.keys() {
+            roles.push(role.clone());
+        }
+        for role in object_type.type_input_permissions.keys() {
+            roles.push(role.clone());
+        }
+    }
+    for model in models.values() {
+        if let Some(select_permissions) = &model.select_permissions {
+            for role in select_permissions.keys() {
+                roles.push(role.clone());
+            }
+        }
+    }
+    for command in commands.values() {
+        if let Some(command_permissions) = &command.permissions {
+            for role in command_permissions.keys() {
+                roles.push(role.clone());
+            }
+        }
+    }
+    roles
 }
 
 /// resolve commands
@@ -146,7 +185,7 @@ fn resolve_commands(
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
     data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
     object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
-    scalar_types: &HashMap<Qualified<CustomTypeName>, ScalarTypeRepresentation>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
 ) -> Result<IndexMap<Qualified<CommandName>, command::Command>, Error> {
     let mut commands: IndexMap<Qualified<CommandName>, command::Command> = IndexMap::new();
     for open_dds::accessor::QualifiedObject {
@@ -189,13 +228,11 @@ fn resolve_type_permissions(
     // resolve type permissions
     for open_dds::accessor::QualifiedObject {
         subgraph,
-        object: output_type_permission,
+        object: type_permission,
     } in &metadata_accessor.type_permissions
     {
-        let qualified_type_name = Qualified::new(
-            subgraph.to_string(),
-            output_type_permission.type_name.to_owned(),
-        );
+        let qualified_type_name =
+            Qualified::new(subgraph.to_string(), type_permission.type_name.to_owned());
         match object_types.get_mut(&qualified_type_name) {
             None => {
                 return Err(Error::UnknownTypeInOutputPermissionsDefinition {
@@ -203,7 +240,8 @@ fn resolve_type_permissions(
                 })
             }
             Some(object_type) => {
-                resolve_output_type_permission(object_type, output_type_permission)?;
+                resolve_output_type_permission(object_type, type_permission)?;
+                resolve_input_type_permission(object_type, type_permission)?;
             }
         }
     }
@@ -216,7 +254,9 @@ fn resolve_boolean_expression_types(
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
     data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
     object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
     existing_graphql_types: &mut HashSet<ast::TypeName>,
+    graphql_config: &graphql_config::GraphqlConfig,
 ) -> Result<HashMap<Qualified<CustomTypeName>, ObjectBooleanExpressionType>, Error> {
     let mut boolean_expression_types = HashMap::new();
     for open_dds::accessor::QualifiedObject {
@@ -228,9 +268,11 @@ fn resolve_boolean_expression_types(
             boolean_expression_type,
             subgraph,
             data_connectors,
-            object_types,
             data_connector_type_mappings,
+            object_types,
+            scalar_types,
             existing_graphql_types,
+            graphql_config,
         )?;
         if let Some(existing) = boolean_expression_types.insert(
             resolved_boolean_expression.name.clone(),
@@ -252,7 +294,7 @@ fn resolve_models(
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
     data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
     object_types: &HashMap<Qualified<CustomTypeName>, ObjectTypeRepresentation>,
-    scalar_types: &HashMap<Qualified<CustomTypeName>, ScalarTypeRepresentation>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
     existing_graphql_types: &mut HashSet<ast::TypeName>,
     global_id_enabled_types: &mut HashMap<Qualified<CustomTypeName>, Vec<Qualified<ModelName>>>,
     apollo_federation_entity_enabled_types: &mut HashMap<
@@ -311,7 +353,6 @@ fn resolve_models(
             resolve_model_graphql_api(
                 model_graphql_definition,
                 &mut resolved_model,
-                subgraph,
                 existing_graphql_types,
                 data_connectors,
                 &model.description,
@@ -362,6 +403,7 @@ fn resolve_relationships(
             data_connectors,
             object_representation,
         )?;
+
         if object_representation
             .relationships
             .insert(
