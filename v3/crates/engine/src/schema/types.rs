@@ -18,8 +18,8 @@ use open_dds::{
 use crate::{
     metadata::resolved::{
         self,
-        data_connector::DataConnectorLink,
         permission::ValueExpression,
+        stages::data_connectors::DataConnectorLink,
         subgraph::{
             deserialize_non_string_key_btreemap, serialize_non_string_key_btreemap, Qualified,
             QualifiedTypeReference,
@@ -28,7 +28,7 @@ use crate::{
     },
     schema::types::resolved::{
         subgraph::{deserialize_qualified_btreemap, serialize_qualified_btreemap},
-        types::TypeMapping,
+        TypeMapping,
     },
     utils::HashMapWithJsonKey,
 };

@@ -1,8 +1,8 @@
 use super::permission::{resolve_value_expression, ValueExpression};
 use super::relationship::RelationshipTarget;
 use super::stages::{
-    data_connector_scalar_types, data_connector_type_mappings, graphql_config, scalar_types,
-    type_permissions,
+    data_connector_scalar_types, data_connector_type_mappings, data_connectors, graphql_config,
+    scalar_types, type_permissions,
 };
 use super::typecheck;
 use super::types::{
@@ -11,8 +11,6 @@ use super::types::{
 };
 use crate::metadata::resolved::argument::get_argument_mappings;
 
-use crate::metadata::resolved::data_connector;
-use crate::metadata::resolved::data_connector::DataConnectorLink;
 use crate::metadata::resolved::error::{
     BooleanExpressionError, Error, GraphqlConfigError, RelationshipError,
 };
@@ -22,8 +20,8 @@ use crate::metadata::resolved::subgraph::{
     serialize_qualified_btreemap, ArgumentInfo, Qualified, QualifiedBaseType,
     QualifiedTypeReference,
 };
+use crate::metadata::resolved::types::mk_name;
 use crate::metadata::resolved::types::store_new_graphql_type;
-use crate::metadata::resolved::types::{mk_name, TypeMapping};
 use crate::schema::types::output_type::relationship::{
     ModelTargetSource, PredicateRelationshipAnnotation,
 };
@@ -106,13 +104,14 @@ pub struct ModelGraphQlApi {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ModelSource {
-    pub data_connector: DataConnectorLink,
+    pub data_connector: data_connectors::DataConnectorLink,
     pub collection: String,
     #[serde(
         serialize_with = "serialize_qualified_btreemap",
         deserialize_with = "deserialize_qualified_btreemap"
     )]
-    pub type_mappings: BTreeMap<Qualified<CustomTypeName>, TypeMapping>,
+    pub type_mappings:
+        BTreeMap<Qualified<CustomTypeName>, data_connector_type_mappings::TypeMapping>,
     pub argument_mappings: HashMap<ArgumentName, String>,
 }
 
@@ -519,14 +518,14 @@ fn resolve_model_predicate(
             // TODO: resolve the "in" operator too (ndc_models::BinaryArrayComparisonOperator)
             if let Some(model_source) = &model.source {
                 // Get field mappings of model data type
-                let TypeMapping::Object { field_mappings, .. } = model_source
-                    .type_mappings
-                    .get(&model.data_type)
-                    .ok_or(Error::TypeMappingRequired {
-                        model_name: model.name.clone(),
-                        type_name: model.data_type.clone(),
-                        data_connector: model_source.data_connector.name.clone(),
-                    })?;
+                let data_connector_type_mappings::TypeMapping::Object { field_mappings, .. } =
+                    model_source.type_mappings.get(&model.data_type).ok_or(
+                        Error::TypeMappingRequired {
+                            model_name: model.name.clone(),
+                            type_name: model.data_type.clone(),
+                            data_connector: model_source.data_connector.name.clone(),
+                        },
+                    )?;
 
                 // Determine field_mapping for the predicate field
                 let field_mapping = field_mappings.get(field).ok_or_else(|| {
@@ -551,12 +550,11 @@ fn resolve_model_predicate(
 
                 // Get scalar type info from the data connector
                 let (_, scalar_type_info) =
-                    data_connector::get_simple_scalar(field_ndc_type.clone(), scalars).ok_or_else(
-                        || Error::UnsupportedFieldInSelectPermissionsPredicate {
+                    data_connector_scalar_types::get_simple_scalar(field_ndc_type.clone(), scalars)
+                        .ok_or_else(|| Error::UnsupportedFieldInSelectPermissionsPredicate {
                             field_name: field.clone(),
                             model_name: model.name.clone(),
-                        },
-                    )?;
+                        })?;
 
                 let (resolved_operator, argument_type) = resolve_binary_operator(
                     operator,
@@ -584,14 +582,14 @@ fn resolve_model_predicate(
         permissions::ModelPredicate::FieldIsNull(FieldIsNullPredicate { field }) => {
             if let Some(model_source) = &model.source {
                 // Get field mappings of model data type
-                let TypeMapping::Object { field_mappings, .. } = model_source
-                    .type_mappings
-                    .get(&model.data_type)
-                    .ok_or(Error::TypeMappingRequired {
-                        model_name: model.name.clone(),
-                        type_name: model.data_type.clone(),
-                        data_connector: model_source.data_connector.name.clone(),
-                    })?;
+                let data_connector_type_mappings::TypeMapping::Object { field_mappings, .. } =
+                    model_source.type_mappings.get(&model.data_type).ok_or(
+                        Error::TypeMappingRequired {
+                            model_name: model.name.clone(),
+                            type_name: model.data_type.clone(),
+                            data_connector: model_source.data_connector.name.clone(),
+                        },
+                    )?;
                 // Determine field_mapping for the predicate field
                 let field_mapping = field_mappings.get(field).ok_or_else(|| {
                     Error::UnknownFieldInSelectPermissionsDefinition {
@@ -852,7 +850,7 @@ pub(crate) fn get_ndc_column_for_comparison<F: Fn() -> String>(
     comparison_location: F,
 ) -> Result<NdcColumnForComparison, Error> {
     // Get field mappings of model data type
-    let TypeMapping::Object { field_mappings, .. } = model_source
+    let data_connector_type_mappings::TypeMapping::Object { field_mappings, .. } = model_source
         .type_mappings
         .get(model_data_type)
         .ok_or(Error::TypeMappingRequired {
@@ -885,13 +883,12 @@ pub(crate) fn get_ndc_column_for_comparison<F: Fn() -> String>(
         .scalars;
     // Determine whether the ndc type is a simple scalar and get scalar type info
     let (_field_ndc_type_scalar, scalar_type_info) =
-        data_connector::get_simple_scalar(field_ndc_type.clone(), scalars).ok_or_else(|| {
-            Error::UncomparableNonScalarFieldType {
+        data_connector_scalar_types::get_simple_scalar(field_ndc_type.clone(), scalars)
+            .ok_or_else(|| Error::UncomparableNonScalarFieldType {
                 comparison_location: comparison_location(),
                 field_name: field.clone(),
                 model_name: model_name.clone(),
-            }
-        })?;
+            })?;
 
     let equal_operator = match scalar_type_info
         .comparison_operators
@@ -1009,14 +1006,16 @@ pub fn resolve_model_graphql_api(
                 )?;
                 order_by_expression_type_name
                     .map(|order_by_type_name| {
-                        let TypeMapping::Object { field_mappings, .. } = model_source
-                            .type_mappings
-                            .get(&model.data_type)
-                            .ok_or(Error::TypeMappingRequired {
+                        let data_connector_type_mappings::TypeMapping::Object {
+                            field_mappings,
+                            ..
+                        } = model_source.type_mappings.get(&model.data_type).ok_or(
+                            Error::TypeMappingRequired {
                                 model_name: model_name.clone(),
                                 type_name: model.data_type.clone(),
                                 data_connector: model_source.data_connector.name.clone(),
-                            })?;
+                            },
+                        )?;
 
                         let mut order_by_fields = HashMap::new();
                         for (field_name, field_mapping) in field_mappings.iter() {
@@ -1219,7 +1218,7 @@ pub fn resolve_model_source(
     }
 
     let resolved_model_source = ModelSource {
-        data_connector: DataConnectorLink::new(
+        data_connector: data_connectors::DataConnectorLink::new(
             qualified_data_connector_name,
             data_connector_context.inner.url.clone(),
             data_connector_context.inner.headers,

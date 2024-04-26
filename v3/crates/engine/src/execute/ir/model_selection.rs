@@ -21,7 +21,7 @@ use crate::schema::GDS;
 #[derive(Debug, Serialize)]
 pub struct ModelSelection<'s> {
     // The data connector backing this model.
-    pub data_connector: &'s resolved::data_connector::DataConnectorLink,
+    pub data_connector: &'s resolved::stages::data_connectors::DataConnectorLink,
 
     // Source collection in the data connector for this model
     pub(crate) collection: &'s String,
@@ -87,7 +87,7 @@ pub(crate) fn model_selection_ir<'s>(
         .type_mappings
         .get(data_type)
         .map(|type_mapping| {
-            let resolved::types::TypeMapping::Object { field_mappings, .. } = type_mapping;
+            let resolved::TypeMapping::Object { field_mappings, .. } = type_mapping;
             field_mappings
         })
         .ok_or_else(|| error::InternalEngineError::InternalGeneric {

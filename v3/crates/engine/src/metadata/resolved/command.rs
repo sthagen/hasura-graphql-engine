@@ -1,16 +1,18 @@
-use super::stages::{data_connector_scalar_types, scalar_types, type_permissions};
+use super::stages::{
+    data_connector_scalar_types, data_connector_type_mappings, data_connectors, scalar_types,
+    type_permissions,
+};
 use crate::metadata::resolved::argument::get_argument_mappings;
-use crate::metadata::resolved::data_connector::DataConnectorLink;
 use crate::metadata::resolved::error::Error;
 use crate::metadata::resolved::ndc_validation;
 use crate::metadata::resolved::subgraph::{
     deserialize_qualified_btreemap, mk_qualified_type_reference, serialize_qualified_btreemap,
     ArgumentInfo, Qualified, QualifiedTypeReference,
 };
+use crate::metadata::resolved::types::mk_name;
 use crate::metadata::resolved::types::{
     get_type_representation, object_type_exists, unwrap_custom_type_name,
 };
-use crate::metadata::resolved::types::{mk_name, TypeMapping};
 use indexmap::IndexMap;
 use lang_graphql::ast::common as ast;
 use open_dds::arguments::ArgumentName;
@@ -24,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 use super::permission::{resolve_value_expression, ValueExpression};
-use super::stages::data_connector_type_mappings;
 use super::typecheck;
 use super::types::{
     collect_type_mapping_for_source, TypeMappingCollectionError, TypeMappingToCollect,
@@ -39,13 +40,14 @@ pub struct CommandGraphQlApi {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct CommandSource {
-    pub data_connector: DataConnectorLink,
+    pub data_connector: data_connectors::DataConnectorLink,
     pub source: DataConnectorCommand,
     #[serde(
         serialize_with = "serialize_qualified_btreemap",
         deserialize_with = "deserialize_qualified_btreemap"
     )]
-    pub type_mappings: BTreeMap<Qualified<CustomTypeName>, TypeMapping>,
+    pub type_mappings:
+        BTreeMap<Qualified<CustomTypeName>, data_connector_type_mappings::TypeMapping>,
     pub argument_mappings: HashMap<ArgumentName, String>,
 }
 
@@ -292,7 +294,7 @@ pub fn resolve_command_source(
     }
 
     command.source = Some(CommandSource {
-        data_connector: DataConnectorLink::new(
+        data_connector: data_connectors::DataConnectorLink::new(
             qualified_data_connector_name,
             data_connector_context.inner.url.clone(),
             data_connector_context.inner.headers,

@@ -39,12 +39,12 @@ pub struct FilterRelationshipAnnotation {
     pub relationship_name: RelationshipName,
     pub relationship_type: RelationshipType,
     pub source_type: Qualified<CustomTypeName>,
-    pub source_data_connector: resolved::data_connector::DataConnectorLink,
+    pub source_data_connector: resolved::stages::data_connectors::DataConnectorLink,
     #[serde(
         serialize_with = "serialize_qualified_btreemap",
         deserialize_with = "deserialize_qualified_btreemap"
     )]
-    pub source_type_mappings: BTreeMap<Qualified<CustomTypeName>, resolved::types::TypeMapping>,
+    pub source_type_mappings: BTreeMap<Qualified<CustomTypeName>, resolved::TypeMapping>,
     pub target_source: ModelTargetSource,
     pub target_type: Qualified<CustomTypeName>,
     pub target_model_name: Qualified<ModelName>,
@@ -56,12 +56,12 @@ pub struct OrderByRelationshipAnnotation {
     pub relationship_name: RelationshipName,
     pub relationship_type: RelationshipType,
     pub source_type: Qualified<CustomTypeName>,
-    pub source_data_connector: resolved::data_connector::DataConnectorLink,
+    pub source_data_connector: resolved::stages::data_connectors::DataConnectorLink,
     #[serde(
         serialize_with = "serialize_qualified_btreemap",
         deserialize_with = "deserialize_qualified_btreemap"
     )]
-    pub source_type_mappings: BTreeMap<Qualified<CustomTypeName>, resolved::types::TypeMapping>,
+    pub source_type_mappings: BTreeMap<Qualified<CustomTypeName>, resolved::TypeMapping>,
     pub target_source: ModelTargetSource,
     pub target_type: Qualified<CustomTypeName>,
     pub target_model_name: Qualified<ModelName>,
@@ -73,12 +73,12 @@ pub struct PredicateRelationshipAnnotation {
     pub relationship_name: RelationshipName,
     pub relationship_type: RelationshipType,
     pub source_type: Qualified<CustomTypeName>,
-    pub source_data_connector: resolved::data_connector::DataConnectorLink,
+    pub source_data_connector: resolved::stages::data_connectors::DataConnectorLink,
     #[serde(
         serialize_with = "serialize_qualified_btreemap",
         deserialize_with = "deserialize_qualified_btreemap"
     )]
-    pub source_type_mappings: BTreeMap<Qualified<CustomTypeName>, resolved::types::TypeMapping>,
+    pub source_type_mappings: BTreeMap<Qualified<CustomTypeName>, resolved::TypeMapping>,
     pub target_source: ModelTargetSource,
     pub target_type: Qualified<CustomTypeName>,
     pub target_model_name: Qualified<ModelName>,

@@ -1,14 +1,9 @@
-use super::stages::data_connector_scalar_types;
-
-use crate::metadata::resolved::data_connector;
+use super::stages::{data_connector_scalar_types, data_connector_type_mappings, graphql_config};
 
 use crate::metadata::resolved::error::{BooleanExpressionError, Error, GraphqlConfigError};
 use crate::metadata::resolved::model;
 
-use crate::metadata::resolved::stages::graphql_config::GraphqlConfig;
 use crate::metadata::resolved::subgraph::{Qualified, QualifiedTypeReference};
-
-use crate::metadata::resolved::types::TypeMapping;
 
 use lang_graphql::ast::common::{self as ast};
 use ndc_models;
@@ -52,8 +47,8 @@ pub fn resolve_boolean_expression(
     where_type_name: ast::TypeName,
     subgraph: &str,
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
-    type_mappings: &TypeMapping,
-    graphql_config: &GraphqlConfig,
+    type_mappings: &data_connector_type_mappings::TypeMapping,
+    graphql_config: &graphql_config::GraphqlConfig,
 ) -> Result<BooleanExpression, Error> {
     let mut scalar_fields = HashMap::new();
 
@@ -69,7 +64,7 @@ pub fn resolve_boolean_expression(
         })?
         .scalars;
 
-    let TypeMapping::Object { field_mappings, .. } = type_mappings;
+    let data_connector_type_mappings::TypeMapping::Object { field_mappings, .. } = type_mappings;
 
     let filter_graphql_config = graphql_config
         .query
@@ -82,7 +77,10 @@ pub fn resolve_boolean_expression(
     for (field_name, field_mapping) in field_mappings.iter() {
         // Generate comparison expression for fields mapped to simple scalar type
         if let Some((scalar_type_name, scalar_type_info)) =
-            data_connector::get_simple_scalar(field_mapping.column_type.clone(), scalar_types)
+            data_connector_scalar_types::get_simple_scalar(
+                field_mapping.column_type.clone(),
+                scalar_types,
+            )
         {
             if let Some(graphql_type_name) = &scalar_type_info.comparison_expression_name.clone() {
                 let mut operators = BTreeMap::new();
