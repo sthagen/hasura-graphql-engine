@@ -1,73 +1,78 @@
-use super::stages::{
+mod types;
+
+use crate::metadata::resolved::argument::get_argument_mappings;
+use crate::metadata::resolved::error::Error;
+use crate::metadata::resolved::ndc_validation;
+use crate::metadata::resolved::stages::{
     boolean_expressions, data_connector_scalar_types, data_connector_type_mappings,
     data_connectors, scalar_types, type_permissions,
 };
-use crate::metadata::resolved::argument::{
-    get_argument_mappings, resolve_value_expression_for_argument,
-};
-use crate::metadata::resolved::error::Error;
-use crate::metadata::resolved::ndc_validation;
-use crate::metadata::resolved::subgraph::{
-    deserialize_qualified_btreemap, mk_qualified_type_reference, serialize_qualified_btreemap,
-    ArgumentInfo, Qualified, QualifiedTypeReference,
-};
+use crate::metadata::resolved::subgraph::{mk_qualified_type_reference, ArgumentInfo, Qualified};
 use crate::metadata::resolved::types::mk_name;
 use crate::metadata::resolved::types::{
     get_type_representation, object_type_exists, unwrap_custom_type_name,
 };
 use indexmap::IndexMap;
-use lang_graphql::ast::common as ast;
-use open_dds::arguments::ArgumentName;
-use open_dds::commands::{
-    self, CommandName, CommandV1, DataConnectorCommand, GraphQlRootFieldKind,
-};
 
-use open_dds::permissions::{CommandPermissionsV1, Role};
-use open_dds::types::{BaseType, CustomTypeName, Deprecated, TypeName, TypeReference};
-use serde::{Deserialize, Serialize};
+use open_dds::commands::{self, CommandName, CommandV1, DataConnectorCommand};
+pub use types::{Command, CommandGraphQlApi, CommandSource};
+
+use open_dds::types::{BaseType, CustomTypeName, TypeName, TypeReference};
+
 use std::collections::{BTreeMap, HashMap};
 
-use super::permission::ValueExpression;
-use super::typecheck;
-use super::types::{
+use crate::metadata::resolved::types::{
     collect_type_mapping_for_source, TypeMappingCollectionError, TypeMappingToCollect,
 };
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct CommandGraphQlApi {
-    pub root_field_kind: GraphQlRootFieldKind,
-    pub root_field_name: ast::Name,
-    pub deprecated: Option<Deprecated>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct CommandSource {
-    pub data_connector: data_connectors::DataConnectorLink,
-    pub source: DataConnectorCommand,
-    #[serde(
-        serialize_with = "serialize_qualified_btreemap",
-        deserialize_with = "deserialize_qualified_btreemap"
-    )]
-    pub type_mappings:
-        BTreeMap<Qualified<CustomTypeName>, data_connector_type_mappings::TypeMapping>,
-    pub argument_mappings: HashMap<ArgumentName, String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Command {
-    pub name: Qualified<CommandName>,
-    pub output_type: QualifiedTypeReference,
-    pub arguments: IndexMap<ArgumentName, ArgumentInfo>,
-    pub graphql_api: Option<CommandGraphQlApi>,
-    pub source: Option<CommandSource>,
-    pub permissions: Option<HashMap<Role, CommandPermission>>,
-    pub description: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct CommandPermission {
-    pub allow_execution: bool,
-    pub argument_presets: BTreeMap<ArgumentName, (QualifiedTypeReference, ValueExpression)>,
+/// resolve commands
+pub fn resolve(
+    metadata_accessor: &open_dds::accessor::MetadataAccessor,
+    data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
+    data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
+    object_types: &HashMap<Qualified<CustomTypeName>, type_permissions::ObjectTypeWithPermissions>,
+    scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
+    boolean_expression_types: &HashMap<
+        Qualified<CustomTypeName>,
+        boolean_expressions::ObjectBooleanExpressionType,
+    >,
+) -> Result<IndexMap<Qualified<CommandName>, Command>, Error> {
+    let mut commands: IndexMap<Qualified<CommandName>, Command> = IndexMap::new();
+    for open_dds::accessor::QualifiedObject {
+        subgraph,
+        object: command,
+    } in &metadata_accessor.commands
+    {
+        let mut resolved_command = resolve_command(
+            command,
+            subgraph,
+            object_types,
+            scalar_types,
+            boolean_expression_types,
+        )?;
+        if let Some(command_source) = &command.source {
+            resolve_command_source(
+                command_source,
+                &mut resolved_command,
+                subgraph,
+                data_connectors,
+                data_connector_type_mappings,
+                object_types,
+                scalar_types,
+                boolean_expression_types,
+            )?;
+        }
+        let qualified_command_name = Qualified::new(subgraph.to_string(), command.name.clone());
+        if commands
+            .insert(qualified_command_name.clone(), resolved_command)
+            .is_some()
+        {
+            return Err(Error::DuplicateCommandDefinition {
+                name: qualified_command_name,
+            });
+        }
+    }
+    Ok(commands)
 }
 
 fn type_exists(
@@ -174,7 +179,6 @@ pub fn resolve_command(
         arguments,
         graphql_api,
         source: None,
-        permissions: None,
         description: command_description,
     })
 }
@@ -339,79 +343,4 @@ pub fn resolve_command_source(
     )?;
 
     Ok(())
-}
-
-pub fn resolve_command_permissions(
-    command: &Command,
-    permissions: &CommandPermissionsV1,
-    object_types: &HashMap<Qualified<CustomTypeName>, type_permissions::ObjectTypeWithPermissions>,
-    boolean_expression_types: &HashMap<
-        Qualified<CustomTypeName>,
-        boolean_expressions::ObjectBooleanExpressionType,
-    >,
-    data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
-    data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
-    subgraph: &str,
-) -> Result<HashMap<Role, CommandPermission>, Error> {
-    let mut validated_permissions = HashMap::new();
-    for command_permission in &permissions.permissions {
-        let mut argument_presets = BTreeMap::new();
-
-        for argument_preset in &command_permission.argument_presets {
-            if argument_presets.contains_key(&argument_preset.argument) {
-                return Err(Error::DuplicateCommandArgumentPreset {
-                    command_name: command.name.clone(),
-                    argument_name: argument_preset.argument.clone(),
-                });
-            }
-
-            match command.arguments.get(&argument_preset.argument) {
-                Some(argument) => {
-                    let value_expression = resolve_value_expression_for_argument(
-                        &argument_preset.argument,
-                        &argument_preset.value,
-                        &argument.argument_type,
-                        subgraph,
-                        object_types,
-                        boolean_expression_types,
-                        data_connectors,
-                        data_connector_type_mappings,
-                    )?;
-
-                    // additionally typecheck literals
-                    // we do this outside the argument resolve so that we can emit a command-specific error
-                    // on typechecking failure
-                    typecheck::typecheck_value_expression(
-                        &argument.argument_type,
-                        &argument_preset.value,
-                    )
-                    .map_err(|type_error| {
-                        Error::CommandArgumentPresetTypeError {
-                            command_name: command.name.clone(),
-                            argument_name: argument_preset.argument.clone(),
-                            type_error,
-                        }
-                    })?;
-
-                    argument_presets.insert(
-                        argument_preset.argument.clone(),
-                        (argument.argument_type.clone(), value_expression),
-                    );
-                }
-                None => {
-                    return Err(Error::CommandArgumentPresetMismatch {
-                        command_name: command.name.clone(),
-                        argument_name: argument_preset.argument.clone(),
-                    });
-                }
-            }
-        }
-
-        let resolved_permission = CommandPermission {
-            allow_execution: command_permission.allow_execution,
-            argument_presets,
-        };
-        validated_permissions.insert(command_permission.role.clone(), resolved_permission);
-    }
-    Ok(validated_permissions)
 }

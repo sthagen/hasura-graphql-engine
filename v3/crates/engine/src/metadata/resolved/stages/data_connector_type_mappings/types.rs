@@ -1,7 +1,5 @@
 use crate::metadata::resolved::error::Error;
-use crate::metadata::resolved::relationship::Relationship;
 use crate::metadata::resolved::subgraph::QualifiedTypeReference;
-
 use indexmap::IndexMap;
 
 use open_dds::types::{CustomTypeName, Deprecated, FieldName};
@@ -80,7 +78,7 @@ impl DataConnectorTypeMappings {
 
 /// output of `data_connector_type_mappings` step
 pub struct DataConnectorTypeMappingsOutput {
-    pub existing_graphql_types: HashSet<ast::TypeName>,
+    pub graphql_types: HashSet<ast::TypeName>,
     pub global_id_enabled_types: HashMap<Qualified<CustomTypeName>, Vec<Qualified<ModelName>>>,
     pub apollo_federation_entity_enabled_types:
         HashMap<Qualified<CustomTypeName>, Option<Qualified<open_dds::models::ModelName>>>,
@@ -92,7 +90,6 @@ pub struct DataConnectorTypeMappingsOutput {
 #[display(fmt = "Display")]
 pub struct ObjectTypeRepresentation {
     pub fields: IndexMap<FieldName, FieldDefinition>,
-    pub relationships: IndexMap<ast::Name, Relationship>,
     pub global_id_fields: Vec<FieldName>,
     pub apollo_federation_config: Option<ResolvedObjectApolloFederationConfig>,
     pub graphql_output_type_name: Option<ast::TypeName>,
