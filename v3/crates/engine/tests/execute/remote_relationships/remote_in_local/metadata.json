@@ -176,9 +176,7 @@
         "selectUniques": [
           {
             "queryRootField": "AnalyticsById",
-            "uniqueIdentifier": [
-              "analytics_id"
-            ]
+            "uniqueIdentifier": ["analytics_id"]
           }
         ],
         "selectMany": {
@@ -404,31 +402,19 @@
         {
           "role": "admin",
           "output": {
-            "allowedFields": [
-              "movie_id",
-              "title",
-              "rating"
-            ]
+            "allowedFields": ["movie_id", "title", "rating"]
           }
         },
         {
           "role": "user1",
           "output": {
-            "allowedFields": [
-              "movie_id",
-              "title",
-              "rating"
-            ]
+            "allowedFields": ["movie_id", "title", "rating"]
           }
         },
         {
           "role": "user2",
           "output": {
-            "allowedFields": [
-              "movie_id",
-              "title",
-              "rating"
-            ]
+            "allowedFields": ["movie_id", "title", "rating"]
           }
         }
       ]
@@ -559,31 +545,19 @@
         {
           "role": "admin",
           "output": {
-            "allowedFields": [
-              "actor_id",
-              "name",
-              "movie_id"
-            ]
+            "allowedFields": ["actor_id", "name", "movie_id"]
           }
         },
         {
           "role": "user1",
           "output": {
-            "allowedFields": [
-              "actor_id",
-              "name",
-              "movie_id"
-            ]
+            "allowedFields": ["actor_id", "name", "movie_id"]
           }
         },
         {
           "role": "user2",
           "output": {
-            "allowedFields": [
-              "actor_id",
-              "name",
-              "movie_id"
-            ]
+            "allowedFields": ["actor_id", "name", "movie_id"]
           }
         }
       ]
@@ -658,7 +632,7 @@
     "kind": "Relationship",
     "version": "v1",
     "definition": {
-      "source": "actor",
+      "sourceType": "actor",
       "name": "Movie",
       "target": {
         "model": {
@@ -690,7 +664,7 @@
     "kind": "Relationship",
     "version": "v1",
     "definition": {
-      "source": "movie",
+      "sourceType": "movie",
       "name": "Actors",
       "target": {
         "model": {
@@ -722,7 +696,7 @@
     "kind": "Relationship",
     "version": "v1",
     "definition": {
-      "source": "movie",
+      "sourceType": "movie",
       "name": "Analytics",
       "target": {
         "model": {
@@ -754,7 +728,7 @@
     "kind": "Relationship",
     "version": "v1",
     "definition": {
-      "source": "movie_analytics",
+      "sourceType": "movie_analytics",
       "name": "Movie",
       "target": {
         "model": {

@@ -24,7 +24,7 @@
             "graphql": {
               "typeName": "Album"
             },
-             "dataConnectorTypeMapping": [
+            "dataConnectorTypeMapping": [
               {
                 "dataConnectorName": "db",
                 "dataConnectorObjectType": "Album",
@@ -278,9 +278,7 @@
               "selectUniques": [
                 {
                   "queryRootField": "AlbumByID",
-                  "uniqueIdentifier": [
-                    "AlbumId"
-                  ]
+                  "uniqueIdentifier": ["AlbumId"]
                 }
               ],
               "selectMany": {
@@ -325,9 +323,7 @@
               "selectUniques": [
                 {
                   "queryRootField": "TrackByID",
-                  "uniqueIdentifier": [
-                    "TrackId"
-                  ]
+                  "uniqueIdentifier": ["TrackId"]
                 }
               ],
               "selectMany": {
@@ -378,9 +374,7 @@
               "selectUniques": [
                 {
                   "queryRootField": "GenreByID",
-                  "uniqueIdentifier": [
-                    "GenreId"
-                  ]
+                  "uniqueIdentifier": ["GenreId"]
                 }
               ],
               "selectMany": {
@@ -414,21 +408,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "AlbumId",
-                    "Title",
-                    "ArtistId"
-                  ]
+                  "allowedFields": ["AlbumId", "Title", "ArtistId"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "AlbumId",
-                    "Title",
-                    "ArtistId"
-                  ]
+                  "allowedFields": ["AlbumId", "Title", "ArtistId"]
                 }
               }
             ]
@@ -443,23 +429,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "TrackId",
-                    "Name",
-                    "AlbumId",
-                    "GenreId"
-                  ]
+                  "allowedFields": ["TrackId", "Name", "AlbumId", "GenreId"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "TrackId",
-                    "Name",
-                    "AlbumId",
-                    "GenreId"
-                  ]
+                  "allowedFields": ["TrackId", "Name", "AlbumId", "GenreId"]
                 }
               }
             ]
@@ -474,19 +450,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "GenreId",
-                    "Name"
-                  ]
+                  "allowedFields": ["GenreId", "Name"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "GenreId",
-                    "Name"
-                  ]
+                  "allowedFields": ["GenreId", "Name"]
                 }
               }
             ]
@@ -559,7 +529,7 @@
         },
         {
           "definition": {
-            "source": "Album",
+            "sourceType": "Album",
             "name": "Tracks",
             "target": {
               "model": {
@@ -591,7 +561,7 @@
         },
         {
           "definition": {
-            "source": "Track",
+            "sourceType": "Track",
             "name": "Album",
             "target": {
               "model": {
@@ -623,7 +593,7 @@
         },
         {
           "definition": {
-            "source": "Track",
+            "sourceType": "Track",
             "name": "Genre",
             "target": {
               "model": {
@@ -655,7 +625,7 @@
         },
         {
           "definition": {
-            "source": "Track",
+            "sourceType": "Track",
             "name": "TrackAlbums",
             "target": {
               "model": {
@@ -762,9 +732,7 @@
               "selectUniques": [
                 {
                   "queryRootField": "ArtistByID",
-                  "uniqueIdentifier": [
-                    "ArtistId"
-                  ]
+                  "uniqueIdentifier": ["ArtistId"]
                 }
               ],
               "selectMany": {
@@ -819,19 +787,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "ArtistId",
-                    "Name"
-                  ]
+                  "allowedFields": ["ArtistId", "Name"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "ArtistId",
-                    "Name"
-                  ]
+                  "allowedFields": ["ArtistId", "Name"]
                 }
               }
             ]
@@ -841,7 +803,7 @@
         },
         {
           "definition": {
-            "source": "Album",
+            "sourceType": "Album",
             "name": "Artist",
             "target": {
               "model": {
