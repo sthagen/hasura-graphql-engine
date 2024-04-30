@@ -8,8 +8,8 @@ use super::types::output_type::get_object_type_representation;
 use super::types::output_type::relationship::{FilterRelationshipAnnotation, ModelTargetSource};
 use super::types::{BooleanExpressionAnnotation, InputAnnotation, TypeId};
 use crate::metadata::resolved;
-use crate::metadata::resolved::subgraph::Qualified;
-use crate::metadata::resolved::types::mk_name;
+use crate::metadata::resolved::mk_name;
+use crate::metadata::resolved::Qualified;
 
 use crate::schema::permissions;
 use crate::schema::types;
@@ -155,11 +155,11 @@ pub fn build_boolean_expression_input_schema(
                 })?;
 
                 let target_object_type_representation =
-                    get_object_type_representation(gds, &target_model.data_type)?;
+                    get_object_type_representation(gds, &target_model.model.data_type)?;
 
                 // Build relationship field in filter expression only when
                 // the target_model is backed by a source
-                if let Some(target_source) = &target_model.source {
+                if let Some(target_source) = &target_model.model.source {
                     let target_model_source =
                         ModelTargetSource::from_model_source(target_source, relationship)?;
 
@@ -176,12 +176,12 @@ pub fn build_boolean_expression_input_schema(
                         {
                             // If the relationship target model does not have filterExpressionType do not include
                             // it in the source model filter expression input type.
-                            if let Some(ref target_model_filter_expression) = &target_model
-                                .clone()
-                                .filter_expression_type
-                                .and_then(|ref boolean_expression_type| {
-                                    boolean_expression_type.clone().graphql
-                                })
+                            if let Some(ref target_model_filter_expression) =
+                                &target_model.model.clone().filter_expression_type.and_then(
+                                    |ref boolean_expression_type| {
+                                        boolean_expression_type.clone().graphql
+                                    },
+                                )
                             {
                                 let target_model_filter_expression_type_name =
                                     &target_model_filter_expression.type_name;
@@ -191,7 +191,7 @@ pub fn build_boolean_expression_input_schema(
                                     relationship_name: relationship.name.clone(),
                                     target_source: target_model_source.clone(),
                                     target_type: target_typename.clone(),
-                                    target_model_name: target_model.name.clone(),
+                                    target_model_name: target_model.model.name.clone(),
                                     relationship_type: relationship_type.clone(),
                                     mappings: mappings.clone(),
                                     source_data_connector: boolean_expression_type

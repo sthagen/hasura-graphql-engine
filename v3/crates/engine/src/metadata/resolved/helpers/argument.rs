@@ -1,18 +1,20 @@
-use crate::metadata::resolved::error::{
+use crate::metadata::resolved::helpers::model::resolve_ndc_type;
+use crate::metadata::resolved::helpers::ndc_validation;
+use crate::metadata::resolved::helpers::type_mappings;
+use crate::metadata::resolved::helpers::types::{
+    get_object_type_for_boolean_expression, get_type_representation, unwrap_custom_type_name,
+    TypeRepresentation,
+};
+use crate::metadata::resolved::stages::{
+    boolean_expressions, data_connector_scalar_types, data_connector_type_mappings,
+    model_permissions, relationships, scalar_types, type_permissions,
+};
+use crate::metadata::resolved::types::error::{
     Error, TypeError, TypeMappingValidationError, TypePredicateError,
 };
-use crate::metadata::resolved::model::resolve_ndc_type;
-use crate::metadata::resolved::ndc_validation;
-use crate::metadata::resolved::permission::ValueExpression;
-use crate::metadata::resolved::stages::{
-    boolean_expressions, data_connector_scalar_types, data_connector_type_mappings, models,
-    relationships, scalar_types, type_permissions,
-};
-use crate::metadata::resolved::subgraph::{ArgumentInfo, Qualified};
-use crate::metadata::resolved::subgraph::{QualifiedBaseType, QualifiedTypeReference};
-use crate::metadata::resolved::types::{
-    get_object_type_for_boolean_expression, get_type_representation, unwrap_custom_type_name,
-    TypeMappingToCollect, TypeRepresentation,
+use crate::metadata::resolved::types::permission::ValueExpression;
+use crate::metadata::resolved::types::subgraph::{
+    ArgumentInfo, Qualified, QualifiedBaseType, QualifiedTypeReference,
 };
 use indexmap::IndexMap;
 use ndc_models;
@@ -71,11 +73,17 @@ pub fn get_argument_mappings<'a>(
         Qualified<CustomTypeName>,
         boolean_expressions::ObjectBooleanExpressionType,
     >,
-) -> Result<(HashMap<ArgumentName, String>, Vec<TypeMappingToCollect<'a>>), ArgumentMappingError> {
+) -> Result<
+    (
+        HashMap<ArgumentName, String>,
+        Vec<type_mappings::TypeMappingToCollect<'a>>,
+    ),
+    ArgumentMappingError,
+> {
     let mut unconsumed_argument_mappings: HashMap<&ArgumentName, &String> =
         HashMap::from_iter(argument_mapping.iter());
     let mut resolved_argument_mappings = HashMap::<ArgumentName, String>::new();
-    let mut type_mappings_to_collect = Vec::<TypeMappingToCollect>::new();
+    let mut type_mappings_to_collect = Vec::<type_mappings::TypeMappingToCollect>::new();
     for (argument_name, argument_type) in arguments {
         let mapped_to_ndc_argument_name = if let Some(mapped_to_ndc_argument_name) =
             unconsumed_argument_mappings.remove(&argument_name)
@@ -121,7 +129,7 @@ pub fn get_argument_mappings<'a>(
                         ndc_validation::get_underlying_named_type(&ndc_argument_info.argument_type)
                             .map_err(ArgumentMappingError::NDCValidationError)?;
 
-                    type_mappings_to_collect.push(TypeMappingToCollect {
+                    type_mappings_to_collect.push(type_mappings::TypeMappingToCollect {
                         type_name: object_type_name,
                         ndc_object_type_name: underlying_ndc_argument_named_type,
                     })
@@ -133,7 +141,7 @@ pub fn get_argument_mappings<'a>(
                             .map_err(ArgumentMappingError::NDCValidationError)?;
 
                     // resolve the object type the boolean expression refers to
-                    type_mappings_to_collect.push(TypeMappingToCollect {
+                    type_mappings_to_collect.push(type_mappings::TypeMappingToCollect {
                         type_name: &boolean_expression_type.object_type,
                         ndc_object_type_name: underlying_ndc_argument_named_type,
                     })
@@ -256,7 +264,7 @@ pub(crate) fn resolve_model_predicate_with_type(
     subgraph: &str,
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
     fields: &IndexMap<FieldName, data_connector_type_mappings::FieldDefinition>,
-) -> Result<models::ModelPredicate, Error> {
+) -> Result<model_permissions::ModelPredicate, Error> {
     match model_predicate {
         permissions::ModelPredicate::FieldComparison(permissions::FieldComparisonPredicate {
             field,
@@ -328,7 +336,7 @@ pub(crate) fn resolve_model_predicate_with_type(
                 }),
             }?;
 
-            Ok(models::ModelPredicate::BinaryFieldComparison {
+            Ok(model_permissions::ModelPredicate::BinaryFieldComparison {
                 field: field.clone(),
                 ndc_column: field_mapping.column.clone(),
                 operator: resolved_operator,
@@ -347,7 +355,7 @@ pub(crate) fn resolve_model_predicate_with_type(
                 }
             })?;
 
-            Ok(models::ModelPredicate::UnaryFieldComparison {
+            Ok(model_permissions::ModelPredicate::UnaryFieldComparison {
                 field: field.clone(),
                 ndc_column: field_mapping.column.clone(),
                 operator: ndc_models::UnaryComparisonOperator::IsNull,
@@ -368,7 +376,9 @@ pub(crate) fn resolve_model_predicate_with_type(
                 data_connectors,
                 fields,
             )?;
-            Ok(models::ModelPredicate::Not(Box::new(resolved_predicate)))
+            Ok(model_permissions::ModelPredicate::Not(Box::new(
+                resolved_predicate,
+            )))
         }
         permissions::ModelPredicate::And(predicates) => {
             let mut resolved_predicates = Vec::new();
@@ -383,7 +393,7 @@ pub(crate) fn resolve_model_predicate_with_type(
                     fields,
                 )?);
             }
-            Ok(models::ModelPredicate::And(resolved_predicates))
+            Ok(model_permissions::ModelPredicate::And(resolved_predicates))
         }
         permissions::ModelPredicate::Or(predicates) => {
             let mut resolved_predicates = Vec::new();
@@ -398,7 +408,7 @@ pub(crate) fn resolve_model_predicate_with_type(
                     fields,
                 )?);
             }
-            Ok(models::ModelPredicate::Or(resolved_predicates))
+            Ok(model_permissions::ModelPredicate::Or(resolved_predicates))
         }
     }
 }

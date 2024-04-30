@@ -1,13 +1,10 @@
 use open_dds::types::{CustomTypeName, FieldName};
 use std::collections::{BTreeMap, HashMap};
 
-use crate::metadata::resolved::permission::ValueExpression;
-use crate::metadata::resolved::stages::{
-    data_connector_type_mappings, models, relationships, type_permissions,
-};
-use crate::metadata::resolved::subgraph::{Qualified, QualifiedTypeReference};
-use crate::metadata::resolved::types::{object_type_exists, unwrap_custom_type_name};
+use crate::metadata::resolved::ValueExpression;
 use crate::metadata::resolved::{self};
+use crate::metadata::resolved::{object_type_exists, unwrap_custom_type_name};
+use crate::metadata::resolved::{Qualified, QualifiedTypeReference};
 use crate::schema::Role;
 use crate::schema::{self, types};
 
@@ -15,7 +12,7 @@ use super::types::ArgumentNameAndPath;
 
 /// Build namespace annotation for select permissions
 pub(crate) fn get_select_permissions_namespace_annotations(
-    model: &models::Model,
+    model: &resolved::ModelWithPermissions,
     object_types: &HashMap<Qualified<CustomTypeName>, resolved::ObjectTypeWithRelationships>,
 ) -> Result<HashMap<Role, Option<types::NamespaceAnnotation>>, schema::Error> {
     let mut permissions: HashMap<Role, Option<types::NamespaceAnnotation>> = model
@@ -37,6 +34,7 @@ pub(crate) fn get_select_permissions_namespace_annotations(
                                         (
                                             ArgumentNameAndPath {
                                                 ndc_argument_name: model
+                                                    .model
                                                     .source
                                                     .as_ref()
                                                     .and_then(|model_source| {
@@ -61,9 +59,9 @@ pub(crate) fn get_select_permissions_namespace_annotations(
     // them to model argument preset annotations as well. if there is no
     // source defined for the model, we don't generate these preset
     // annotations.
-    if let Some(model_source) = model.source.as_ref() {
+    if let Some(model_source) = model.model.source.as_ref() {
         let mut role_presets_map = HashMap::new();
-        for (arg_name, arg_info) in &model.arguments {
+        for (arg_name, arg_info) in &model.model.arguments {
             // get the NDC argument name of this command source
             let ndc_argument_name = model_source.argument_mappings.get(arg_name).cloned();
 
@@ -98,9 +96,9 @@ pub(crate) fn get_select_permissions_namespace_annotations(
 /// This is different from generating permissions for select_many etc,
 /// as we need to check the permissions of the arguments used in the selection.
 pub(crate) fn get_select_one_namespace_annotations(
-    model: &models::Model,
+    model: &resolved::ModelWithPermissions,
     object_type_representation: &resolved::ObjectTypeWithRelationships,
-    select_unique: &models::SelectUniqueGraphQlDefinition,
+    select_unique: &resolved::SelectUniqueGraphQlDefinition,
     object_types: &HashMap<Qualified<CustomTypeName>, resolved::ObjectTypeWithRelationships>,
 ) -> Result<HashMap<Role, Option<types::NamespaceAnnotation>>, schema::Error> {
     let select_permissions = get_select_permissions_namespace_annotations(model, object_types)?;
@@ -121,11 +119,11 @@ pub(crate) fn get_select_one_namespace_annotations(
 /// We need to check the permissions of the source and target fields
 /// in the relationship mappings.
 pub(crate) fn get_model_relationship_namespace_annotations(
-    target_model: &models::Model,
+    target_model: &resolved::ModelWithPermissions,
     source_object_type_representation: &resolved::ObjectTypeWithRelationships,
     target_object_type_representation: &resolved::ObjectTypeWithRelationships,
     mappings: &[resolved::RelationshipModelMapping],
-    object_types: &HashMap<Qualified<CustomTypeName>, relationships::ObjectTypeWithRelationships>,
+    object_types: &HashMap<Qualified<CustomTypeName>, resolved::ObjectTypeWithRelationships>,
 ) -> Result<HashMap<Role, Option<types::NamespaceAnnotation>>, schema::Error> {
     let select_permissions =
         get_select_permissions_namespace_annotations(target_model, object_types)?;
@@ -154,40 +152,35 @@ pub(crate) fn get_command_namespace_annotations(
     let mut permissions = HashMap::new();
 
     // process command permissions, and annotate any command argument presets
-    match &command.permissions {
-        Some(command_permissions) => {
-            for (role, permission) in command_permissions {
-                if permission.allow_execution {
-                    let argument_presets = permission
-                        .argument_presets
-                        .iter()
-                        .map(|(argument_name, preset)| {
-                            (
-                                ArgumentNameAndPath {
-                                    ndc_argument_name: command
-                                        .command
-                                        .source
-                                        .as_ref()
-                                        .and_then(|command_source| {
-                                            command_source.argument_mappings.get(argument_name)
-                                        })
-                                        .cloned(),
-                                    field_path: vec![],
-                                },
-                                preset.clone(),
-                            )
-                        })
-                        .collect();
-                    permissions.insert(
-                        role.clone(),
-                        Some(types::NamespaceAnnotation::Command(
-                            types::ArgumentPresets { argument_presets },
-                        )),
-                    );
-                }
-            }
+    for (role, permission) in &command.permissions {
+        if permission.allow_execution {
+            let argument_presets = permission
+                .argument_presets
+                .iter()
+                .map(|(argument_name, preset)| {
+                    (
+                        ArgumentNameAndPath {
+                            ndc_argument_name: command
+                                .command
+                                .source
+                                .as_ref()
+                                .and_then(|command_source| {
+                                    command_source.argument_mappings.get(argument_name)
+                                })
+                                .cloned(),
+                            field_path: vec![],
+                        },
+                        preset.clone(),
+                    )
+                })
+                .collect();
+            permissions.insert(
+                role.clone(),
+                Some(types::NamespaceAnnotation::Command(
+                    types::ArgumentPresets { argument_presets },
+                )),
+            );
         }
-        None => {}
     }
 
     // if any of command argument's input type has field presets defined, add
@@ -228,7 +221,7 @@ fn build_annotations_from_input_object_type_permissions(
     type_reference: &QualifiedTypeReference,
     ndc_argument_name: &Option<String>,
     object_types: &HashMap<Qualified<CustomTypeName>, resolved::ObjectTypeWithRelationships>,
-    type_mappings: &BTreeMap<Qualified<CustomTypeName>, data_connector_type_mappings::TypeMapping>,
+    type_mappings: &BTreeMap<Qualified<CustomTypeName>, resolved::TypeMapping>,
     role_presets_map: &mut HashMap<Role, types::ArgumentPresets>,
 ) -> Result<(), schema::Error> {
     if let Some(object_type) = unwrap_custom_type_name(type_reference) {
@@ -238,7 +231,7 @@ fn build_annotations_from_input_object_type_permissions(
                     type_mappings
                         .get(object_type)
                         .map(|type_mapping| match type_mapping {
-                            data_connector_type_mappings::TypeMapping::Object {
+                            resolved::TypeMapping::Object {
                                 ndc_object_type_name: _,
                                 field_mappings,
                             } => field_mappings,
@@ -295,20 +288,14 @@ fn build_annotations_from_input_object_type_permissions(
 /// Preset map we generate -
 ///   `Map<("person", ["address", "country"]), ValueExpression(SessionVariable("x-hasura-user-country"))>`
 fn build_preset_map_from_input_object_type_permission(
-    permission: &type_permissions::TypeInputPermission,
-    field_mappings: Option<&BTreeMap<FieldName, data_connector_type_mappings::FieldMapping>>,
+    permission: &resolved::TypeInputPermission,
+    field_mappings: Option<&BTreeMap<FieldName, resolved::FieldMapping>>,
     type_reference: &QualifiedTypeReference,
     field_path: &[String],
     ndc_argument_name: &Option<String>,
     object_type: &Qualified<CustomTypeName>,
 ) -> Result<
-    BTreeMap<
-        ArgumentNameAndPath,
-        (
-            QualifiedTypeReference,
-            resolved::permission::ValueExpression,
-        ),
-    >,
+    BTreeMap<ArgumentNameAndPath, (QualifiedTypeReference, resolved::ValueExpression)>,
     schema::Error,
 > {
     let preset_map = permission
@@ -444,7 +431,7 @@ pub(crate) fn get_allowed_roles_for_field<'a>(
 /// Builds namespace annotations for the `node` field.
 pub(crate) fn get_node_field_namespace_permissions(
     object_type_representation: &resolved::ObjectTypeWithRelationships,
-    model: &models::Model,
+    model: &resolved::ModelWithPermissions,
 ) -> HashMap<Role, resolved::FilterPermission> {
     let mut permissions = HashMap::new();
 
@@ -483,7 +470,7 @@ pub(crate) fn get_node_field_namespace_permissions(
 /// Builds namespace annotations for the `_entities` field.
 pub(crate) fn get_entities_field_namespace_permissions(
     object_type_representation: &resolved::ObjectTypeWithRelationships,
-    model: &models::Model,
+    model: &resolved::ModelWithPermissions,
 ) -> HashMap<Role, resolved::FilterPermission> {
     let mut permissions = HashMap::new();
 

@@ -6,27 +6,27 @@ use indexmap::IndexMap;
 
 use open_dds::{commands::CommandName, types::CustomTypeName};
 
-use crate::metadata::resolved::error::Error;
-use crate::metadata::resolved::permission::ValueExpression;
 use crate::metadata::resolved::stages::{
     boolean_expressions, commands, data_connector_scalar_types, data_connector_type_mappings,
     relationships,
 };
-use crate::metadata::resolved::subgraph::{Qualified, QualifiedTypeReference};
+use crate::metadata::resolved::types::error::Error;
+use crate::metadata::resolved::types::permission::ValueExpression;
+use crate::metadata::resolved::types::subgraph::{Qualified, QualifiedTypeReference};
 use open_dds::arguments::ArgumentName;
 
-use crate::metadata::resolved::argument::resolve_value_expression_for_argument;
+use crate::metadata::resolved::helpers::argument::resolve_value_expression_for_argument;
 
 use open_dds::permissions::CommandPermissionsV1;
 
 use std::collections::BTreeMap;
 
-use crate::metadata::resolved::typecheck;
+use crate::metadata::resolved::helpers::typecheck;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct CommandWithPermissions {
     pub command: commands::Command,
-    pub permissions: Option<HashMap<Role, CommandPermission>>,
+    pub permissions: HashMap<Role, CommandPermission>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -55,7 +55,7 @@ pub fn resolve(
                     command_name.clone(),
                     CommandWithPermissions {
                         command: command.clone(),
-                        permissions: None,
+                        permissions: HashMap::new(),
                     },
                 )
             })
@@ -72,8 +72,8 @@ pub fn resolve(
             .ok_or_else(|| Error::UnknownCommandInCommandPermissions {
                 command_name: qualified_command_name.clone(),
             })?;
-        if command.permissions.is_none() {
-            command.permissions = Some(resolve_command_permissions(
+        if command.permissions.is_empty() {
+            command.permissions = resolve_command_permissions(
                 &command.command,
                 command_permissions,
                 object_types,
@@ -81,7 +81,7 @@ pub fn resolve(
                 data_connectors,
                 data_connector_type_mappings,
                 subgraph,
-            )?);
+            )?;
         } else {
             return Err(Error::DuplicateCommandPermission {
                 command_name: qualified_command_name.clone(),

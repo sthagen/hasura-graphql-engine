@@ -5,14 +5,14 @@ use indexmap::IndexMap;
 
 use open_dds::{commands::CommandName, models::ModelName, types::CustomTypeName};
 
-use crate::metadata::resolved::subgraph::Qualified;
+use crate::metadata::resolved::types::subgraph::Qualified;
 
-use crate::metadata::resolved::stages::{command_permissions, models, relationships};
+use crate::metadata::resolved::stages::{command_permissions, model_permissions, relationships};
 
 /// Gather all roles from various permission objects.
 pub fn resolve(
     object_types: &HashMap<Qualified<CustomTypeName>, relationships::ObjectTypeWithRelationships>,
-    models: &IndexMap<Qualified<ModelName>, models::Model>,
+    models: &IndexMap<Qualified<ModelName>, model_permissions::ModelWithPermissions>,
     commands: &IndexMap<Qualified<CommandName>, command_permissions::CommandWithPermissions>,
 ) -> Vec<Role> {
     let mut roles = Vec::new();
@@ -32,10 +32,8 @@ pub fn resolve(
         }
     }
     for command in commands.values() {
-        if let Some(command_permissions) = &command.permissions {
-            for role in command_permissions.keys() {
-                roles.push(role.clone());
-            }
+        for role in command.permissions.keys() {
+            roles.push(role.clone());
         }
     }
     roles

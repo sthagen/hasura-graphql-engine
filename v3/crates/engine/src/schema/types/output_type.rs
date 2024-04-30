@@ -14,12 +14,11 @@ use self::relationship::{
 };
 use super::inbuilt_type::base_type_container_for_inbuilt_type;
 use super::{Annotation, PossibleApolloFederationTypes, TypeId};
-use crate::metadata::resolved::stages::data_connector_type_mappings;
-use crate::metadata::resolved::subgraph::{
+use crate::metadata::resolved::{self, mk_name};
+use crate::metadata::resolved::{get_type_representation, TypeRepresentation};
+use crate::metadata::resolved::{
     Qualified, QualifiedBaseType, QualifiedTypeName, QualifiedTypeReference,
 };
-use crate::metadata::resolved::types::{get_type_representation, TypeRepresentation};
-use crate::metadata::resolved::{self, types::mk_name};
 use crate::schema::commands::generate_command_argument;
 use crate::schema::query_root::select_many::generate_select_many_arguments;
 use crate::schema::{mk_deprecation_status, permissions};
@@ -316,7 +315,7 @@ fn object_type_fields(
                     }
                 })?;
 
-                if !model.arguments.is_empty() {
+                if !model.model.arguments.is_empty() {
                     return Err(Error::InternalUnsupported {
                         summary: "Relationships to models with arguments aren't supported".into(),
                     });
@@ -330,7 +329,7 @@ fn object_type_fields(
                 };
 
                 let target_object_type_representation =
-                    get_object_type_representation(gds, &model.data_type)?;
+                    get_object_type_representation(gds, &model.model.data_type)?;
 
                 builder.conditional_namespaced(
                     gql_schema::Field::<GDS>::new(
@@ -376,7 +375,7 @@ fn object_type_fields(
 }
 
 fn generate_apollo_federation_directives(
-    apollo_federation_config: &data_connector_type_mappings::ResolvedObjectApolloFederationConfig,
+    apollo_federation_config: &resolved::ResolvedObjectApolloFederationConfig,
 ) -> Vec<Directive> {
     let mut directives = Vec::new();
     for key in &apollo_federation_config.keys {
