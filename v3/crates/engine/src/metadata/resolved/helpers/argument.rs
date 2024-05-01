@@ -6,8 +6,8 @@ use crate::metadata::resolved::helpers::types::{
     TypeRepresentation,
 };
 use crate::metadata::resolved::stages::{
-    boolean_expressions, data_connector_scalar_types, data_connector_type_mappings,
-    model_permissions, relationships, scalar_types, type_permissions,
+    boolean_expressions, data_connector_scalar_types, model_permissions, object_types,
+    relationships, scalar_types, type_permissions,
 };
 use crate::metadata::resolved::types::error::{
     Error, TypeError, TypeMappingValidationError, TypePredicateError,
@@ -179,7 +179,6 @@ pub(crate) fn resolve_value_expression_for_argument(
         boolean_expressions::ObjectBooleanExpressionType,
     >,
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
-    data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
 ) -> Result<ValueExpression, Error> {
     match value_expression {
         open_dds::permissions::ValueExpression::SessionVariable(session_variable) => {
@@ -213,16 +212,14 @@ pub(crate) fn resolve_value_expression_for_argument(
 
             // look up this type in the context of it's data connector
             // so that we use the correct column names for the data source
-            let data_connector_field_mappings = data_connector_type_mappings
+            let data_connector_field_mappings = object_type_representation
+                .type_mappings
                 .get(
-                    &boolean_expression_type.object_type,
                     &boolean_expression_type.data_connector_name,
                     &boolean_expression_type.data_connector_object_type,
                 )
                 .map(|type_mapping| match type_mapping {
-                    data_connector_type_mappings::TypeMapping::Object {
-                        field_mappings, ..
-                    } => field_mappings,
+                    object_types::TypeMapping::Object { field_mappings, .. } => field_mappings,
                 })
                 .ok_or(Error::DataConnectorTypeMappingValidationError {
                     type_name: base_type.clone(),
@@ -259,11 +256,11 @@ pub(crate) fn resolve_value_expression_for_argument(
 pub(crate) fn resolve_model_predicate_with_type(
     model_predicate: &permissions::ModelPredicate,
     type_name: &Qualified<CustomTypeName>,
-    data_connector_field_mappings: &BTreeMap<FieldName, data_connector_type_mappings::FieldMapping>,
+    data_connector_field_mappings: &BTreeMap<FieldName, object_types::FieldMapping>,
     data_connector_name: &Qualified<DataConnectorName>,
     subgraph: &str,
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
-    fields: &IndexMap<FieldName, data_connector_type_mappings::FieldDefinition>,
+    fields: &IndexMap<FieldName, object_types::FieldDefinition>,
 ) -> Result<model_permissions::ModelPredicate, Error> {
     match model_predicate {
         permissions::ModelPredicate::FieldComparison(permissions::FieldComparisonPredicate {
@@ -419,7 +416,7 @@ fn resolve_binary_operator_for_type(
     type_name: &Qualified<CustomTypeName>,
     data_connector: &Qualified<DataConnectorName>,
     field_name: &FieldName,
-    fields: &IndexMap<FieldName, data_connector_type_mappings::FieldDefinition>,
+    fields: &IndexMap<FieldName, object_types::FieldDefinition>,
     scalars: &HashMap<&str, data_connector_scalar_types::ScalarTypeWithRepresentationInfo>,
     ndc_scalar_type: &ndc_models::ScalarType,
     subgraph: &str,

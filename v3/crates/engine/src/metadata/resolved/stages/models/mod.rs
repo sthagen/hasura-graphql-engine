@@ -14,8 +14,8 @@ use crate::metadata::resolved::helpers::type_mappings;
 use crate::metadata::resolved::helpers::types::NdcColumnForComparison;
 use crate::metadata::resolved::helpers::types::{mk_name, store_new_graphql_type};
 use crate::metadata::resolved::stages::{
-    boolean_expressions, data_connector_scalar_types, data_connector_type_mappings,
-    data_connectors, graphql_config, scalar_types, type_permissions,
+    boolean_expressions, data_connector_scalar_types, data_connectors, graphql_config,
+    object_types, scalar_types, type_permissions,
 };
 use crate::metadata::resolved::types::subgraph::{
     mk_qualified_type_reference, ArgumentInfo, Qualified,
@@ -38,7 +38,6 @@ use std::iter;
 pub fn resolve(
     metadata_accessor: &open_dds::accessor::MetadataAccessor,
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
-    data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
     existing_graphql_types: &HashSet<ast::TypeName>,
     global_id_enabled_types: &HashMap<Qualified<CustomTypeName>, Vec<Qualified<ModelName>>>,
     apollo_federation_entity_enabled_types: &HashMap<
@@ -98,7 +97,6 @@ pub fn resolve(
                 data_connectors,
                 object_types,
                 scalar_types,
-                data_connector_type_mappings,
                 boolean_expression_types,
             )?;
         }
@@ -181,7 +179,7 @@ fn resolve_filter_expression_type(
 
 fn resolve_orderable_fields(
     model: &ModelV1,
-    type_fields: &IndexMap<FieldName, data_connector_type_mappings::FieldDefinition>,
+    type_fields: &IndexMap<FieldName, object_types::FieldDefinition>,
 ) -> Result<Vec<OrderableField>, Error> {
     for field in &model.orderable_fields {
         // Check for unknown orderable field
@@ -454,16 +452,14 @@ fn resolve_model_graphql_api(
                 )?;
                 order_by_expression_type_name
                     .map(|order_by_type_name| {
-                        let data_connector_type_mappings::TypeMapping::Object {
-                            field_mappings,
-                            ..
-                        } = model_source.type_mappings.get(&model.data_type).ok_or(
-                            Error::TypeMappingRequired {
+                        let object_types::TypeMapping::Object { field_mappings, .. } = model_source
+                            .type_mappings
+                            .get(&model.data_type)
+                            .ok_or(Error::TypeMappingRequired {
                                 model_name: model_name.clone(),
                                 type_name: model.data_type.clone(),
                                 data_connector: model_source.data_connector.name.clone(),
-                            },
-                        )?;
+                            })?;
 
                         let mut order_by_fields = HashMap::new();
                         for (field_name, field_mapping) in field_mappings.iter() {
@@ -574,7 +570,6 @@ fn resolve_model_source(
     data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
     object_types: &HashMap<Qualified<CustomTypeName>, type_permissions::ObjectTypeWithPermissions>,
     scalar_types: &HashMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
-    data_connector_type_mappings: &data_connector_type_mappings::DataConnectorTypeMappings,
     boolean_expression_types: &HashMap<
         Qualified<CustomTypeName>,
         boolean_expressions::ObjectBooleanExpressionType,
@@ -636,7 +631,6 @@ fn resolve_model_source(
     {
         type_mappings::collect_type_mapping_for_source(
             type_mapping_to_collect,
-            data_connector_type_mappings,
             &qualified_data_connector_name,
             object_types,
             scalar_types,
@@ -761,7 +755,7 @@ pub(crate) fn get_ndc_column_for_comparison<F: Fn() -> String>(
     comparison_location: F,
 ) -> Result<NdcColumnForComparison, Error> {
     // Get field mappings of model data type
-    let data_connector_type_mappings::TypeMapping::Object { field_mappings, .. } = model_source
+    let object_types::TypeMapping::Object { field_mappings, .. } = model_source
         .type_mappings
         .get(model_data_type)
         .ok_or(Error::TypeMappingRequired {

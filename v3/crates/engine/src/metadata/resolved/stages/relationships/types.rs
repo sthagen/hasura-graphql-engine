@@ -1,4 +1,4 @@
-use crate::metadata::resolved::stages::{data_connector_type_mappings, type_permissions};
+use crate::metadata::resolved::stages::{object_types, type_permissions};
 use crate::metadata::resolved::types::subgraph::{Qualified, QualifiedTypeReference};
 use indexmap::IndexMap;
 use open_dds::permissions::Role;
@@ -16,7 +16,7 @@ use open_dds::types::Deprecated;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, derive_more::Display)]
 #[display(fmt = "Display")]
 pub struct ObjectTypeWithRelationships {
-    pub object_type: data_connector_type_mappings::ObjectTypeRepresentation,
+    pub object_type: object_types::ObjectTypeRepresentation,
     /// permissions on this type, when it is used in an output context (e.g. as
     /// a return type of Model or Command)
     pub type_output_permissions: HashMap<Role, open_dds::permissions::TypeOutputPermission>,
@@ -25,6 +25,8 @@ pub struct ObjectTypeWithRelationships {
     pub type_input_permissions: HashMap<Role, type_permissions::TypeInputPermission>,
     /// any relationships defined on this object
     pub relationships: IndexMap<ast::Name, Relationship>,
+    /// type mappings for each data connector
+    pub type_mappings: object_types::DataConnectorTypeMappingsForObject,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
