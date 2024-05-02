@@ -3,17 +3,16 @@ use ndc_models;
 use std::collections::{BTreeMap, HashMap};
 
 use super::commands;
+use super::error;
 use super::model_selection;
 use super::relationships;
 use super::ProcessResponseAs;
-use crate::execute::error;
-use crate::execute::ir::relationship;
 use crate::execute::ir::selection_set::{FieldSelection, NestedSelection, ResultSelectionSet};
 use crate::execute::remote_joins::types::{
     JoinLocations, JoinNode, LocationKind, MonotonicCounter, RemoteJoinType, TargetField,
 };
 use crate::execute::remote_joins::types::{Location, RemoteJoin};
-use crate::metadata::resolved::FieldMapping;
+use metadata_resolve::FieldMapping;
 
 pub(crate) fn process_nested_selection<'s, 'ir>(
     nested_selection: &'ir NestedSelection<'s>,
@@ -301,7 +300,7 @@ pub(crate) fn collect_relationships_from_selection(
             } => {
                 relationships.insert(
                     name.to_string(),
-                    relationship::process_model_relationship_definition(relationship_info)?,
+                    relationships::process_model_relationship_definition(relationship_info)?,
                 );
                 relationships::collect_relationships(query, relationships)?;
             }
@@ -312,7 +311,7 @@ pub(crate) fn collect_relationships_from_selection(
             } => {
                 relationships.insert(
                     name.to_string(),
-                    relationship::process_command_relationship_definition(relationship_info)?,
+                    relationships::process_command_relationship_definition(relationship_info)?,
                 );
                 if let Some(nested_selection) = &ir.command_info.selection {
                     collect_relationships_from_nested_selection(nested_selection, relationships)?;

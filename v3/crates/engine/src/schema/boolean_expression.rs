@@ -5,11 +5,11 @@ use open_dds::types::CustomTypeName;
 use std::collections::{BTreeMap, HashMap};
 
 use super::types::output_type::get_object_type_representation;
-use super::types::output_type::relationship::{FilterRelationshipAnnotation, ModelTargetSource};
+use super::types::output_type::relationship::FilterRelationshipAnnotation;
 use super::types::{BooleanExpressionAnnotation, InputAnnotation, TypeId};
-use crate::metadata::resolved;
-use crate::metadata::resolved::mk_name;
-use crate::metadata::resolved::Qualified;
+use metadata_resolve;
+use metadata_resolve::mk_name;
+use metadata_resolve::Qualified;
 
 use crate::schema::permissions;
 use crate::schema::types;
@@ -141,7 +141,7 @@ pub fn build_boolean_expression_input_schema(
         // relationship fields
         // TODO(naveen): Add support for command relationships
         for (rel_name, relationship) in object_type_representation.relationships.iter() {
-            if let resolved::RelationshipTarget::Model {
+            if let metadata_resolve::RelationshipTarget::Model {
                 model_name,
                 relationship_type,
                 target_typename,
@@ -161,11 +161,14 @@ pub fn build_boolean_expression_input_schema(
                 // the target_model is backed by a source
                 if let Some(target_source) = &target_model.model.source {
                     let target_model_source =
-                        ModelTargetSource::from_model_source(target_source, relationship)?;
+                        metadata_resolve::ModelTargetSource::from_model_source(
+                            target_source,
+                            relationship,
+                        )?;
 
                     // filter expression with relationships is currently only supported for local relationships
-                    if let resolved::RelationshipExecutionCategory::Local =
-                        resolved::relationship_execution_category(
+                    if let metadata_resolve::RelationshipExecutionCategory::Local =
+                        metadata_resolve::relationship_execution_category(
                             &boolean_expression_type.data_connector_link,
                             &target_source.data_connector,
                             &target_model_source.capabilities,
@@ -255,7 +258,7 @@ pub fn build_boolean_expression_input_schema(
 
 fn get_scalar_comparison_input_type(
     builder: &mut gql_schema::Builder<GDS>,
-    comparison_expression: &resolved::ComparisonExpressionInfo,
+    comparison_expression: &metadata_resolve::ComparisonExpressionInfo,
 ) -> Result<gql_schema::RegisteredTypeName, Error> {
     let graphql_type_name = comparison_expression.type_name.clone();
     let mut operators = Vec::new();

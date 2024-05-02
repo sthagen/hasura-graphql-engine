@@ -49,6 +49,9 @@ alias fmt := format
 fix-local:
   cargo clippy --no-deps --fix --allow-no-vcs
   cargo fmt
+  just fix-format
+
+fix-format:
   prettier --write .
 
 # tests run by CI
@@ -68,6 +71,7 @@ test TESTNAME='':
 update-golden-files: docker-refresh
   docker compose -f ci.docker-compose.yaml run --rm -e REGENERATE_GOLDENFILES=1 test_setup \
     cargo nextest run --archive-file=./bin/nextest.tar.zst --no-fail-fast
+  just fix-format
 
 # Benchmarks run by CI
 ci-bench:
@@ -144,6 +148,7 @@ machete:
 # update golden tests
 update-golden-files-local: start-docker-test-deps
   REGENERATE_GOLDENFILES=1 cargo test
+  just fix-format
 
 # run the engine using schema from tests
 run-local: start-docker-test-deps start-docker-run-deps
@@ -153,13 +158,13 @@ run-local: start-docker-test-deps start-docker-run-deps
   --metadata-path crates/engine/tests/schema.json
 
 # check the docker build works
-build-docker-with-nix:
+build-docker-with-nix binary="engine":
   #!/usr/bin/env bash
-  echo "$(tput bold)nix build .#engine-docker | gunzip | docker load$(tput sgr0)"
-  gunzip < "$(nix build --no-warn-dirty --no-link --print-out-paths '.#engine-docker')" | docker load
+  echo "$(tput bold)nix build .#{{ binary }}-docker | gunzip | docker load$(tput sgr0)"
+  gunzip < "$(nix build --no-warn-dirty --no-link --print-out-paths '.#{{ binary }}-docker')" | docker load
 
-# check the Postgres arm64 docker build works
-build-aarch64-docker-with-nix:
+# check the arm64 docker build works
+build-aarch64-docker-with-nix binary="engine":
   #!/usr/bin/env bash
-  echo "$(tput bold)nix build .#engine-docker-aarch64-linux | gunzip | docker load$(tput sgr0)"
-  gunzip < "$(nix build --no-warn-dirty --no-link --print-out-paths --system aarch64-linux '.#engine-docker-aarch64-linux')" | docker load
+  echo "$(tput bold)nix build .#{{ binary }}-docker-aarch64-linux | gunzip | docker load$(tput sgr0)"
+  gunzip < "$(nix build --no-warn-dirty --no-link --print-out-paths --system aarch64-linux '.#{{ binary }}-docker-aarch64-linux')" | docker load
