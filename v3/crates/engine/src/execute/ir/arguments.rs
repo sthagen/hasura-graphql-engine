@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::execute::model_tracking::UsagesCounts;
 use hasura_authn_core::SessionVariables;
 use lang_graphql::ast::common::Name;
 use lang_graphql::normalized_ast::{InputField, Value};
@@ -9,10 +10,10 @@ use open_dds::types::{CustomTypeName, InbuiltType};
 
 use crate::execute::ir::arguments;
 use crate::execute::ir::error;
-use crate::schema::types::{
+use crate::schema::GDS;
+use crate::schema::{
     Annotation, ArgumentNameAndPath, ArgumentPresets, InputAnnotation, ModelInputAnnotation,
 };
-use crate::schema::GDS;
 use metadata_resolve::TypeMapping;
 use metadata_resolve::{Qualified, QualifiedBaseType, QualifiedTypeName, QualifiedTypeReference};
 
@@ -70,6 +71,7 @@ pub(crate) fn process_model_arguments_presets(
     argument_presets: &ArgumentPresets,
     session_variables: &SessionVariables,
     model_arguments: &mut BTreeMap<String, ndc_models::Argument>,
+    usage_counts: &mut UsagesCounts,
 ) -> Result<(), error::Error> {
     let ArgumentPresets { argument_presets } = argument_presets;
     for (argument_name_and_path, (field_type, argument_value)) in argument_presets {
@@ -90,6 +92,7 @@ pub(crate) fn process_model_arguments_presets(
             argument_value,
             field_type,
             session_variables,
+            usage_counts,
         )?;
 
         match NonEmpty::from_slice(field_path) {

@@ -6,20 +6,19 @@ use lang_graphql as gql;
 use lang_graphql::ast::common as ast;
 use open_dds::{commands::CommandName, models, types::CustomTypeName};
 
+use crate::execute::model_tracking::UsagesCounts;
 use std::collections::HashMap;
 
 use super::commands;
 use super::error;
 use super::root_field;
-use crate::schema::types::ApolloFederationRootFields;
-use crate::schema::types::CommandSourceDetail;
-use crate::schema::types::EntityFieldTypeNameMapping;
-use crate::schema::types::RootFieldKind;
-use crate::schema::types::TypeKind;
-use crate::schema::types::{
-    Annotation, NodeFieldTypeNameMapping, OutputAnnotation, RootFieldAnnotation,
-};
+use crate::schema::ApolloFederationRootFields;
+use crate::schema::CommandSourceDetail;
+use crate::schema::EntityFieldTypeNameMapping;
+use crate::schema::RootFieldKind;
+use crate::schema::TypeKind;
 use crate::schema::{mk_typename, GDS};
+use crate::schema::{Annotation, NodeFieldTypeNameMapping, OutputAnnotation, RootFieldAnnotation};
 use metadata_resolve;
 
 pub mod apollo_federation;
@@ -221,6 +220,7 @@ fn generate_command_rootfield_ir<'n, 's>(
     field_call: &'s gql::normalized_ast::FieldCall<'s, GDS>,
     session_variables: &SessionVariables,
 ) -> Result<root_field::QueryRootField<'n, 's>, error::Error> {
+    let mut usage_counts = UsagesCounts::new();
     let source =
         source
             .as_ref()
@@ -247,6 +247,7 @@ fn generate_command_rootfield_ir<'n, 's>(
             *result_base_type_kind,
             source,
             session_variables,
+            &mut usage_counts,
         )?,
     };
     Ok(ir)

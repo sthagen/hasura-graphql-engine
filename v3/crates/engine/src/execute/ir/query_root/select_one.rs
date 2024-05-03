@@ -21,8 +21,8 @@ use crate::execute::model_tracking::{count_model, UsagesCounts};
 use metadata_resolve;
 use metadata_resolve::Qualified;
 
-use crate::schema::types::{self, Annotation, ModelInputAnnotation};
 use crate::schema::GDS;
+use crate::schema::{self, Annotation, ModelInputAnnotation};
 
 /// IR for the 'select_one' operation on a model
 #[derive(Serialize, Debug)]
@@ -53,7 +53,7 @@ pub(crate) fn select_one_generate_ir<'n, 's>(
     let mut model_argument_fields = Vec::new();
     for argument in field_call.arguments.values() {
         match argument.info.generic {
-            annotation @ Annotation::Input(types::InputAnnotation::Model(
+            annotation @ Annotation::Input(schema::InputAnnotation::Model(
                 model_input_argument_annotation,
             )) => match model_input_argument_annotation {
                 ModelInputAnnotation::ModelArgument { .. } => {
@@ -83,6 +83,10 @@ pub(crate) fn select_one_generate_ir<'n, 's>(
             })?,
         }
     }
+    // Add the name of the root model
+    let mut usage_counts = UsagesCounts::new();
+    count_model(model_name, &mut usage_counts);
+
     let mut model_arguments = arguments::build_ndc_model_arguments(
         &field_call.name,
         model_argument_fields.into_iter(),
@@ -95,12 +99,9 @@ pub(crate) fn select_one_generate_ir<'n, 's>(
             argument_presets,
             session_variables,
             &mut model_arguments,
+            &mut usage_counts,
         )?;
     }
-
-    // Add the name of the root model
-    let mut usage_counts = UsagesCounts::new();
-    count_model(model_name, &mut usage_counts);
 
     let filter_clause = ResolvedFilterExpression {
         expression: Some(ndc_models::Expression::And {
