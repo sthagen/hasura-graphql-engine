@@ -20,13 +20,13 @@ use super::selection_set;
 use crate::execute::ir::error;
 use crate::execute::ir::permissions;
 use crate::execute::model_tracking::{count_command, UsagesCounts};
-use crate::schema::ArgumentNameAndPath;
-use crate::schema::ArgumentPresets;
-use crate::schema::CommandSourceDetail;
-use crate::schema::TypeKind;
-use crate::schema::GDS;
 use metadata_resolve;
-use metadata_resolve::{Qualified, QualifiedTypeReference};
+use metadata_resolve::{ConnectorArgumentName, Qualified, QualifiedTypeReference};
+use schema::ArgumentNameAndPath;
+use schema::ArgumentPresets;
+use schema::CommandSourceDetail;
+use schema::TypeKind;
+use schema::GDS;
 
 /// IR for the 'command' operations
 #[derive(Serialize, Debug)]
@@ -64,7 +64,7 @@ pub struct FunctionBasedCommand<'s> {
     pub function_name: &'s FunctionName,
 
     /// Variable arguments to be used for remote joins
-    pub variable_arguments: BTreeMap<String, String>,
+    pub variable_arguments: BTreeMap<ConnectorArgumentName, String>,
 }
 
 /// IR for the 'procedure based command' operations

@@ -20,18 +20,21 @@ use tracing_util::{
 };
 
 use base64::engine::Engine;
+use engine::VERSION;
 use engine::{
     authentication::{AuthConfig, AuthConfig::V1 as V1AuthConfig, AuthModeConfig},
     execute::HttpContext,
 };
-use engine::{schema::GDS, VERSION};
 use hasura_authn_core::Session;
 use hasura_authn_jwt::auth as jwt_auth;
 use hasura_authn_jwt::jwt;
 use hasura_authn_webhook::webhook;
 use lang_graphql as gql;
+use schema::GDS;
 use std::hash;
 use std::hash::{Hash, Hasher};
+
+mod cors;
 
 const DEFAULT_PORT: u16 = 3000;
 
@@ -58,6 +61,19 @@ struct ServerOptions {
     /// The port on which the server listens.
     #[arg(long, value_name = "PORT", env = "PORT", default_value_t = DEFAULT_PORT)]
     port: u16,
+    /// Enable CORS. Support preflight request and include related headers in responses.
+    #[arg(long, env = "ENABLE_CORS")]
+    enable_cors: bool,
+    /// The list of allowed origins for CORS. If not provided, all origins are allowed.
+    /// Requires `--enable-cors` to be set.
+    #[arg(
+        long,
+        value_name = "ORIGIN_LIST",
+        env = "CORS_ALLOW_ORIGIN",
+        requires = "enable_cors",
+        value_delimiter = ','
+    )]
+    cors_allow_origin: Vec<String>,
 }
 
 struct EngineState {
@@ -193,7 +209,7 @@ async fn start_engine(server: &ServerOptions) -> Result<(), StartupError> {
 
     let health_route = Router::new().route("/health", get(handle_health));
 
-    let app_ = Router::new()
+    let app = Router::new()
         // serve graphiql at root
         .route("/", get(graphiql))
         .merge(graphql_route)
@@ -202,27 +218,25 @@ async fn start_engine(server: &ServerOptions) -> Result<(), StartupError> {
         .layer(DefaultBodyLimit::max(10 * MB)); // Set request payload limit to 10 MB
 
     // If `--introspection-metadata` is specified we also serve the file indicated on `/metadata`
-    // and its hash on `/metadata-hash`. This is a temporary workaround to enable the console to
-    // interact with an engine process running locally (c.f running in the hasura cloud).
+    // and its hash on `/metadata-hash`.
     let app = match &server.introspection_metadata {
-        None => app_,
-        Some(path) => {
-            let file_contents = tokio::fs::read_to_string(path)
-                .await
-                .map_err(|err| StartupError::ReadSchema(err.into()))?;
-            let mut hasher = hash::DefaultHasher::new();
-            file_contents.hash(&mut hasher);
-            let hash = hasher.finish();
-            let base64_hash = base64::engine::general_purpose::STANDARD.encode(hash.to_ne_bytes());
-            app_.merge(Router::new().route("/metadata", get(|| async { file_contents })))
-                .merge(Router::new().route("/metadata-hash", get(|| async { base64_hash })))
-        }
+        None => app,
+        Some(path) => add_metadata_routes(app, path).await?,
     };
 
     let address = net::SocketAddr::new(server.host, server.port);
     let log = format!("starting server on {address}");
     println!("{log}");
     add_event_on_active_span(log);
+
+    // If `--enable-cors` is specified, we add a CORS layer to the app.
+    // It is important that this layer is added last, since it only affects the layers that precede
+    // it.
+    let app = if server.enable_cors {
+        cors::add_cors_layer(app, &server.cors_allow_origin)
+    } else {
+        app
+    };
 
     // run it with hyper on `addr`
     axum::Server::bind(&address)
@@ -456,4 +470,23 @@ fn read_auth_config(path: &PathBuf) -> Result<AuthConfig, anyhow::Error> {
     Ok(open_dds::traits::OpenDd::deserialize(
         serde_json::from_str(&raw_auth_config)?,
     )?)
+}
+
+/// Serve the introspection metadata file and its hash at `/metadata` and `/metadata-hash` respectively.
+/// This is a temporary workaround to enable the console to interact with an engine process running locally.
+async fn add_metadata_routes(
+    app: Router,
+    introspection_metadata_path: &PathBuf,
+) -> Result<Router, StartupError> {
+    let file_contents = tokio::fs::read_to_string(introspection_metadata_path)
+        .await
+        .map_err(|err| StartupError::ReadSchema(err.into()))?;
+    let mut hasher = hash::DefaultHasher::new();
+    file_contents.hash(&mut hasher);
+    let hash = hasher.finish();
+    let base64_hash = base64::engine::general_purpose::STANDARD.encode(hash.to_ne_bytes());
+    let new_app = app
+        .merge(Router::new().route("/metadata", get(|| async { file_contents })))
+        .merge(Router::new().route("/metadata-hash", get(|| async { base64_hash })));
+    Ok(new_app)
 }
