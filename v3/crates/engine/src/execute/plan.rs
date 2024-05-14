@@ -708,7 +708,7 @@ async fn execute_mutation_field_plan<'n, 's, 'ir>(
     tracer
         .in_span_async(
             "execute_mutation_field_plan",
-            "Execute request plan for mutation field".to_string(),
+            "Execute request plan for mutation field",
             tracing_util::SpanVisibility::User,
             || {
                 Box::pin(async {
@@ -860,8 +860,7 @@ async fn resolve_ndc_query_execution(
         project_id,
     )
     .await?;
-    let result = process_response(selection_set, response, process_response_as)?;
-    Ok(json::to_value(result)?)
+    process_response(selection_set, response, process_response_as)
 }
 
 async fn resolve_ndc_mutation_execution(
@@ -879,7 +878,7 @@ async fn resolve_ndc_mutation_execution(
         // TODO: remote joins are not handled for mutations
         join_locations: _,
     } = ndc_query;
-    let response = ndc::execute_ndc_mutation(
+    ndc::execute_ndc_mutation(
         http_context,
         &query,
         data_connector,
@@ -889,8 +888,7 @@ async fn resolve_ndc_mutation_execution(
         process_response_as,
         project_id,
     )
-    .await?;
-    Ok(json::to_value(response)?)
+    .await
 }
 
 async fn resolve_optional_ndc_select(
