@@ -195,7 +195,11 @@ pub(crate) fn resolve_value_expression_for_argument(
         object_boolean_expressions::ObjectBooleanExpressionType,
     >,
     models: &IndexMap<Qualified<ModelName>, models::Model>,
-    data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
+    data_connectors: &data_connectors::DataConnectors,
+    data_connector_scalars: &BTreeMap<
+        Qualified<DataConnectorName>,
+        data_connector_scalar_types::ScalarTypeWithRepresentationInfoMap,
+    >,
 ) -> Result<ValueExpression, Error> {
     match value_expression {
         open_dds::permissions::ValueExpression::SessionVariable(session_variable) => {
@@ -243,8 +247,6 @@ pub(crate) fn resolve_value_expression_for_argument(
                 },
             })?;
 
-            // look up this type in the context of it's data connector
-            // so that we use the correct column names for the data source
             let data_connector_field_mappings = object_type_representation
                 .type_mappings
                 .get(
@@ -265,6 +267,16 @@ pub(crate) fn resolve_value_expression_for_argument(
                     },
                 })?;
 
+            // Get available scalars defined for this data connector
+            let specific_data_connector_scalars = data_connector_scalars
+                .get(&object_boolean_expression_type.data_connector_name)
+                .ok_or(Error::TypePredicateError {
+                    type_predicate_error: TypePredicateError::UnknownTypeDataConnector {
+                        type_name: base_type.clone(),
+                        data_connector: object_boolean_expression_type.data_connector_name.clone(),
+                    },
+                })?;
+
             let resolved_model_predicate = resolve_model_predicate_with_type(
                 bool_exp,
                 base_type,
@@ -273,6 +285,7 @@ pub(crate) fn resolve_value_expression_for_argument(
                 &object_boolean_expression_type.data_connector_name,
                 subgraph,
                 data_connectors,
+                specific_data_connector_scalars,
                 object_types,
                 scalar_types,
                 models,
@@ -297,10 +310,10 @@ pub(crate) fn resolve_model_predicate_with_type(
     data_connector_field_mappings: &BTreeMap<FieldName, object_types::FieldMapping>,
     data_connector_name: &Qualified<DataConnectorName>,
     subgraph: &str,
-    data_connectors: &data_connector_scalar_types::DataConnectorsWithScalars,
+    data_connectors: &data_connectors::DataConnectors,
+    scalars: &data_connector_scalar_types::ScalarTypeWithRepresentationInfoMap,
     object_types: &BTreeMap<Qualified<CustomTypeName>, relationships::ObjectTypeWithRelationships>,
     scalar_types: &BTreeMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
-
     models: &IndexMap<Qualified<ModelName>, models::Model>,
     fields: &IndexMap<FieldName, object_types::FieldDefinition>,
 ) -> Result<model_permissions::ModelPredicate, Error> {
@@ -324,19 +337,6 @@ pub(crate) fn resolve_model_predicate_with_type(
             })?;
             // Determine ndc type of the field
             let field_ndc_type = &field_mapping.column_type;
-
-            // Determine whether the ndc type is a simple scalar
-            // Get available scalars defined in the data connector
-            let scalars = &data_connectors
-                .data_connectors_with_scalars
-                .get(data_connector_name)
-                .ok_or(Error::TypePredicateError {
-                    type_predicate_error: TypePredicateError::UnknownTypeDataConnector {
-                        type_name: type_name.clone(),
-                        data_connector: data_connector_name.clone(),
-                    },
-                })?
-                .scalars;
 
             // Get scalar type info from the data connector
             let (_, scalar_type_info) =
@@ -407,6 +407,7 @@ pub(crate) fn resolve_model_predicate_with_type(
         }) => {
             if let Some(nested_predicate) = predicate {
                 let relationship_field_name = mk_name(&name.0)?;
+
                 let relationship = &object_type_representation
                     .relationships
                     .get(&relationship_field_name)
@@ -461,9 +462,15 @@ pub(crate) fn resolve_model_predicate_with_type(
                                 }
                                     })?;
 
+                                let target_object_type_representation = object_types
+                                    .get(&target_model.data_type)
+                                    .ok_or(Error::UnknownType {
+                                        data_type: target_model.data_type.clone(),
+                                    })?;
+
                                 // validate data connector name
                                 let data_connector_context = data_connectors
-                                    .data_connectors_with_scalars
+                                    .0
                                     .get(data_connector_name)
                                     .ok_or_else(|| {
                                         Error::from(TypePredicateError::UnknownTypeDataConnector {
@@ -480,7 +487,7 @@ pub(crate) fn resolve_model_predicate_with_type(
 
                                 // look up this type in the context of it's data connector
                                 // so that we use the correct column names for the data source
-                                let data_connector_field_mappings = object_type_representation.type_mappings.get(
+                                let data_connector_field_mappings = target_object_type_representation.type_mappings.get(
                                     &target_source.model.data_connector.name,
                                     DataConnectorObjectType::ref_cast(&target_source.model.collection)
                                 )
@@ -562,6 +569,7 @@ pub(crate) fn resolve_model_predicate_with_type(
                                     data_connector_name,
                                     subgraph,
                                     data_connectors,
+                                    scalars,
                                     object_types,
                                     scalar_types,
                                     models,
@@ -607,6 +615,7 @@ pub(crate) fn resolve_model_predicate_with_type(
                 data_connector_name,
                 subgraph,
                 data_connectors,
+                scalars,
                 object_types,
                 scalar_types,
                 models,
@@ -627,6 +636,7 @@ pub(crate) fn resolve_model_predicate_with_type(
                     data_connector_name,
                     subgraph,
                     data_connectors,
+                    scalars,
                     object_types,
                     scalar_types,
                     models,
@@ -646,6 +656,7 @@ pub(crate) fn resolve_model_predicate_with_type(
                     data_connector_name,
                     subgraph,
                     data_connectors,
+                    scalars,
                     object_types,
                     scalar_types,
                     models,
@@ -664,7 +675,7 @@ fn resolve_binary_operator_for_type(
     data_connector: &Qualified<DataConnectorName>,
     field_name: &FieldName,
     fields: &IndexMap<FieldName, object_types::FieldDefinition>,
-    scalars: &BTreeMap<&str, data_connector_scalar_types::ScalarTypeWithRepresentationInfo>,
+    scalars: &data_connector_scalar_types::ScalarTypeWithRepresentationInfoMap,
     ndc_scalar_type: &ndc_models::ScalarType,
     subgraph: &str,
 ) -> Result<(String, QualifiedTypeReference), Error> {
