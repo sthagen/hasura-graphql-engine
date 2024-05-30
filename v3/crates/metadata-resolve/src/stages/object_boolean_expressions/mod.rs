@@ -11,7 +11,10 @@ use crate::types::subgraph::Qualified;
 
 use crate::helpers::type_mappings;
 use lang_graphql::ast::common as ast;
-use open_dds::{data_connector::DataConnectorName, types::CustomTypeName};
+use open_dds::{
+    data_connector::DataConnectorName,
+    types::{CustomTypeName, OperatorName},
+};
 use std::collections::{BTreeMap, BTreeSet};
 pub use types::{
     BooleanExpressionGraphqlConfig, BooleanExpressionInfo, BooleanExpressionsOutput,
@@ -153,7 +156,7 @@ pub(crate) fn resolve_object_boolean_expression_type(
                 })?;
 
     // validate comparable fields
-    for comparable_field in object_boolean_expression.comparable_fields.iter() {
+    for comparable_field in &object_boolean_expression.comparable_fields {
         if !object_type_representation
             .object_type
             .fields
@@ -304,7 +307,7 @@ pub fn resolve_boolean_expression_info(
             graphql_config_error: GraphqlConfigError::MissingFilterInputFieldInGraphqlConfig,
         })?;
 
-    for (field_name, field_mapping) in field_mappings.iter() {
+    for (field_name, field_mapping) in field_mappings {
         // Generate comparison expression for fields mapped to simple scalar type
         if let Some((scalar_type_name, scalar_type_info)) =
             data_connector_scalar_types::get_simple_scalar(
@@ -314,11 +317,9 @@ pub fn resolve_boolean_expression_info(
         {
             if let Some(graphql_type_name) = &scalar_type_info.comparison_expression_name.clone() {
                 let mut operators = BTreeMap::new();
-                for (op_name, op_definition) in
-                    scalar_type_info.scalar_type.comparison_operators.iter()
-                {
+                for (op_name, op_definition) in &scalar_type_info.scalar_type.comparison_operators {
                     operators.insert(
-                        op_name.clone(),
+                        OperatorName(op_name.clone()),
                         resolve_ndc_type(
                             data_connector_name,
                             &get_argument_type(op_definition, &field_mapping.column_type),
@@ -333,7 +334,6 @@ pub fn resolve_boolean_expression_info(
                     scalar_fields.insert(
                         field_name.clone(),
                         ComparisonExpressionInfo {
-                            data_connector_name: data_connector_name.clone(),
                             scalar_type_name: scalar_type_name.clone(),
                             type_name: graphql_type_name.clone(),
                             ndc_column: field_mapping.column.clone(),
@@ -341,7 +341,7 @@ pub fn resolve_boolean_expression_info(
                             is_null_operator_name: filter_graphql_config
                                 .operator_names
                                 .is_null
-                                .to_string(),
+                                .clone(),
                         },
                     );
                 };

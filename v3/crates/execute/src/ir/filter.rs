@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use crate::ir::error;
 use crate::model_tracking::{count_model, UsagesCounts};
+use open_dds::data_connector::DataConnectorColumnName;
 use schema::FilterRelationshipAnnotation;
 use schema::GDS;
 use schema::{self};
@@ -61,7 +62,7 @@ fn build_filter_expression<'s>(
             // The "_and" field value should be a list
             let and_values = field.value.as_list()?;
 
-            for value in and_values.iter() {
+            for value in and_values {
                 // Each value in the list should be an object
                 let value_object = value.as_object()?;
                 and_expressions.push(resolve_filter_object(
@@ -84,7 +85,7 @@ fn build_filter_expression<'s>(
             // The "_or" field value should be a list
             let or_values = field.value.as_list()?;
 
-            for value in or_values.iter() {
+            for value in or_values {
                 let value_object = value.as_object()?;
                 or_expressions.push(resolve_filter_object(
                     value_object,
@@ -226,12 +227,12 @@ fn resolve_filter_object<'s>(
 /// Generate a binary comparison operator
 fn build_binary_comparison_expression(
     operator: &str,
-    column: String,
+    column: DataConnectorColumnName,
     value: &normalized_ast::Value<'_, GDS>,
 ) -> ndc_models::Expression {
     ndc_models::Expression::BinaryComparisonOperator {
         column: ndc_models::ComparisonTarget::Column {
-            name: column,
+            name: column.0,
             path: Vec::new(),
         },
         operator: operator.to_string(),
@@ -243,13 +244,13 @@ fn build_binary_comparison_expression(
 
 /// Resolve `_is_null` GraphQL boolean operator
 fn build_is_null_expression(
-    column: String,
+    column: DataConnectorColumnName,
     value: &normalized_ast::Value<'_, GDS>,
 ) -> Result<ndc_models::Expression, error::Error> {
     // Build an 'IsNull' unary comparison expression
     let unary_comparison_expression = ndc_models::Expression::UnaryComparisonOperator {
         column: ndc_models::ComparisonTarget::Column {
-            name: column,
+            name: column.0,
             path: Vec::new(),
         },
         operator: ndc_models::UnaryComparisonOperator::IsNull,

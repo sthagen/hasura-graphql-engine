@@ -9,8 +9,12 @@ use serde::{
 };
 
 use crate::{
-    data_connector::DataConnectorName, data_connector::DataConnectorObjectType,
-    identifier::Identifier, impl_JsonSchema_with_OpenDd_for, impl_OpenDd_default_for,
+    data_connector::{
+        DataConnectorColumnName, DataConnectorName, DataConnectorObjectType,
+        DataConnectorScalarType,
+    },
+    identifier::Identifier,
+    impl_JsonSchema_with_OpenDd_for, impl_OpenDd_default_for,
     models::EnableAllOrSpecific,
 };
 
@@ -397,7 +401,7 @@ pub enum FieldMapping {
 /// The target column in a data connector object that a source field maps to.
 pub struct ColumnFieldMapping {
     /// The name of the target column
-    pub name: String, // TODO: Map field arguments
+    pub name: DataConnectorColumnName, // TODO: Map field arguments
 }
 
 /// The name of a field in a user-defined object type.
@@ -547,7 +551,7 @@ pub struct DataConnectorScalarRepresentationV1 {
     /// The name of the data connector that this scalar type comes from.
     pub data_connector_name: DataConnectorName,
     /// The name of the scalar type coming from the data connector.
-    pub data_connector_scalar_type: String,
+    pub data_connector_scalar_type: DataConnectorScalarType,
     /// The name of the Open DD type that this data connector scalar type should be represented as.
     pub representation: TypeName,
     /// Configuration for how this scalar's operators should appear in the GraphQL schema.

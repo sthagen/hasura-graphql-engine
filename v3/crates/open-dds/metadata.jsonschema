@@ -1178,10 +1178,18 @@
       "properties": {
         "name": {
           "description": "The name of the target column",
-          "type": "string"
+          "allOf": [
+            {
+              "$ref": "#/definitions/DataConnectorColumnName"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "DataConnectorColumnName": {
+      "description": "The name of a column in a data connector.",
+      "type": "string"
     },
     "ScalarTypeV1": {
       "$id": "https://hasura.io/jsonschemas/metadata/ScalarTypeV1",
@@ -1412,7 +1420,11 @@
         },
         "dataConnectorScalarType": {
           "description": "The name of the scalar type coming from the data connector.",
-          "type": "string"
+          "allOf": [
+            {
+              "$ref": "#/definitions/DataConnectorScalarType"
+            }
+          ]
         },
         "representation": {
           "description": "The name of the Open DD type that this data connector scalar type should be represented as.",
@@ -1435,6 +1447,12 @@
         }
       },
       "additionalProperties": false
+    },
+    "DataConnectorScalarType": {
+      "$id": "https://hasura.io/jsonschemas/metadata/DataConnectorScalarType",
+      "title": "DataConnectorScalarType",
+      "description": "The name of a scalar type in a data connector.",
+      "type": "string"
     },
     "TypeName": {
       "$id": "https://hasura.io/jsonschemas/metadata/TypeName",
