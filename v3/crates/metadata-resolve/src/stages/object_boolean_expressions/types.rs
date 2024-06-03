@@ -1,4 +1,4 @@
-use crate::stages::{data_connectors, object_types};
+use crate::stages::data_connectors;
 
 use crate::types::subgraph::{Qualified, QualifiedTypeReference};
 use std::collections::BTreeMap;
@@ -7,12 +7,12 @@ use lang_graphql::ast::common::{self as ast};
 use std::collections::BTreeSet;
 
 use open_dds::{
-    data_connector::{DataConnectorColumnName, DataConnectorName, DataConnectorObjectType},
+    data_connector::{DataConnectorName, DataConnectorObjectType},
     types::{CustomTypeName, FieldName, OperatorName},
 };
 use serde::{Deserialize, Serialize};
 
-pub struct BooleanExpressionsOutput {
+pub struct ObjectBooleanExpressionsOutput {
     pub object_boolean_expression_types:
         BTreeMap<Qualified<CustomTypeName>, ObjectBooleanExpressionType>,
     pub graphql_types: BTreeSet<ast::TypeName>,
@@ -29,9 +29,7 @@ pub struct ObjectBooleanExpressionDataConnector {
 pub struct ObjectBooleanExpressionType {
     pub name: Qualified<CustomTypeName>,
     pub object_type: Qualified<CustomTypeName>,
-    pub type_mappings:
-        BTreeMap<Qualified<open_dds::types::CustomTypeName>, object_types::TypeMapping>,
-    pub graphql: Option<BooleanExpressionInfo>,
+    pub graphql: Option<BooleanExpressionGraphqlConfig>,
 
     /// in future we'll not be using this at all, for now it is here, and we use it only to check
     /// the user has not included something that does not make sense
@@ -42,13 +40,12 @@ pub struct ObjectBooleanExpressionType {
 pub struct ComparisonExpressionInfo {
     pub scalar_type_name: String,
     pub type_name: ast::TypeName,
-    pub ndc_column: DataConnectorColumnName,
     pub operators: BTreeMap<OperatorName, QualifiedTypeReference>,
     pub is_null_operator_name: ast::Name,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct BooleanExpressionGraphqlConfig {
+pub struct BooleanExpressionGraphqlFieldConfig {
     pub where_field_name: ast::Name,
     pub and_operator_name: ast::Name,
     pub or_operator_name: ast::Name,
@@ -56,8 +53,8 @@ pub struct BooleanExpressionGraphqlConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct BooleanExpressionInfo {
+pub struct BooleanExpressionGraphqlConfig {
     pub type_name: ast::TypeName,
     pub scalar_fields: BTreeMap<FieldName, ComparisonExpressionInfo>,
-    pub graphql_config: BooleanExpressionGraphqlConfig,
+    pub graphql_config: BooleanExpressionGraphqlFieldConfig,
 }
