@@ -115,6 +115,49 @@
           "kind": "ObjectType",
           "version": "v1",
           "definition": {
+            "name": "country",
+            "fields": [
+              {
+                "name": "name",
+                "type": "String"
+              },
+              {
+                "name": "continent",
+                "type": "String"
+              }
+            ],
+            "graphql": {
+              "typeName": "Country"
+            },
+            "dataConnectorTypeMapping": [
+              {
+                "dataConnectorName": "db",
+                "dataConnectorObjectType": "country"
+              }
+            ]
+          }
+        },
+
+        {
+          "kind": "TypePermissions",
+          "version": "v1",
+          "definition": {
+            "typeName": "country",
+            "permissions": [
+              {
+                "role": "admin",
+                "output": {
+                  "allowedFields": ["name", "continent"]
+                }
+              }
+            ]
+          }
+        },
+
+        {
+          "kind": "ObjectType",
+          "version": "v1",
+          "definition": {
             "name": "location",
             "fields": [
               {
@@ -123,7 +166,7 @@
               },
               {
                 "name": "country",
-                "type": "String"
+                "type": "country"
               },
               {
                 "name": "campuses",
