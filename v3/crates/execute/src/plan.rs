@@ -13,6 +13,8 @@ use lang_graphql::ast::common as ast;
 use serde_json as json;
 use tracing_util::{set_attribute_on_active_span, AttributeVisibility, Traceable};
 
+use super::ir;
+use super::ir::aggregates::AggregateFieldSelection;
 use super::ir::model_selection::ModelSelection;
 use super::ir::root_field;
 use super::ndc;
@@ -80,7 +82,7 @@ pub struct NDCQueryExecution<'s, 'ir> {
     pub execution_tree: ExecutionTree<'s, 'ir>,
     pub execution_span_attribute: &'static str,
     pub field_span_attribute: String,
-    pub process_response_as: ProcessResponseAs<'ir>,
+    pub process_response_as: ProcessResponseAs<'s, 'ir>,
     // This selection set can either be owned by the IR structures or by the normalized query request itself.
     // We use the more restrictive lifetime `'ir` here which allows us to construct this struct using the selection
     // set either from the IR or from the normalized query request.
@@ -104,7 +106,7 @@ pub struct NDCMutationExecution<'n, 's, 'ir> {
     pub data_connector: &'s metadata_resolve::DataConnectorLink,
     pub execution_span_attribute: String,
     pub field_span_attribute: String,
-    pub process_response_as: ProcessResponseAs<'ir>,
+    pub process_response_as: ProcessResponseAs<'s, 'ir>,
     pub selection_set: &'n normalized_ast::SelectionSet<'s, GDS>,
 }
 
@@ -121,7 +123,7 @@ pub struct ExecutionNode<'s> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ProcessResponseAs<'ir> {
+pub enum ProcessResponseAs<'s, 'ir> {
     Object {
         is_nullable: bool,
     },
@@ -132,14 +134,18 @@ pub enum ProcessResponseAs<'ir> {
         command_name: &'ir metadata_resolve::Qualified<open_dds::commands::CommandName>,
         type_container: &'ir ast::TypeContainer<ast::TypeName>,
     },
+    Aggregates {
+        requested_fields: &'ir IndexMap<String, AggregateFieldSelection<'s>>,
+    },
 }
 
-impl<'ir> ProcessResponseAs<'ir> {
+impl<'s, 'ir> ProcessResponseAs<'s, 'ir> {
     pub fn is_nullable(&self) -> bool {
         match self {
             ProcessResponseAs::Object { is_nullable }
             | ProcessResponseAs::Array { is_nullable } => *is_nullable,
             ProcessResponseAs::CommandResponse { type_container, .. } => type_container.nullable,
+            ProcessResponseAs::Aggregates { .. } => false,
         }
     }
 }
@@ -148,46 +154,23 @@ impl<'ir> ProcessResponseAs<'ir> {
 /// plan, but currently can't be both. This may change when we support protocols other than
 /// GraphQL.
 pub fn generate_request_plan<'n, 's, 'ir>(
-    ir: &'ir IndexMap<ast::Alias, root_field::RootField<'n, 's>>,
+    ir: &'ir ir::IR<'n, 's>,
 ) -> Result<RequestPlan<'n, 's, 'ir>, error::Error> {
-    let mut request_plan = None;
-
-    for (alias, field) in ir {
-        match field {
-            root_field::RootField::QueryRootField(field_ir) => {
-                let mut query_plan = match request_plan {
-                    Some(RequestPlan::MutationPlan(_)) => {
-                        Err(error::InternalError::InternalGeneric {
-                            description:
-                                "Parsed engine request contains mixed mutation/query operations"
-                                    .to_string(),
-                        })?
-                    }
-                    Some(RequestPlan::QueryPlan(query_plan)) => query_plan,
-                    None => IndexMap::new(),
-                };
-
-                query_plan.insert(alias.clone(), plan_query(field_ir)?);
-                request_plan = Some(RequestPlan::QueryPlan(query_plan));
+    match ir {
+        ir::IR::Query(ir) => {
+            let mut query_plan = IndexMap::new();
+            for (alias, field) in ir {
+                query_plan.insert(alias.clone(), plan_query(field)?);
             }
-
-            root_field::RootField::MutationRootField(field_ir) => {
-                let mut mutation_plan = match request_plan {
-                    Some(RequestPlan::QueryPlan(_)) => {
-                        Err(error::InternalError::InternalGeneric {
-                            description:
-                                "Parsed engine request contains mixed mutation/query operations"
-                                    .to_string(),
-                        })?
-                    }
-                    Some(RequestPlan::MutationPlan(mutation_plan)) => mutation_plan,
-                    None => MutationPlan {
-                        nodes: IndexMap::new(),
-                        type_names: IndexMap::new(),
-                    },
-                };
-
-                match field_ir {
+            Ok(RequestPlan::QueryPlan(query_plan))
+        }
+        ir::IR::Mutation(ir) => {
+            let mut mutation_plan = MutationPlan {
+                nodes: IndexMap::new(),
+                type_names: IndexMap::new(),
+            };
+            for (alias, field) in ir {
+                match field {
                     root_field::MutationRootField::TypeName { type_name } => {
                         mutation_plan
                             .type_names
@@ -195,7 +178,6 @@ pub fn generate_request_plan<'n, 's, 'ir>(
                     }
                     root_field::MutationRootField::ProcedureBasedCommand { selection_set, ir } => {
                         let plan = plan_mutation(selection_set, ir)?;
-
                         mutation_plan
                             .nodes
                             .entry(plan.data_connector.clone())
@@ -203,17 +185,10 @@ pub fn generate_request_plan<'n, 's, 'ir>(
                             .insert(alias.clone(), plan);
                     }
                 };
-
-                request_plan = Some(RequestPlan::MutationPlan(mutation_plan));
             }
+            Ok(RequestPlan::MutationPlan(mutation_plan))
         }
     }
-
-    request_plan.ok_or(error::Error::Internal(
-        error::InternalError::InternalGeneric {
-            description: "Parsed an empty request".to_string(),
-        },
-    ))
 }
 
 // Given a singular root field of a mutation, plan the execution of that root field.
@@ -291,6 +266,25 @@ fn plan_query<'n, 's, 'ir>(
                 process_response_as: ProcessResponseAs::Array {
                     is_nullable: ir.type_container.nullable.to_owned(),
                 },
+            })
+        }
+        root_field::QueryRootField::ModelSelectAggregate { ir, selection_set } => {
+            let execution_tree = generate_execution_tree(&ir.model_selection)?;
+            let requested_fields = ir
+                .model_selection
+                .aggregate_selection
+                .as_ref()
+                .map(|selection| &selection.fields)
+                .ok_or_else(|| error::InternalError::InternalGeneric {
+                    description: "Found a ModelSelectAggregate without an aggregate selection"
+                        .to_owned(),
+                })?;
+            NodeQueryPlan::NDCQueryExecution(NDCQueryExecution {
+                execution_tree,
+                selection_set,
+                execution_span_attribute: "execute_model_select_aggregate",
+                field_span_attribute: ir.field_name.to_string(),
+                process_response_as: ProcessResponseAs::Aggregates { requested_fields },
             })
         }
         root_field::QueryRootField::NodeSelect(optional_ir) => match optional_ir {
@@ -563,7 +557,7 @@ async fn execute_query_field_plan<'n, 's, 'ir>(
     tracer
         .in_span_async(
             "execute_query_field_plan",
-            format!("{} field planning", field_alias),
+            format!("{field_alias} field planning"),
             tracing_util::SpanVisibility::User,
             || {
                 Box::pin(async {

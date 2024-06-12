@@ -1,6 +1,6 @@
 {
-  "ArticleMany": {
-    "QueryRootField": {
+  "Query": {
+    "ArticleMany": {
       "ModelSelectMany": {
         "selection_set": {
           "fields": {
@@ -98,7 +98,8 @@
               },
               "capabilities": {
                 "supports_explaining_queries": true,
-                "supports_explaining_mutations": false
+                "supports_explaining_mutations": false,
+                "supports_nested_object_aggregations": false
               }
             },
             "collection": "article",
@@ -125,7 +126,8 @@
                   }
                 }
               }
-            }
+            },
+            "aggregate_selection": null
           },
           "type_container": {
             "base": {

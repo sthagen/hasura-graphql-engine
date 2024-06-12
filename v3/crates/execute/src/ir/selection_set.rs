@@ -89,7 +89,7 @@ impl NDCRelationshipName {
 }
 
 /// IR that represents the selected fields of an output type.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Default)]
 pub(crate) struct ResultSelectionSet<'s> {
     // The fields in the selection set. They are stored in the form that would
     // be converted and sent over the wire. Serialized the map as ordered to
@@ -276,8 +276,7 @@ pub(crate) fn generate_selection_set_ir<'s>(
                     let global_id_fields = typename_mappings.get(&type_name).ok_or(
                         error::InternalEngineError::InternalGeneric {
                             description: format!(
-                                "Global ID fields not found of the type {}",
-                                type_name
+                                "Global ID fields not found of the type {type_name}"
                             ),
                         },
                     )?;

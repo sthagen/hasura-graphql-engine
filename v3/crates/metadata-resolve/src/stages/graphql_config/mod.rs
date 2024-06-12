@@ -7,6 +7,7 @@ use crate::types::error::{Error, GraphqlConfigError};
 use lang_graphql::ast::common as ast;
 use open_dds::accessor::QualifiedObject;
 use open_dds::graphql_config::{self, OrderByDirection};
+use open_dds::types::GraphQlFieldName;
 use serde::{Deserialize, Serialize};
 
 lazy_static::lazy_static! {
@@ -40,7 +41,12 @@ lazy_static::lazy_static! {
                  enum_type_names: vec![graphql_config::OrderByEnumTypeName{
                     type_name: "order_by".to_string(),
                     directions: vec![graphql_config::OrderByDirection::Asc, graphql_config::OrderByDirection::Desc],
-                 }] })
+                 }] }),
+            aggregate: Some(graphql_config::AggregateGraphqlConfig {
+                filter_input_field_name: GraphQlFieldName("filter_input".to_string()),
+                count_field_name: GraphQlFieldName("_count".to_string()),
+                count_distinct_field_name: GraphQlFieldName("_count_distinct".to_string()),
+            })
         },
         mutation: graphql_config::MutationGraphqlConfig{
             root_operation_type_name: "Mutation".to_string(),
@@ -118,6 +124,7 @@ pub struct QueryGraphqlConfig {
     pub offset_field_name: Option<ast::Name>,
     pub filter_input_config: Option<FilterInputGraphqlConfig>,
     pub order_by_field_name: Option<ast::Name>,
+    pub aggregate_config: Option<AggregateGraphqlConfig>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -133,6 +140,13 @@ pub struct FilterInputOperatorNames {
     pub or: ast::Name,
     pub not: ast::Name,
     pub is_null: ast::Name,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AggregateGraphqlConfig {
+    pub filter_input_field_name: ast::Name,
+    pub count_field_name: ast::Name,
+    pub count_distinct_field_name: ast::Name,
 }
 
 /// Resolve and validate the GraphQL configuration.
@@ -250,6 +264,23 @@ pub fn resolve_graphql_config(
                 }
             };
 
+            let aggregate_config = graphql_config_metadata
+                .query
+                .aggregate
+                .as_ref()
+                .map(|aggregate_config| -> Result<_, Error> {
+                    Ok(AggregateGraphqlConfig {
+                        filter_input_field_name: mk_name(
+                            aggregate_config.filter_input_field_name.0.as_str(),
+                        )?,
+                        count_field_name: mk_name(aggregate_config.count_field_name.0.as_str())?,
+                        count_distinct_field_name: mk_name(
+                            aggregate_config.count_distinct_field_name.0.as_str(),
+                        )?,
+                    })
+                })
+                .transpose()?;
+
             let enable_apollo_federation_fields = graphql_config_metadata
                 .apollo_federation
                 .as_ref()
@@ -262,6 +293,7 @@ pub fn resolve_graphql_config(
                     offset_field_name,
                     filter_input_config,
                     order_by_field_name,
+                    aggregate_config,
                 },
                 global: GlobalGraphqlConfig {
                     query_root_type_name,

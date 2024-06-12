@@ -23,6 +23,7 @@ use schema::{Annotation, NodeFieldTypeNameMapping, OutputAnnotation, RootFieldAn
 
 pub mod apollo_federation;
 pub mod node_field;
+pub mod select_aggregate;
 pub mod select_many;
 pub mod select_one;
 
@@ -32,7 +33,7 @@ pub fn generate_ir<'n, 's>(
     session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     selection_set: &'s gql::normalized_ast::SelectionSet<'s, GDS>,
-) -> Result<IndexMap<ast::Alias, root_field::RootField<'n, 's>>, error::Error> {
+) -> Result<IndexMap<ast::Alias, root_field::QueryRootField<'n, 's>>, error::Error> {
     let type_name = selection_set
         .type_name
         .clone()
@@ -146,10 +147,7 @@ pub fn generate_ir<'n, 's>(
                 )),
             },
         }?;
-        ir.insert(
-            alias.clone(),
-            root_field::RootField::QueryRootField(field_ir),
-        );
+        ir.insert(alias.clone(), field_ir);
     }
     Ok(ir)
 }
@@ -216,6 +214,17 @@ fn generate_model_rootfield_ir<'n, 's>(
                 source,
                 &session.variables,
                 request_headers,
+                model_name,
+            )?,
+        },
+        RootFieldKind::SelectAggregate => root_field::QueryRootField::ModelSelectAggregate {
+            selection_set: &field.selection_set,
+            ir: select_aggregate::select_aggregate_generate_ir(
+                field,
+                field_call,
+                data_type,
+                source,
+                &session.variables,
                 model_name,
             )?,
         },
