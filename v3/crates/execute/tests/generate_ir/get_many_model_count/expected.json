@@ -40,6 +40,7 @@
                                   "capabilities": {
                                     "supports_explaining_queries": true,
                                     "supports_explaining_mutations": false,
+                                    "supports_nested_object_filtering": true,
                                     "supports_nested_object_aggregations": false
                                   }
                                 },
@@ -159,6 +160,7 @@
                                         "capabilities": {
                                           "supports_explaining_queries": true,
                                           "supports_explaining_mutations": false,
+                                          "supports_nested_object_filtering": true,
                                           "supports_nested_object_aggregations": false
                                         }
                                       },
@@ -278,6 +280,7 @@
                                               "capabilities": {
                                                 "supports_explaining_queries": true,
                                                 "supports_explaining_mutations": false,
+                                                "supports_nested_object_filtering": true,
                                                 "supports_nested_object_aggregations": false
                                               }
                                             },
@@ -413,7 +416,8 @@
                                                 },
                                                 "nullable": false
                                               },
-                                              "field_base_type_kind": "Scalar"
+                                              "field_base_type_kind": "Scalar",
+                                              "argument_types": {}
                                             }
                                           }
                                         },
@@ -493,6 +497,7 @@
               "capabilities": {
                 "supports_explaining_queries": true,
                 "supports_explaining_mutations": false,
+                "supports_nested_object_filtering": true,
                 "supports_nested_object_aggregations": false
               }
             },
@@ -517,6 +522,7 @@
                           "capabilities": {
                             "supports_explaining_queries": true,
                             "supports_explaining_mutations": false,
+                            "supports_nested_object_filtering": true,
                             "supports_nested_object_aggregations": false
                           }
                         },
@@ -548,6 +554,7 @@
                                     "capabilities": {
                                       "supports_explaining_queries": true,
                                       "supports_explaining_mutations": false,
+                                      "supports_nested_object_filtering": true,
                                       "supports_nested_object_aggregations": false
                                     }
                                   },
@@ -579,6 +586,7 @@
                                               "capabilities": {
                                                 "supports_explaining_queries": true,
                                                 "supports_explaining_mutations": false,
+                                                "supports_nested_object_filtering": true,
                                                 "supports_nested_object_aggregations": false
                                               }
                                             },
@@ -596,13 +604,15 @@
                                                 "hasura_global_id_col_id_article_id": {
                                                   "Column": {
                                                     "column": "id",
-                                                    "nested_selection": null
+                                                    "nested_selection": null,
+                                                    "arguments": {}
                                                   }
                                                 },
                                                 "title": {
                                                   "Column": {
                                                     "column": "title",
-                                                    "nested_selection": null
+                                                    "nested_selection": null,
+                                                    "arguments": {}
                                                   }
                                                 }
                                               }
@@ -631,6 +641,7 @@
                                               "capabilities": {
                                                 "supports_explaining_queries": true,
                                                 "supports_explaining_mutations": false,
+                                                "supports_nested_object_filtering": true,
                                                 "supports_nested_object_aggregations": false
                                               }
                                             },
@@ -683,6 +694,7 @@
                                                   "capabilities": {
                                                     "supports_explaining_queries": true,
                                                     "supports_explaining_mutations": false,
+                                                    "supports_nested_object_filtering": true,
                                                     "supports_nested_object_aggregations": false
                                                   }
                                                 },
@@ -776,6 +788,7 @@
                                     "capabilities": {
                                       "supports_explaining_queries": true,
                                       "supports_explaining_mutations": false,
+                                      "supports_nested_object_filtering": true,
                                       "supports_nested_object_aggregations": false
                                     }
                                   },
@@ -828,6 +841,7 @@
                                         "capabilities": {
                                           "supports_explaining_queries": true,
                                           "supports_explaining_mutations": false,
+                                          "supports_nested_object_filtering": true,
                                           "supports_nested_object_aggregations": false
                                         }
                                       },
@@ -921,6 +935,7 @@
                           "capabilities": {
                             "supports_explaining_queries": true,
                             "supports_explaining_mutations": false,
+                            "supports_nested_object_filtering": true,
                             "supports_nested_object_aggregations": false
                           }
                         },
@@ -973,6 +988,7 @@
                               "capabilities": {
                                 "supports_explaining_queries": true,
                                 "supports_explaining_mutations": false,
+                                "supports_nested_object_filtering": true,
                                 "supports_nested_object_aggregations": false
                               }
                             },
