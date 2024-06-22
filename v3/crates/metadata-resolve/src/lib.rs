@@ -23,7 +23,8 @@ pub use stages::aggregates::{
 };
 pub use stages::boolean_expressions::{
     BooleanExpressionComparableRelationship, BooleanExpressionGraphqlConfig,
-    ComparisonExpressionInfo, ObjectComparisonExpressionInfo, ResolvedObjectBooleanExpressionType,
+    ComparisonExpressionInfo, IncludeLogicalOperators, ObjectComparisonExpressionInfo,
+    ResolvedObjectBooleanExpressionType,
 };
 pub use stages::command_permissions::CommandWithPermissions;
 pub use stages::commands::Command;
@@ -42,8 +43,9 @@ pub use stages::object_types::{
     FieldMapping, ObjectTypeRepresentation, ResolvedObjectApolloFederationConfig, TypeMapping,
 };
 pub use stages::relationships::{
-    relationship_execution_category, ObjectTypeWithRelationships, Relationship,
-    RelationshipCapabilities, RelationshipCommandMapping, RelationshipExecutionCategory,
+    relationship_execution_category, CommandRelationshipTarget, ModelAggregateRelationshipTarget,
+    ModelRelationshipTarget, ObjectTypeWithRelationships, RelationshipCapabilities,
+    RelationshipCommandMapping, RelationshipExecutionCategory, RelationshipField,
     RelationshipModelMapping, RelationshipTarget,
 };
 pub use stages::scalar_types::ScalarTypeRepresentation;
