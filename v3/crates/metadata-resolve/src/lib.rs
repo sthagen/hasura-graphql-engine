@@ -24,13 +24,14 @@ pub use stages::aggregates::{
 pub use stages::boolean_expressions::{
     BooleanExpressionComparableRelationship, BooleanExpressionGraphqlConfig,
     ComparisonExpressionInfo, IncludeLogicalOperators, ObjectComparisonExpressionInfo,
-    ResolvedObjectBooleanExpressionType,
+    ResolvedObjectBooleanExpressionType, ResolvedScalarBooleanExpressionType,
 };
 pub use stages::command_permissions::CommandWithPermissions;
 pub use stages::commands::Command;
+pub use stages::data_connectors;
 pub use stages::data_connectors::DataConnectorLink;
 pub use stages::model_permissions::{
-    FilterPermission, ModelPredicate, ModelTargetSource, ModelWithPermissions,
+    FilterPermission, ModelPredicate, ModelTargetSource, ModelWithPermissions, SelectPermission,
 };
 pub use stages::models::{ConnectorArgumentName, Model, ModelSource};
 

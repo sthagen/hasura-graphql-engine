@@ -123,22 +123,8 @@ pub fn resolve(
         &object_types_with_permissions,
         &scalar_types,
         &object_boolean_expression_types,
-    )?;
-
-    // Resolve the filter expressions and graphql settings for models
-    // This is a separate step so we can look up resolved models and their sources
-    let models_graphql::ModelsGraphqlOutput {
-        models_with_graphql,
-        graphql_types: _,
-    } = models_graphql::resolve(
-        &models,
-        &data_connector_scalars,
-        &object_types_with_permissions,
-        &aggregate_expressions,
-        &object_boolean_expression_types,
         &boolean_expression_types,
-        &graphql_types,
-        &graphql_config,
+        &aggregate_expressions,
     )?;
 
     let commands = commands::resolve(
@@ -147,6 +133,7 @@ pub fn resolve(
         &object_types_with_permissions,
         &scalar_types,
         &object_boolean_expression_types,
+        &boolean_expression_types,
     )?;
 
     apollo::resolve(
@@ -165,12 +152,28 @@ pub fn resolve(
         &aggregate_expressions,
     )?;
 
+    // Resolve the filter expressions and graphql settings for models
+    // This is a separate step so we can look up resolved models and their sources
+    let models_graphql::ModelsGraphqlOutput {
+        models_with_graphql,
+        graphql_types: _,
+    } = models_graphql::resolve(
+        &models,
+        &data_connector_scalars,
+        &object_types_with_relationships,
+        &object_boolean_expression_types,
+        &boolean_expression_types,
+        &graphql_types,
+        &graphql_config,
+    )?;
+
     let commands_with_permissions = command_permissions::resolve(
         &metadata_accessor,
         &commands,
         &object_types_with_relationships,
         &scalar_types,
         &object_boolean_expression_types,
+        &boolean_expression_types,
         &models_with_graphql,
         &data_connectors,
         &data_connector_scalars,
@@ -184,6 +187,7 @@ pub fn resolve(
         &scalar_types,
         &models_with_graphql,
         &object_boolean_expression_types,
+        &boolean_expression_types,
     )?;
 
     let roles = roles::resolve(

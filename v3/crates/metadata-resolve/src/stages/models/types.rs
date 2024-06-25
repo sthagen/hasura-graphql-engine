@@ -12,6 +12,7 @@ use open_dds::{
     models::{ModelGraphQlDefinition, ModelName, OrderableField},
     types::{CustomTypeName, FieldName},
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -47,12 +48,14 @@ pub struct Model {
     pub global_id_source: Option<NDCFieldSourceMapping>,
     pub apollo_federation_key_source: Option<NDCFieldSourceMapping>,
     pub orderable_fields: Vec<OrderableField>,
+    pub aggregate_expression: Option<Qualified<AggregateExpressionName>>,
     pub raw: ModelRaw,
 }
 
 #[derive(
     Serialize,
     Deserialize,
+    JsonSchema,
     Clone,
     Debug,
     PartialEq,
@@ -70,7 +73,6 @@ pub struct ConnectorArgumentName(pub String);
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ModelRaw {
     pub filter_expression_type: Option<Qualified<CustomTypeName>>,
-    pub aggregate_expression: Option<Qualified<AggregateExpressionName>>,
     pub graphql: Option<ModelGraphQlDefinition>,
     pub description: Option<String>,
 }

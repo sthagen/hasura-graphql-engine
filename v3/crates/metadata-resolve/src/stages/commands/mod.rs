@@ -1,12 +1,13 @@
 mod types;
 
 use crate::helpers::argument::get_argument_mappings;
-use crate::helpers::ndc_validation;
+use crate::helpers::ndc_validation::{self};
 use crate::helpers::types::{
     get_type_representation, mk_name, object_type_exists, unwrap_custom_type_name,
 };
 use crate::stages::{
-    data_connectors, models, object_boolean_expressions, scalar_types, type_permissions,
+    boolean_expressions, data_connectors, models, object_boolean_expressions, scalar_types,
+    type_permissions,
 };
 use crate::types::error::Error;
 use crate::types::subgraph::{mk_qualified_type_reference, ArgumentInfo, Qualified};
@@ -21,7 +22,7 @@ use open_dds::types::{BaseType, CustomTypeName, TypeName, TypeReference};
 
 use std::collections::BTreeMap;
 
-use crate::helpers::type_mappings;
+use crate::helpers::type_mappings::{self, SpecialCaseTypeMapping};
 
 /// resolve commands
 pub fn resolve(
@@ -33,6 +34,7 @@ pub fn resolve(
         Qualified<CustomTypeName>,
         object_boolean_expressions::ObjectBooleanExpressionType,
     >,
+    boolean_expression_types: &boolean_expressions::BooleanExpressionTypes,
 ) -> Result<IndexMap<Qualified<CommandName>, Command>, Error> {
     let mut commands: IndexMap<Qualified<CommandName>, Command> = IndexMap::new();
     for open_dds::accessor::QualifiedObject {
@@ -46,6 +48,7 @@ pub fn resolve(
             object_types,
             scalar_types,
             object_boolean_expression_types,
+            boolean_expression_types,
         )?;
         if let Some(command_source) = &command.source {
             let command_source = resolve_command_source(
@@ -56,6 +59,7 @@ pub fn resolve(
                 object_types,
                 scalar_types,
                 object_boolean_expression_types,
+                boolean_expression_types,
             )?;
             resolved_command.source = Some(command_source);
         }
@@ -81,6 +85,7 @@ fn type_exists(
         Qualified<CustomTypeName>,
         object_boolean_expressions::ObjectBooleanExpressionType,
     >,
+    boolean_expression_types: &boolean_expressions::BooleanExpressionTypes,
 ) -> bool {
     match &type_obj.underlying_type {
         BaseType::List(type_obj) => type_exists(
@@ -89,6 +94,7 @@ fn type_exists(
             object_types,
             scalar_types,
             object_boolean_expression_types,
+            boolean_expression_types,
         ),
         BaseType::Named(type_name) => match type_name {
             TypeName::Inbuilt(_) => true,
@@ -101,6 +107,7 @@ fn type_exists(
                     object_types,
                     scalar_types,
                     object_boolean_expression_types,
+                    boolean_expression_types,
                 )
                 .is_ok()
             }
@@ -117,6 +124,7 @@ pub fn resolve_command(
         Qualified<CustomTypeName>,
         object_boolean_expressions::ObjectBooleanExpressionType,
     >,
+    boolean_expression_types: &boolean_expressions::BooleanExpressionTypes,
 ) -> Result<Command, Error> {
     let mut arguments = IndexMap::new();
     let qualified_command_name = Qualified::new(subgraph.to_string(), command.name.clone());
@@ -129,6 +137,7 @@ pub fn resolve_command(
             object_types,
             scalar_types,
             object_boolean_expression_types,
+            boolean_expression_types,
         ) {
             if arguments
                 .insert(
@@ -196,6 +205,7 @@ pub fn resolve_command_source(
         Qualified<CustomTypeName>,
         object_boolean_expressions::ObjectBooleanExpressionType,
     >,
+    boolean_expression_types: &boolean_expressions::BooleanExpressionTypes,
 ) -> Result<CommandSource, Error> {
     if command.source.is_some() {
         return Err(Error::DuplicateCommandSourceDefinition {
@@ -282,6 +292,7 @@ pub fn resolve_command_source(
         object_types,
         scalar_types,
         object_boolean_expression_types,
+        boolean_expression_types,
     )
     .map_err(|err| match &command_source.data_connector_command {
         DataConnectorCommand::Function(function_name) => {
@@ -314,11 +325,7 @@ pub fn resolve_command_source(
         .map(|custom_type_name| {
             // Get the corresponding object_type (data_connector.object_type) associated with the result_type for the source
             let source_result_type_name =
-                ndc_validation::get_underlying_named_type(&command_source_response.result_type)
-                    .map_err(|e| Error::CommandTypeMappingCollectionError {
-                        command_name: command.name.clone(),
-                        error: type_mappings::TypeMappingCollectionError::NDCValidationError(e),
-                    })?;
+                ndc_validation::get_underlying_named_type(&command_source_response.result_type);
 
             let source_result_type_mapping_to_resolve = type_mappings::TypeMappingToCollect {
                 type_name: custom_type_name,
@@ -328,6 +335,37 @@ pub fn resolve_command_source(
             Ok::<_, Error>(source_result_type_mapping_to_resolve)
         })
         .transpose()?;
+
+    // Get the ndc object type from the source result type name
+    let ndc_object_type = source_result_type_mapping_to_resolve
+        .as_ref()
+        .map(|type_mapping_to_resolve| {
+            let ndc_type_name = &type_mapping_to_resolve.ndc_object_type_name.0;
+            data_connector_context
+                .inner
+                .schema
+                .object_types
+                .get(ndc_type_name)
+                .ok_or_else(|| Error::CommandTypeMappingCollectionError {
+                    command_name: command.name.clone(),
+                    error: type_mappings::TypeMappingCollectionError::NDCValidationError(
+                        crate::NDCValidationError::NoSuchType(ndc_type_name.clone()),
+                    ),
+                })
+        })
+        .transpose()?;
+
+    let special_case = data_connector_context
+        .inner
+        .response_headers
+        .as_ref()
+        .zip(ndc_object_type)
+        .map(
+            |(response_config, ndc_object_type)| SpecialCaseTypeMapping {
+                response_config,
+                ndc_object_type,
+            },
+        );
 
     for type_mapping_to_collect in source_result_type_mapping_to_resolve
         .iter()
@@ -339,6 +377,7 @@ pub fn resolve_command_source(
             object_types,
             scalar_types,
             &mut type_mappings,
+            &special_case,
         )
         .map_err(|error| Error::CommandTypeMappingCollectionError {
             command_name: command.name.clone(),
@@ -346,23 +385,28 @@ pub fn resolve_command_source(
         })?;
     }
 
-    let command_source = CommandSource {
+    let mut command_source = CommandSource {
         data_connector: data_connectors::DataConnectorLink::new(
             qualified_data_connector_name,
             &data_connector_context.inner,
         )?,
         source: command_source.data_connector_command.clone(),
+        ndc_type_opendd_type_same: true,
         type_mappings,
         argument_mappings,
         source_arguments: command_source_response.arguments,
     };
 
-    ndc_validation::validate_ndc_command(
+    let commands_response_config = special_case.map(|x| x.response_config);
+    let source_type_opendd_type_same = ndc_validation::validate_ndc_command(
         &command.name,
         &command_source,
         &command.output_type,
         &data_connector_context.inner.schema,
+        commands_response_config,
     )?;
+
+    command_source.ndc_type_opendd_type_same = source_type_opendd_type_same;
 
     Ok(command_source)
 }

@@ -1,13 +1,15 @@
 mod error;
 mod explain;
 mod global_id;
-mod ir;
-mod model_tracking;
-mod ndc;
+pub mod ir;
+pub mod model_tracking;
+pub mod ndc;
 mod plan;
 mod process_response;
 mod remote_joins;
 
+pub use plan::process_model_relationship_definition;
+use plan::ExecuteQueryResult;
 use thiserror::Error;
 
 use gql::normalized_ast::Operation;
@@ -27,9 +29,11 @@ use tracing_util::{
 // we explicitly export things used by other crates
 pub use explain::execute_explain;
 pub use explain::types::{redact_ndc_explain, ExplainResponse};
+pub use ndc::fetch_from_data_connector;
 pub use plan::{execute_mutation_plan, execute_query_plan, generate_request_plan, RequestPlan};
 
 /// Context for making HTTP requests
+#[derive(Debug, Clone)]
 pub struct HttpContext {
     /// The HTTP client to use for making requests
     pub client: reqwest::Client,
@@ -61,7 +65,32 @@ impl<'a> TraceableError for GraphQLErrors<'a> {
 }
 
 /// A simple wrapper around a GraphQL HTTP response
-pub struct GraphQLResponse(pub gql::http::Response);
+pub struct GraphQLResponse(gql::http::Response);
+
+impl GraphQLResponse {
+    pub fn from_result(result: ExecuteQueryResult) -> Self {
+        Self(result.to_graphql_response())
+    }
+
+    pub fn from_error(err: &error::RequestError) -> Self {
+        Self(Response::error(
+            err.to_graphql_error(),
+            axum::http::HeaderMap::default(),
+        ))
+    }
+
+    pub fn from_response(response: gql::http::Response) -> Self {
+        Self(response)
+    }
+
+    pub fn does_contain_error(&self) -> bool {
+        self.0.does_contains_error()
+    }
+
+    pub fn inner(self) -> gql::http::Response {
+        self.0
+    }
+}
 
 /// Implement traceable for GraphQL Response
 impl Traceable for GraphQLResponse {
@@ -92,7 +121,7 @@ pub async fn execute_query(
         project_id,
     )
     .await
-    .unwrap_or_else(|e| GraphQLResponse(Response::error(e.to_graphql_error())))
+    .unwrap_or_else(|e| GraphQLResponse::from_error(&e))
 }
 
 #[derive(Error, Debug)]
@@ -190,7 +219,7 @@ pub async fn execute_query_internal(
                                         .await
                                     }
                                 };
-                                GraphQLResponse(execute_query_result.to_graphql_response())
+                                GraphQLResponse::from_result(execute_query_result)
                             })
                         })
                         .await;

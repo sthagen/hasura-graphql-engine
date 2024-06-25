@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use indexmap::IndexMap;
 
+use lang_graphql::ast::common::{self as ast};
 use open_dds::aggregates::AggregateExpressionName;
 use open_dds::relationships::{
     self, FieldAccess, RelationshipName, RelationshipType, RelationshipV1,
@@ -16,8 +17,8 @@ use open_dds::{
 
 use crate::helpers::types::mk_name;
 use crate::stages::{
-    aggregates, commands, data_connector_scalar_types, data_connectors, models, models_graphql,
-    object_types, type_permissions,
+    aggregates, commands, data_connector_scalar_types, data_connectors, models, object_types,
+    type_permissions,
 };
 use crate::types::error::{Error, RelationshipError};
 use crate::types::internal_flags::MetadataResolveFlagsInternal;
@@ -451,7 +452,7 @@ fn resolve_aggregate_relationship_field(
             }
 
             // Validate its usage with the relationship's target model
-            let aggregate_expression_name = models_graphql::resolve_aggregate_expression(
+            let aggregate_expression_name = models::resolve_aggregate_expression(
                 &Qualified::new(
                     resolved_target_model.name.subgraph.to_string(),
                     aggregate.aggregate_expression.clone(),
@@ -566,7 +567,7 @@ fn resolve_model_relationship_fields(
     )?;
 
     let regular_relationship_field = RelationshipField {
-        field_name: mk_name(&relationship.name.0)?,
+        field_name: make_relationship_field_name(&relationship.name)?,
         relationship_name: relationship.name.clone(),
         source: source_type_name.clone(),
         target: RelationshipTarget::Model(ModelRelationshipTarget {
@@ -583,6 +584,13 @@ fn resolve_model_relationship_fields(
     Ok(std::iter::once(regular_relationship_field)
         .chain(aggregate_relationship_field)
         .collect())
+}
+
+// create the graphql name for a non-aggregate relationship field name
+pub fn make_relationship_field_name(
+    relationship_name: &RelationshipName,
+) -> Result<ast::Name, Error> {
+    mk_name(&relationship_name.0)
 }
 
 fn resolve_command_relationship_field(
