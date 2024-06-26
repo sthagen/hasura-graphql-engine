@@ -25,7 +25,7 @@ use crate::types::internal_flags::MetadataResolveFlagsInternal;
 /// This is where we take the input metadata and attempt to resolve a working `Metadata` object.
 pub fn resolve(
     metadata: open_dds::Metadata,
-    flags: &MetadataResolveFlagsInternal,
+    flags: MetadataResolveFlagsInternal,
 ) -> Result<Metadata, Error> {
     let metadata_accessor: open_dds::accessor::MetadataAccessor =
         open_dds::accessor::MetadataAccessor::new(metadata);
@@ -33,7 +33,7 @@ pub fn resolve(
     // The graphql config represents the shape of the Hasura features in the graphql schema,
     // and which features should be enabled or disabled. We check this structure is valid.
     let graphql_config =
-        graphql_config::resolve(&metadata_accessor.graphql_config, &metadata_accessor.flags)?;
+        graphql_config::resolve(&metadata_accessor.graphql_config, metadata_accessor.flags)?;
 
     // Fetch and check schema information for all our data connectors
     let data_connectors = data_connectors::resolve(&metadata_accessor)?;
@@ -143,13 +143,13 @@ pub fn resolve(
 
     let object_types_with_relationships = relationships::resolve(
         &metadata_accessor,
-        flags,
         &data_connectors,
         &data_connector_scalars,
         &object_types_with_permissions,
         &models,
         &commands,
         &aggregate_expressions,
+        &graphql_config,
     )?;
 
     // Resolve the filter expressions and graphql settings for models
@@ -158,6 +158,7 @@ pub fn resolve(
         models_with_graphql,
         graphql_types: _,
     } = models_graphql::resolve(
+        &metadata_accessor,
         &models,
         &data_connector_scalars,
         &object_types_with_relationships,

@@ -210,7 +210,7 @@ pub enum Error {
     UnnecessaryModelArgumentsGraphQlInputConfiguration { model_name: Qualified<ModelName> },
     #[error("an unnecessary filter input type name graphql configuration has been specified for model {model_name:} that does not use aggregates")]
     UnnecessaryFilterInputTypeNameGraphqlConfiguration { model_name: Qualified<ModelName> },
-    #[error("filter input type name graphql configuration must be specified for model {model_name:} because it uses aggregates")]
+    #[error("filter input type name graphql configuration must be specified for model {model_name:} because aggregates are used with it")]
     MissingFilterInputTypeNameGraphqlConfiguration { model_name: Qualified<ModelName> },
     #[error("multiple graphql types found with the same name: {graphql_type_name:}")]
     ConflictingGraphQlType { graphql_type_name: ast::TypeName },
@@ -789,11 +789,6 @@ pub enum RelationshipError {
         type_name: Qualified<CustomTypeName>,
         relationship_name: RelationshipName,
         data_connector_name: Qualified<DataConnectorName>,
-    },
-    #[error("The relationship {relationship_name} on type {type_name} defines an aggregate, but the aggregate relationships feature is disabled")]
-    AggregateRelationshipsDisabled {
-        type_name: Qualified<CustomTypeName>,
-        relationship_name: RelationshipName,
     },
     #[error("The relationship {relationship_name} on type {type_name} defines an aggregate, but aggregates can only be used with array relationships, not object relationships")]
     AggregateIsOnlyAllowedOnArrayRelationships {

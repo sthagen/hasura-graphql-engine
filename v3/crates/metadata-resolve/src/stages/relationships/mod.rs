@@ -17,11 +17,10 @@ use open_dds::{
 
 use crate::helpers::types::mk_name;
 use crate::stages::{
-    aggregates, commands, data_connector_scalar_types, data_connectors, models, object_types,
-    type_permissions,
+    aggregates, commands, data_connector_scalar_types, data_connectors, graphql_config, models,
+    object_types, type_permissions,
 };
-use crate::types::error::{Error, RelationshipError};
-use crate::types::internal_flags::MetadataResolveFlagsInternal;
+use crate::types::error::{Error, GraphqlConfigError, RelationshipError};
 use crate::types::subgraph::Qualified;
 
 pub use types::{
@@ -35,7 +34,6 @@ pub use types::{
 /// returns updated `types` value
 pub fn resolve(
     metadata_accessor: &open_dds::accessor::MetadataAccessor,
-    flags: &MetadataResolveFlagsInternal,
     data_connectors: &data_connectors::DataConnectors,
     data_connector_scalars: &BTreeMap<
         Qualified<DataConnectorName>,
@@ -51,6 +49,7 @@ pub fn resolve(
         Qualified<AggregateExpressionName>,
         aggregates::AggregateExpression,
     >,
+    graphql_config: &graphql_config::GraphqlConfig,
 ) -> Result<BTreeMap<Qualified<CustomTypeName>, ObjectTypeWithRelationships>, Error> {
     let mut object_types_with_relationships = BTreeMap::new();
     for (
@@ -97,8 +96,8 @@ pub fn resolve(
             data_connector_scalars,
             aggregate_expressions,
             object_types_with_permissions,
+            graphql_config,
             &object_representation.object_type,
-            flags,
         )?;
 
         for resolved_relationship in resolved_relationships {
@@ -424,22 +423,13 @@ fn resolve_aggregate_relationship_field(
         aggregates::AggregateExpression,
     >,
     object_types: &BTreeMap<Qualified<CustomTypeName>, type_permissions::ObjectTypeWithPermissions>,
-    flags: &MetadataResolveFlagsInternal,
+    graphql_config: &graphql_config::GraphqlConfig,
 ) -> Result<Option<RelationshipField>, Error> {
     // If an aggregate has been specified
     let aggregate_expression_name_and_description = model_relationship_target
         .aggregate
         .as_ref()
         .map(|aggregate| -> Result<_, Error> {
-            // Check if the feature is enabled or not
-            if !flags.enable_aggregate_relationships {
-                return Err(RelationshipError::AggregateRelationshipsDisabled {
-                    type_name: source_type_name.clone(),
-                    relationship_name: relationship.name.clone(),
-                }
-                .into());
-            }
-
             // Ensure the relationship is an array relationship
             if model_relationship_target.relationship_type != RelationshipType::Array {
                 return Err(
@@ -482,10 +472,21 @@ fn resolve_aggregate_relationship_field(
 
     // We only get an aggregate if both the expression and a field name has been specified.
     // Without the field name, the aggregate is inaccessible
-    Ok(aggregate_expression_name_and_description
+    aggregate_expression_name_and_description
         .zip(field_name)
-        .map(
-            |((aggregate_expression, description), field_name)| RelationshipField {
+        .map(|((aggregate_expression, description), field_name)| {
+            // Check that the filter input field name is configured in graphql config
+            let filter_input_field_name = graphql_config
+                .query
+                .aggregate_config
+                .as_ref()
+                .map(|agg| agg.filter_input_field_name.clone())
+                .ok_or_else::<Error, _>(|| Error::GraphqlConfigError {
+                    graphql_config_error:
+                        GraphqlConfigError::MissingAggregateFilterInputFieldNameInGraphqlConfig,
+                })?;
+
+            Ok(RelationshipField {
                 field_name,
                 relationship_name: relationship.name.clone(),
                 source: source_type_name.clone(),
@@ -494,12 +495,14 @@ fn resolve_aggregate_relationship_field(
                     target_typename: resolved_target_model.data_type.clone(),
                     mappings: resolved_relationship_mappings.to_vec(),
                     aggregate_expression,
+                    filter_input_field_name,
                 }),
                 target_capabilities: resolved_target_capabilities.clone(),
                 description: description.clone(),
                 deprecated: relationship.deprecated.clone(),
-            },
-        ))
+            })
+        })
+        .transpose()
 }
 
 fn resolve_model_relationship_fields(
@@ -519,7 +522,7 @@ fn resolve_model_relationship_fields(
         aggregates::AggregateExpression,
     >,
     object_types: &BTreeMap<Qualified<CustomTypeName>, type_permissions::ObjectTypeWithPermissions>,
-    flags: &MetadataResolveFlagsInternal,
+    graphql_config: &graphql_config::GraphqlConfig,
 ) -> Result<Vec<RelationshipField>, Error> {
     let qualified_target_model_name = Qualified::new(
         target_model.subgraph().unwrap_or(subgraph).to_string(),
@@ -563,7 +566,7 @@ fn resolve_model_relationship_fields(
         source_type_name,
         aggregate_expressions,
         object_types,
-        flags,
+        graphql_config,
     )?;
 
     let regular_relationship_field = RelationshipField {
@@ -669,8 +672,8 @@ pub fn resolve_relationships(
         aggregates::AggregateExpression,
     >,
     object_types: &BTreeMap<Qualified<CustomTypeName>, type_permissions::ObjectTypeWithPermissions>,
+    graphql_config: &graphql_config::GraphqlConfig,
     source_type: &object_types::ObjectTypeRepresentation,
-    flags: &MetadataResolveFlagsInternal,
 ) -> Result<Vec<RelationshipField>, Error> {
     let source_type_name = Qualified::new(subgraph.to_string(), relationship.source_type.clone());
     match &relationship.target {
@@ -686,7 +689,7 @@ pub fn resolve_relationships(
                 data_connector_scalars,
                 aggregate_expressions,
                 object_types,
-                flags,
+                graphql_config,
             )
         }
         relationships::RelationshipTarget::Command(target_command) => {

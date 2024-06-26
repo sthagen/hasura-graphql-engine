@@ -38,7 +38,8 @@ mod types;
 pub use aggregates::{AggregateOutputAnnotation, AggregationFunctionAnnotation};
 pub use types::output_type::relationship::{
     CommandRelationshipAnnotation, CommandTargetSource, FilterRelationshipAnnotation,
-    ModelRelationshipAnnotation, OrderByRelationshipAnnotation,
+    ModelAggregateRelationshipAnnotation, ModelRelationshipAnnotation,
+    OrderByRelationshipAnnotation,
 };
 pub use types::{
     Annotation, ApolloFederationRootFields, ArgumentNameAndPath, ArgumentPresets,
@@ -92,7 +93,7 @@ pub struct GDS {
 impl GDS {
     pub fn new(
         user_metadata: open_dds::Metadata,
-        metadata_resolve_flags: &metadata_resolve::MetadataResolveFlagsInternal,
+        metadata_resolve_flags: metadata_resolve::MetadataResolveFlagsInternal,
     ) -> Result<Self, Error> {
         let resolved_metadata = resolve(user_metadata, metadata_resolve_flags)?;
         Ok(GDS {
@@ -101,7 +102,7 @@ impl GDS {
     }
 
     pub fn new_with_default_flags(user_metadata: open_dds::Metadata) -> Result<Self, Error> {
-        let resolved_metadata = resolve(user_metadata, &MetadataResolveFlagsInternal::default())?;
+        let resolved_metadata = resolve(user_metadata, MetadataResolveFlagsInternal::default())?;
         Ok(GDS {
             metadata: resolved_metadata,
         })
