@@ -12,6 +12,7 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
+
 use clap::Parser;
 use reqwest::header::CONTENT_TYPE;
 use tower_http::cors::CorsLayer;
@@ -41,6 +42,7 @@ const DEFAULT_PORT: u16 = 3000;
 
 const MB: usize = 1_048_576;
 
+#[allow(clippy::struct_excessive_bools)] // booleans are pretty useful here
 #[derive(Parser)]
 #[command(version = VERSION)]
 struct ServerOptions {
@@ -78,6 +80,10 @@ struct ServerOptions {
         value_delimiter = ','
     )]
     cors_allow_origin: Vec<String>,
+    /// Allow unknown subgraphs, pruning relationships that refer to them.
+    /// Useful when working with part of a supergraph.
+    #[arg(long, env = "PARTIAL_SUPERGRAPH")]
+    partial_supergraph: bool,
     /// List of internal unstable features to enable, separated by commas
     #[arg(
         long = "unstable-feature",
@@ -86,9 +92,16 @@ struct ServerOptions {
         value_delimiter = ','
     )]
     unstable_features: Vec<UnstableFeature>,
+
+    /// Whether internal errors should be shown or censored.
+    /// It is recommended to only show errors while developing since internal errors may contain
+    /// sensitve information.
+    #[arg(long, env = "EXPOSE_INTERNAL_ERRORS")]
+    expose_internal_errors: bool,
 }
 
 struct EngineState {
+    expose_internal_errors: execute::ExposeInternalErrors,
     http_context: HttpContext,
     schema: gql::schema::Schema<GDS>,
     auth_config: AuthConfig,
@@ -310,12 +323,22 @@ impl EngineRouter {
 
 #[allow(clippy::print_stdout)]
 async fn start_engine(server: &ServerOptions) -> Result<(), StartupError> {
-    let metadata_resolve_flags = resolve_unstable_features(&server.unstable_features);
+    let metadata_resolve_configuration = metadata_resolve::configuration::Configuration {
+        allow_unknown_subgraphs: server.partial_supergraph,
+        unstable_features: resolve_unstable_features(&server.unstable_features),
+    };
+
+    let expose_internal_errors = if server.expose_internal_errors {
+        execute::ExposeInternalErrors::Expose
+    } else {
+        execute::ExposeInternalErrors::Censor
+    };
 
     let state = build_state(
+        expose_internal_errors,
         &server.authn_config_path,
         &server.metadata_path,
-        metadata_resolve_flags,
+        metadata_resolve_configuration,
     )
     .map_err(StartupError::ReadSchema)?;
 
@@ -543,6 +566,7 @@ async fn handle_request(
             SpanVisibility::User,
             || {
                 Box::pin(execute::execute_query(
+                    state.expose_internal_errors,
                     &state.http_context,
                     &state.schema,
                     &session,
@@ -578,6 +602,7 @@ async fn handle_explain_request(
             SpanVisibility::User,
             || {
                 Box::pin(execute::execute_explain(
+                    state.expose_internal_errors,
                     &state.http_context,
                     &state.schema,
                     &session,
@@ -641,14 +666,15 @@ async fn handle_sql_request(
 
 /// Build the engine state - include auth, metadata, and sql context.
 fn build_state(
+    expose_internal_errors: execute::ExposeInternalErrors,
     authn_config_path: &PathBuf,
     metadata_path: &PathBuf,
-    metadata_resolve_flags: metadata_resolve::MetadataResolveFlagsInternal,
+    metadata_resolve_configuration: metadata_resolve::configuration::Configuration,
 ) -> Result<Arc<EngineState>, anyhow::Error> {
     let auth_config = read_auth_config(authn_config_path).map_err(StartupError::ReadAuth)?;
     let raw_metadata = std::fs::read_to_string(metadata_path)?;
     let metadata = open_dds::Metadata::from_json_str(&raw_metadata)?;
-    let resolved_metadata = metadata_resolve::resolve(metadata, metadata_resolve_flags)?;
+    let resolved_metadata = metadata_resolve::resolve(metadata, metadata_resolve_configuration)?;
     let http_context = HttpContext {
         client: reqwest::Client::new(),
         ndc_response_size_limit: None,
@@ -659,6 +685,7 @@ fn build_state(
     }
     .build_schema()?;
     let state = Arc::new(EngineState {
+        expose_internal_errors,
         http_context,
         schema,
         auth_config,

@@ -4,6 +4,9 @@
 
 ### Added
 
+- Add flag to (`--expose-internal-errors`) toggle whether to expose internal
+  errors. ([#759](https://github.com/hasura/v3-engine/pull/759))
+
 #### Aggregates of Array Relationships
 
 Aggregates of array relationships can now be defined by specifying an
@@ -38,6 +41,10 @@ definition:
 ### Changed
 
 ### Fixed
+
+- The Open DD schema for `DataConnectorLink` now references the correct version
+  (v0.1.4) of the NDC schema when using the NDC `CapabilitiesResponse` and
+  `SchemaResponse` types
 
 ## [v2024.06.13]
 
