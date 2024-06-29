@@ -15,4 +15,6 @@ pub struct Configuration {
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct UnstableFeatures {
     pub enable_boolean_expression_types: bool,
+    pub enable_order_by_expressions: bool,
+    pub enable_ndc_v02_support: bool,
 }

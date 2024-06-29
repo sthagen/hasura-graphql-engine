@@ -1,7 +1,9 @@
+use crate::configuration::UnstableFeatures;
 use crate::helpers::http::{
     HeaderError, SerializableHeaderMap, SerializableHeaderName, SerializableUrl,
 };
 use crate::helpers::ndc_validation::validate_ndc_argument_presets;
+use crate::ndc_migration;
 use crate::types::error::Error;
 use crate::types::permission::ValueExpression;
 use crate::types::subgraph::Qualified;
@@ -9,16 +11,20 @@ use indexmap::IndexMap;
 use lang_graphql::ast::common::OperationType;
 use ndc_models;
 use open_dds::arguments::ArgumentName;
-use open_dds::data_connector::SchemaAndCapabilitiesV01;
 use open_dds::{
     commands::{FunctionName, ProcedureName},
     data_connector::{
-        self, DataConnectorName, DataConnectorScalarType, DataConnectorUrl, ReadWriteUrls,
-        VersionedSchemaAndCapabilities,
+        self, DataConnectorName, DataConnectorUrl, ReadWriteUrls, VersionedSchemaAndCapabilities,
     },
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum NdcVersion {
+    V01,
+    V02,
+}
 
 /// Map of resolved data connectors information that are used in the later
 /// stages of metadata resolving. This structure is not kept in the finally
@@ -26,54 +32,45 @@ use std::collections::BTreeMap;
 pub struct DataConnectors<'a>(pub BTreeMap<Qualified<DataConnectorName>, DataConnectorContext<'a>>);
 
 /// information about a data connector
-/// currently this contains partial ScalarTypeInfo, which we add to later
 pub struct DataConnectorContext<'a> {
-    pub inner: DataConnectorCoreInfo<'a>,
-    // resolved scalar types
-    pub scalars: BTreeMap<DataConnectorScalarType, ScalarTypeInfo<'a>>,
+    pub url: &'a data_connector::DataConnectorUrl,
+    pub headers: IndexMap<String, String>,
+    pub schema: DataConnectorSchema,
+    pub capabilities: ndc_models::Capabilities,
+    pub supported_ndc_version: NdcVersion,
+    pub argument_presets: Vec<ArgumentPreset>,
+    pub response_headers: Option<CommandsResponseConfig>,
 }
 
 impl<'a> DataConnectorContext<'a> {
     pub fn new(
         data_connector: &'a data_connector::DataConnectorLinkV1,
         data_connector_name: &Qualified<DataConnectorName>,
+        unstable_features: &UnstableFeatures,
     ) -> Result<Self, Error> {
-        let VersionedSchemaAndCapabilities::V01(schema_and_capabilities) = &data_connector.schema;
-        let data_connector_core_info = DataConnectorCoreInfo::new(
-            data_connector,
-            schema_and_capabilities,
-            data_connector_name,
-        )?;
-        Ok(DataConnectorContext {
-            inner: data_connector_core_info,
-            scalars: schema_and_capabilities
-                .schema
-                .scalar_types
-                .iter()
-                .map(|(k, v)| (DataConnectorScalarType(k.clone()), ScalarTypeInfo::new(v)))
-                .collect(),
-        })
-    }
-}
+        let (resolved_schema, capabilities, supported_ndc_version) = match &data_connector.schema {
+            VersionedSchemaAndCapabilities::V01(schema_and_capabilities) => {
+                let schema =
+                    DataConnectorSchema::new(ndc_migration::v02::migrate_schema_response_from_v01(
+                        schema_and_capabilities.schema.clone(),
+                    ));
+                let capabilities = ndc_migration::v02::migrate_capabilities_from_v01(
+                    schema_and_capabilities.capabilities.capabilities.clone(),
+                );
+                (schema, capabilities, NdcVersion::V01)
+            }
+            VersionedSchemaAndCapabilities::V02(schema_and_capabilities) => {
+                let schema = DataConnectorSchema::new(schema_and_capabilities.schema.clone());
+                let capabilities = schema_and_capabilities.capabilities.capabilities.clone();
+                (schema, capabilities, NdcVersion::V02)
+            }
+        };
 
-/// information that does not change between resolver stages
-#[derive(Clone)]
-pub struct DataConnectorCoreInfo<'a> {
-    pub url: &'a data_connector::DataConnectorUrl,
-    pub headers: IndexMap<String, String>,
-    pub schema: DataConnectorSchema,
-    pub capabilities: &'a ndc_models::CapabilitiesResponse,
-    pub argument_presets: Vec<ArgumentPreset>,
-    pub response_headers: Option<CommandsResponseConfig>,
-}
-
-impl<'a> DataConnectorCoreInfo<'a> {
-    pub fn new(
-        data_connector: &'a data_connector::DataConnectorLinkV1,
-        schema_and_capabilities: &'a SchemaAndCapabilitiesV01,
-        data_connector_name: &Qualified<DataConnectorName>,
-    ) -> Result<Self, Error> {
-        let resolved_schema = DataConnectorSchema::new(&schema_and_capabilities.schema);
+        if !unstable_features.enable_ndc_v02_support && supported_ndc_version == NdcVersion::V02 {
+            return Err(Error::NdcV02DataConnectorNotSupported {
+                data_connector: data_connector_name.clone(),
+            });
+        }
 
         let argument_presets = data_connector
             .argument_presets
@@ -101,7 +98,7 @@ impl<'a> DataConnectorCoreInfo<'a> {
             None
         };
 
-        Ok(DataConnectorCoreInfo {
+        Ok(DataConnectorContext {
             url: &data_connector.url,
             headers: data_connector
                 .headers
@@ -109,7 +106,8 @@ impl<'a> DataConnectorCoreInfo<'a> {
                 .map(|(k, v)| (k.clone(), v.value.clone()))
                 .collect(),
             schema: resolved_schema,
-            capabilities: &schema_and_capabilities.capabilities,
+            capabilities,
+            supported_ndc_version,
             argument_presets,
             response_headers,
         })
@@ -134,77 +132,27 @@ pub struct DataConnectorSchema {
 }
 
 impl DataConnectorSchema {
-    fn new(schema: &ndc_models::SchemaResponse) -> Self {
+    fn new(schema: ndc_models::SchemaResponse) -> Self {
         Self {
-            scalar_types: schema.scalar_types.clone(),
-            object_types: schema.object_types.clone(),
+            scalar_types: schema.scalar_types,
+            object_types: schema.object_types,
             collections: schema
                 .collections
-                .iter()
-                .map(|collection_info| (collection_info.name.clone(), collection_info.clone()))
+                .into_iter()
+                .map(|collection_info| (collection_info.name.clone(), collection_info))
                 .collect(),
             functions: schema
                 .functions
-                .iter()
-                .map(|function_info| {
-                    (
-                        FunctionName(function_info.name.clone()),
-                        function_info.clone(),
-                    )
-                })
+                .into_iter()
+                .map(|function_info| (FunctionName(function_info.name.clone()), function_info))
                 .collect(),
             procedures: schema
                 .procedures
-                .iter()
-                .map(|procedure_info| {
-                    (
-                        ProcedureName(procedure_info.name.clone()),
-                        procedure_info.clone(),
-                    )
-                })
+                .into_iter()
+                .map(|procedure_info| (ProcedureName(procedure_info.name.clone()), procedure_info))
                 .collect(),
         }
     }
-}
-
-// basic scalar type info
-#[derive(Debug)]
-pub struct ScalarTypeInfo<'a> {
-    pub scalar_type: &'a ndc_models::ScalarType,
-    pub comparison_operators: ComparisonOperators,
-    pub aggregate_functions: &'a BTreeMap<String, ndc_models::AggregateFunctionDefinition>,
-}
-
-impl<'a> ScalarTypeInfo<'a> {
-    pub(crate) fn new(source_scalar: &'a ndc_models::ScalarType) -> Self {
-        let mut comparison_operators = ComparisonOperators::default();
-        for (operator_name, operator_definition) in &source_scalar.comparison_operators {
-            match operator_definition {
-                ndc_models::ComparisonOperatorDefinition::Equal => {
-                    comparison_operators
-                        .equal_operators
-                        .push(operator_name.clone());
-                }
-                ndc_models::ComparisonOperatorDefinition::In => {
-                    comparison_operators
-                        .in_operators
-                        .push(operator_name.clone());
-                }
-                ndc_models::ComparisonOperatorDefinition::Custom { argument_type: _ } => {}
-            };
-        }
-        ScalarTypeInfo {
-            scalar_type: source_scalar,
-            comparison_operators,
-            aggregate_functions: &source_scalar.aggregate_functions,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
-pub struct ComparisonOperators {
-    pub equal_operators: Vec<String>,
-    pub in_operators: Vec<String>,
 }
 
 /// This represents part of resolved data connector info that is eventually kept
@@ -239,9 +187,9 @@ impl std::hash::Hash for DataConnectorLink {
 impl DataConnectorLink {
     pub(crate) fn new(
         name: Qualified<DataConnectorName>,
-        info: &DataConnectorCoreInfo<'_>,
+        context: &DataConnectorContext<'_>,
     ) -> Result<Self, Error> {
-        let url = match info.url {
+        let url = match context.url {
             DataConnectorUrl::SingleUrl(url) => ResolvedDataConnectorUrl::SingleUrl(
                 SerializableUrl::new(&url.value).map_err(|e| Error::InvalidDataConnectorUrl {
                     data_connector_name: name.clone(),
@@ -265,7 +213,7 @@ impl DataConnectorLink {
                 })
             }
         };
-        let headers = SerializableHeaderMap::new(&info.headers).map_err(|e| match e {
+        let headers = SerializableHeaderMap::new(&context.headers).map_err(|e| match e {
             HeaderError::InvalidHeaderName { header_name } => Error::InvalidHeaderName {
                 data_connector: name.clone(),
                 header_name,
@@ -276,22 +224,15 @@ impl DataConnectorLink {
             },
         })?;
         let capabilities = DataConnectorCapabilities {
-            supports_explaining_queries: info.capabilities.capabilities.query.explain.is_some(),
-            supports_explaining_mutations: info
-                .capabilities
-                .capabilities
-                .mutation
-                .explain
-                .is_some(),
-            supports_nested_object_filtering: info
-                .capabilities
+            supports_explaining_queries: context.capabilities.query.explain.is_some(),
+            supports_explaining_mutations: context.capabilities.mutation.explain.is_some(),
+            supports_nested_object_filtering: context
                 .capabilities
                 .query
                 .nested_fields
                 .filter_by
                 .is_some(),
-            supports_nested_object_aggregations: info
-                .capabilities
+            supports_nested_object_aggregations: context
                 .capabilities
                 .query
                 .nested_fields
@@ -303,8 +244,8 @@ impl DataConnectorLink {
             url,
             headers,
             capabilities,
-            argument_presets: info.argument_presets.clone(),
-            response_config: info.response_headers.clone(),
+            argument_presets: context.argument_presets.clone(),
+            response_config: context.response_headers.clone(),
         })
     }
 }
@@ -462,7 +403,10 @@ mod tests {
     use ndc_models;
     use open_dds::data_connector::DataConnectorLinkV1;
 
-    use crate::{stages::data_connectors::types::DataConnectorContext, Qualified};
+    use crate::{
+        configuration::UnstableFeatures, data_connectors::types::NdcVersion,
+        stages::data_connectors::types::DataConnectorContext, Qualified,
+    };
 
     #[test]
     fn test_url_serialization_deserialization() {
@@ -481,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn test_data_connector_context_capablities() {
+    fn test_data_connector_context_v01_capablities() {
         let data_connector_with_capabilities: DataConnectorLinkV1 =
             open_dds::traits::OpenDd::deserialize(serde_json::json!(
                 {
@@ -502,21 +446,75 @@ mod tests {
             ))
             .unwrap();
 
-        let explicit_capabilities: ndc_models::CapabilitiesResponse = serde_json::from_value(serde_json::json!(
-            { "version": "0.1.3", "capabilities": { "query": { "nested_fields": {} }, "mutation": {} } }
-        )).unwrap();
+        let explicit_capabilities: ndc_models::Capabilities =
+            serde_json::from_value(serde_json::json!(
+                { "query": { "nested_fields": {} }, "mutation": {} }
+            ))
+            .unwrap();
 
         // With explicit capabilities specified, we should use them
         let dc_name = Qualified::new(
             "foo".to_string(),
             data_connector_with_capabilities.name.clone(),
         );
-        assert_eq!(
-            DataConnectorContext::new(&data_connector_with_capabilities, &dc_name)
-                .unwrap()
-                .inner
-                .capabilities,
-            &explicit_capabilities
+        let unstable_features = UnstableFeatures {
+            enable_ndc_v02_support: true,
+            ..Default::default()
+        };
+        let context = DataConnectorContext::new(
+            &data_connector_with_capabilities,
+            &dc_name,
+            &unstable_features,
+        )
+        .unwrap();
+        assert_eq!(context.capabilities, explicit_capabilities);
+        assert_eq!(context.supported_ndc_version, NdcVersion::V01);
+    }
+
+    #[test]
+    fn test_data_connector_context_v02_capablities() {
+        let data_connector_with_capabilities: DataConnectorLinkV1 =
+            open_dds::traits::OpenDd::deserialize(serde_json::json!(
+                {
+                    "name": "foo",
+                    "url": { "singleUrl": { "value": "http://test.com" } },
+                    "schema": {
+                        "version": "v0.2",
+                        "capabilities": { "version": "0.2.0", "capabilities": { "query": { "nested_fields": {} }, "mutation": {} }},
+                        "schema": {
+                            "scalar_types": {},
+                            "object_types": {},
+                            "collections": [],
+                            "functions": [],
+                            "procedures": []
+                        }
+                    }
+                }
+            ))
+            .unwrap();
+
+        let explicit_capabilities: ndc_models::Capabilities =
+            serde_json::from_value(serde_json::json!(
+                { "query": { "nested_fields": {} }, "mutation": {} }
+            ))
+            .unwrap();
+
+        // With explicit capabilities specified, we should use them
+        let dc_name = Qualified::new(
+            "foo".to_string(),
+            data_connector_with_capabilities.name.clone(),
         );
+        let unstable_features = UnstableFeatures {
+            enable_ndc_v02_support: true,
+            ..Default::default()
+        };
+        let context = DataConnectorContext::new(
+            &data_connector_with_capabilities,
+            &dc_name,
+            &unstable_features,
+        )
+        .unwrap();
+        assert_eq!(context.capabilities, explicit_capabilities);
+        assert_eq!(context.supported_ndc_version, NdcVersion::V02);
     }
 }

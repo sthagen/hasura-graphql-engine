@@ -12,7 +12,7 @@ use open_dds::{
     data_connector::{DataConnectorName, DataConnectorScalarType},
     models::ModelName,
     relationships::RelationshipName,
-    types::{CustomTypeName, FieldName, OperatorName, TypeReference},
+    types::{CustomTypeName, FieldName, OperatorName, TypeName, TypeReference},
 };
 
 use crate::helpers::{
@@ -452,6 +452,12 @@ pub enum Error {
         data_connector: Qualified<DataConnectorName>,
         scalar_type: DataConnectorScalarType,
     },
+    #[error("conflicting type representations found for data connector {data_connector:}: {old_representation:} and {new_representation:}")]
+    DataConnectorScalarRepresentationMismatch {
+        data_connector: Qualified<DataConnectorName>,
+        old_representation: TypeName,
+        new_representation: TypeName,
+    },
     #[error(
         "scalar type representation required for type {scalar_type:} in data connector {data_connector:}"
     )]
@@ -601,6 +607,11 @@ pub enum Error {
         field_name: FieldName,
         argument_name: ArgumentName,
         type_name: Qualified<CustomTypeName>,
+    },
+
+    #[error("The data connector {data_connector} uses ndc-spec v0.2.* and is not yet supported")]
+    NdcV02DataConnectorNotSupported {
+        data_connector: Qualified<DataConnectorName>,
     },
 }
 

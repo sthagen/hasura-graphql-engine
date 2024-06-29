@@ -1,5 +1,4 @@
-use super::helpers;
-use super::types::ResolvedScalarBooleanExpressionType;
+use super::types::{IncludeIsNull, ResolvedScalarBooleanExpressionType};
 use crate::stages::data_connectors;
 use crate::types::error::Error;
 use crate::Qualified;
@@ -36,7 +35,7 @@ pub(crate) fn resolve_scalar_boolean_expression_type(
         );
 
         // lookup the data connector we are referring to
-        let data_connector_info = data_connectors
+        let data_connector_context = data_connectors
             .0
             .get(&qualified_data_connector_name)
             .ok_or_else(|| Error::ScalarTypeFromUnknownDataConnector {
@@ -45,9 +44,10 @@ pub(crate) fn resolve_scalar_boolean_expression_type(
             })?;
 
         // check that this scalar type actually exists for this data connector
-        let _data_connector_scalar_type = data_connector_info
-            .scalars
-            .get(&data_connector_operator_mapping.data_connector_scalar_type)
+        let _data_connector_scalar_type = data_connector_context
+            .schema
+            .scalar_types
+            .get(&data_connector_operator_mapping.data_connector_scalar_type.0)
             .ok_or_else(|| Error::UnknownScalarTypeInDataConnector {
                 scalar_type: scalar_type_name.clone(),
                 data_connector: qualified_data_connector_name.clone(),
@@ -73,8 +73,17 @@ pub(crate) fn resolve_scalar_boolean_expression_type(
     Ok(ResolvedScalarBooleanExpressionType {
         name: boolean_expression_type_name.clone(),
         comparison_operators: resolved_comparison_operators,
+        representation: scalar_boolean_expression_operand.r#type.clone(),
         data_connector_operator_mappings,
-        include_is_null: helpers::resolve_is_null(is_null),
+        include_is_null: resolve_is_null(is_null),
         graphql_name,
     })
+}
+
+pub fn resolve_is_null(is_null: &BooleanExpressionIsNull) -> IncludeIsNull {
+    if is_null.enable {
+        IncludeIsNull::Yes
+    } else {
+        IncludeIsNull::No
+    }
 }
