@@ -63,6 +63,14 @@ impl QualifiedTypeReference {
         }
         Ok(qualifier)
     }
+
+    /// Get the underlying type name by resolving Array and Nullable container types
+    pub fn get_underlying_type_name(&self) -> &QualifiedTypeName {
+        match &self.underlying_type {
+            QualifiedBaseType::List(list_type) => list_type.get_underlying_type_name(),
+            QualifiedBaseType::Named(type_name) => type_name,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
