@@ -13,6 +13,7 @@ pub mod models_graphql;
 pub mod object_boolean_expressions;
 pub mod object_types;
 pub mod relationships;
+mod relay;
 pub mod roles;
 pub mod scalar_boolean_expressions;
 pub mod scalar_types;
@@ -35,13 +36,15 @@ pub fn resolve(
     // The graphql config represents the shape of the Hasura features in the graphql schema,
     // and which features should be enabled or disabled. We check this structure is valid.
     let graphql_config =
-        graphql_config::resolve(&metadata_accessor.graphql_config, metadata_accessor.flags)?;
+        graphql_config::resolve(&metadata_accessor.graphql_config, metadata_accessor.flags)
+            .map_err(Error::from)?;
 
     // Fetch and check schema information for all our data connectors
-    let data_connectors = data_connectors::resolve(&metadata_accessor, &configuration)?;
+    let data_connectors =
+        data_connectors::resolve(&metadata_accessor, &configuration).map_err(Error::from)?;
 
     // Validate object types defined in metadata
-    let object_types::DataConnectorTypeMappingsOutput {
+    let object_types::ObjectTypesOutput {
         graphql_types,
         global_id_enabled_types,
         apollo_federation_entity_enabled_types,
@@ -144,10 +147,9 @@ pub fn resolve(
         &boolean_expression_types,
     )?;
 
-    apollo::resolve(
-        &global_id_enabled_types,
-        &apollo_federation_entity_enabled_types,
-    )?;
+    apollo::resolve(&apollo_federation_entity_enabled_types)?;
+
+    relay::resolve(&global_id_enabled_types)?;
 
     let object_types_with_relationships = relationships::resolve(
         &metadata_accessor,

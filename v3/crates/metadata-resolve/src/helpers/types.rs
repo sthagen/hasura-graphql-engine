@@ -1,6 +1,6 @@
 use crate::stages::{
-    boolean_expressions, object_boolean_expressions, relationships, scalar_boolean_expressions,
-    scalar_types,
+    boolean_expressions, graphql_config, object_boolean_expressions, relationships,
+    scalar_boolean_expressions, scalar_types,
 };
 use crate::types::error::{BooleanExpressionError, Error};
 
@@ -28,11 +28,11 @@ pub struct NdcColumnForComparison {
 pub fn store_new_graphql_type(
     existing_graphql_types: &mut BTreeSet<ast::TypeName>,
     new_graphql_type: Option<&ast::TypeName>,
-) -> Result<(), Error> {
+) -> Result<(), graphql_config::GraphqlConfigError> {
     if let Some(new_graphql_type) = new_graphql_type {
         // Fail on conflicting graphql type names
         if !(existing_graphql_types.insert(new_graphql_type.clone())) {
-            return Err(Error::ConflictingGraphQlType {
+            return Err(graphql_config::GraphqlConfigError::ConflictingGraphQlType {
                 graphql_type_name: new_graphql_type.clone(),
             });
         }
@@ -172,8 +172,8 @@ pub fn unwrap_qualified_type_name(type_reference: &QualifiedTypeReference) -> &Q
 }
 
 /// Helper function to create GraphQL compliant name
-pub fn mk_name(name: &str) -> Result<ast::Name, Error> {
-    ast::Name::from_str(name).map_err(|_| Error::InvalidGraphQlName {
+pub fn mk_name(name: &str) -> Result<ast::Name, graphql_config::GraphqlConfigError> {
+    ast::Name::from_str(name).map_err(|_| graphql_config::GraphqlConfigError::InvalidGraphQlName {
         name: name.to_string(),
     })
 }

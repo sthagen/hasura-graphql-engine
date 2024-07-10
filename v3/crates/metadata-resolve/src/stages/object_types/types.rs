@@ -1,14 +1,14 @@
+use super::error::ObjectTypesError;
 use crate::types::subgraph::QualifiedTypeReference;
-use crate::{types::error::Error, ArgumentInfo};
+use crate::ArgumentInfo;
 use indexmap::IndexMap;
-
 use open_dds::arguments::ArgumentName;
+use open_dds::models::ModelName;
 use open_dds::types::{CustomTypeName, DataConnectorArgumentName, Deprecated, FieldName};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
-
-use open_dds::models::ModelName;
+use std::ops::Deref;
 
 use crate::types::subgraph::Qualified;
 
@@ -55,7 +55,7 @@ impl DataConnectorTypeMappingsForObject {
         data_connector_name: &Qualified<DataConnectorName>,
         data_connector_object_type: &DataConnectorObjectType,
         type_mapping: TypeMapping,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ObjectTypesError> {
         if self
             .0
             .entry(data_connector_name.clone())
@@ -63,7 +63,7 @@ impl DataConnectorTypeMappingsForObject {
             .insert(data_connector_object_type.clone(), type_mapping)
             .is_some()
         {
-            return Err(Error::DuplicateDataConnectorObjectTypeMapping {
+            return Err(ObjectTypesError::DuplicateDataConnectorObjectTypeMapping {
                 data_connector: data_connector_name.clone(),
                 data_connector_object_type: data_connector_object_type.to_string(),
             });
@@ -86,13 +86,25 @@ impl DataConnectorTypeMappingsForObject {
     }
 }
 
+pub struct ObjectTypesWithTypeMappings(
+    pub BTreeMap<Qualified<CustomTypeName>, ObjectTypeWithTypeMappings>,
+);
+
+impl Deref for ObjectTypesWithTypeMappings {
+    type Target = BTreeMap<Qualified<CustomTypeName>, ObjectTypeWithTypeMappings>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// output of `object_types` step
-pub struct DataConnectorTypeMappingsOutput {
+pub struct ObjectTypesOutput {
     pub graphql_types: BTreeSet<ast::TypeName>,
     pub global_id_enabled_types: BTreeMap<Qualified<CustomTypeName>, Vec<Qualified<ModelName>>>,
     pub apollo_federation_entity_enabled_types:
         BTreeMap<Qualified<CustomTypeName>, Option<Qualified<open_dds::models::ModelName>>>,
-    pub object_types: BTreeMap<Qualified<CustomTypeName>, ObjectTypeWithTypeMappings>,
+    pub object_types: ObjectTypesWithTypeMappings,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
