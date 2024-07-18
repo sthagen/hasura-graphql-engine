@@ -1,8 +1,10 @@
 use crate::stages::{
-    aggregates::AggregateExpressionError, apollo, boolean_expressions, data_connectors,
-    graphql_config, object_types, relay, scalar_boolean_expressions, type_permissions,
+    aggregates::AggregateExpressionError, apollo, boolean_expressions, data_connector_scalar_types,
+    data_connectors, graphql_config, object_types, relay, scalar_boolean_expressions,
+    type_permissions,
 };
 use crate::types::subgraph::{Qualified, QualifiedTypeName, QualifiedTypeReference};
+use open_dds::data_connector::DataConnectorColumnName;
 use open_dds::{
     aggregates::AggregateExpressionName,
     arguments::ArgumentName,
@@ -12,7 +14,7 @@ use open_dds::{
     },
     models::ModelName,
     relationships::RelationshipName,
-    types::{CustomTypeName, FieldName, OperatorName, TypeName, TypeReference},
+    types::{CustomTypeName, FieldName, OperatorName, TypeReference},
 };
 
 use crate::helpers::{
@@ -356,22 +358,6 @@ pub enum Error {
         relationship_name: RelationshipName,
         type_name: Qualified<CustomTypeName>,
     },
-    #[error("unknown type represented for scalar type {scalar_type:}: {type_name:}")]
-    ScalarTypeUnknownRepresentation {
-        scalar_type: DataConnectorScalarType,
-        type_name: Qualified<CustomTypeName>,
-    },
-    #[error("multiple type representations defined for scalar {scalar_type:} from data connector {data_connector:}")]
-    DuplicateDataConnectorScalarRepresentation {
-        data_connector: Qualified<DataConnectorName>,
-        scalar_type: DataConnectorScalarType,
-    },
-    #[error("conflicting type representations found for data connector {data_connector:}: {old_representation:} and {new_representation:}")]
-    DataConnectorScalarRepresentationMismatch {
-        data_connector: Qualified<DataConnectorName>,
-        old_representation: TypeName,
-        new_representation: TypeName,
-    },
     #[error("type mapping required for type {type_name:} in model source {model_name:} backed by data connector {data_connector:}")]
     TypeMappingRequired {
         model_name: Qualified<ModelName>,
@@ -462,6 +448,10 @@ pub enum Error {
     ApolloError(#[from] apollo::ApolloError),
     #[error("{0}")]
     RelayError(#[from] relay::RelayError),
+    #[error("{0}")]
+    DataConnectorScalarTypesError(
+        #[from] data_connector_scalar_types::DataConnectorScalarTypesError,
+    ),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -653,6 +643,29 @@ pub enum TypePredicateError {
     },
     #[error("operator mappings not found for data connector {data_connector_name:}")]
     OperatorMappingsNotFound {
+        data_connector_name: Qualified<DataConnectorName>,
+    },
+    #[error(
+        "no type mapping found for type {type_name:} in data connector {data_connector_name:}"
+    )]
+    UnknownTypeMapping {
+        type_name: Qualified<CustomTypeName>,
+        data_connector_name: Qualified<DataConnectorName>,
+    },
+    #[error("no field mapping found for field {field_name:} in type {type_name:} in data connector {data_connector_name:}")]
+    UnknownFieldMapping {
+        type_name: Qualified<CustomTypeName>,
+        field_name: FieldName,
+        data_connector_name: Qualified<DataConnectorName>,
+    },
+    #[error(
+        "missing equality operator for source column {ndc_column:} in data connector {data_connector_name:} \
+         which is mapped to field {field_name:} in type {type_name:}"
+    )]
+    MissingEqualOperator {
+        type_name: Qualified<CustomTypeName>,
+        field_name: FieldName,
+        ndc_column: DataConnectorColumnName,
         data_connector_name: Qualified<DataConnectorName>,
     },
 }
