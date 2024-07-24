@@ -22,7 +22,6 @@ ENV GIT_DISCOVERY_ACROSS_FILESYSTEM=1
 # Install Rust tools.
 COPY rust-toolchain.toml .
 RUN rustup show
-RUN cargo install cargo-chef cargo-nextest critcmp just
 
 COPY Cargo.toml Cargo.lock .
 
@@ -33,8 +32,7 @@ RUN --mount=type=cache,target=/app/.cargo/git --mount=type=cache,target=/app/.ca
     --mount=type=cache,target=./target \
     --mount=type=bind,source=./crates,target=./crates \
     set -ex; \
-    cargo build --all-targets; \
-    cargo nextest archive --archive-file=./bin/nextest.tar.zst
+    cargo build --bin custom-connector
 
 # Copy the binaries out of the cache
 RUN --mount=type=cache,target=./target \

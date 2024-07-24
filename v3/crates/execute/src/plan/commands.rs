@@ -1,22 +1,33 @@
 use indexmap::IndexMap;
+use open_dds::data_connector::CollectionName;
+use open_dds::data_connector::DataConnectorColumnName;
 use std::collections::BTreeMap;
 
-use super::common;
+use super::arguments;
 use super::error;
 use super::selection_set;
 use super::types;
 use crate::ir::commands::CommandInfo;
 use crate::ir::commands::FunctionBasedCommand;
 use crate::ir::commands::ProcedureBasedCommand;
+use crate::ir::selection_set::NdcFieldName;
+use crate::ir::selection_set::NdcRelationshipName;
 use crate::ndc::FUNCTION_IR_VALUE_COLUMN_NAME;
+use crate::remote_joins::types::VariableName;
 use crate::remote_joins::types::{JoinLocations, MonotonicCounter, RemoteJoin};
 use open_dds::commands::ProcedureName;
 
 pub(crate) fn plan_query_node<'s, 'ir>(
     ir: &'ir CommandInfo<'s>,
     join_id_counter: &mut MonotonicCounter,
-    relationships: &mut BTreeMap<ndc_models::RelationshipName, ndc_models::Relationship>,
-) -> Result<(types::QueryNode<'s>, JoinLocations<RemoteJoin<'s, 'ir>>), error::Error> {
+    relationships: &mut BTreeMap<NdcRelationshipName, types::Relationship>,
+) -> Result<
+    (
+        types::UnresolvedQueryNode<'s>,
+        JoinLocations<RemoteJoin<'s, 'ir>>,
+    ),
+    error::Error,
+> {
     let mut ndc_nested_field = None;
     let mut jl = JoinLocations::new();
     if let Some(nested_selection) = &ir.selection {
@@ -31,11 +42,10 @@ pub(crate) fn plan_query_node<'s, 'ir>(
     }
     let query = types::QueryNode {
         aggregates: None,
-        groups: None,
         fields: Some(IndexMap::from([(
-            ndc_models::FieldName::from(FUNCTION_IR_VALUE_COLUMN_NAME),
+            NdcFieldName::from(FUNCTION_IR_VALUE_COLUMN_NAME),
             types::Field::Column {
-                column: ndc_models::FieldName::from(FUNCTION_IR_VALUE_COLUMN_NAME),
+                column: DataConnectorColumnName::from(FUNCTION_IR_VALUE_COLUMN_NAME),
                 fields: ndc_nested_field,
                 arguments: BTreeMap::new(),
             },
@@ -53,27 +63,21 @@ pub(crate) fn plan_query_execution<'s, 'ir>(
     join_id_counter: &mut MonotonicCounter,
 ) -> Result<
     (
-        types::QueryExecutionPlan<'s>,
+        types::UnresolvedQueryExecutionPlan<'s>,
         JoinLocations<RemoteJoin<'s, 'ir>>,
     ),
     error::Error,
 > {
     let mut collection_relationships = BTreeMap::new();
-    let mut arguments = common::plan_ndc_arguments(
-        &ir.command_info.arguments,
-        ir.command_info
-            .data_connector
-            .capabilities
-            .supported_ndc_version,
-        &mut collection_relationships,
-    )?;
+    let mut arguments =
+        arguments::plan_arguments(&ir.command_info.arguments, &mut collection_relationships)?;
 
     // Add the variable arguments which are used for remote joins
     for (variable_name, variable_argument) in &ir.variable_arguments {
         arguments.insert(
-            ndc_models::ArgumentName::from(variable_name.as_str()),
+            variable_name.clone(),
             types::Argument::Variable {
-                name: ndc_models::VariableName::from(variable_argument.as_str()),
+                name: VariableName(variable_argument.clone()),
             },
         );
     }
@@ -90,9 +94,9 @@ pub(crate) fn plan_query_execution<'s, 'ir>(
         )?;
     }
 
-    let query_request = types::QueryExecutionPlan {
+    let query_request = types::UnresolvedQueryExecutionPlan {
         query_node,
-        collection: ndc_models::CollectionName::from(ir.function_name.as_str()),
+        collection: CollectionName::from(ir.function_name.as_str()),
         arguments: arguments.clone(),
         collection_relationships,
         variables: None,
@@ -107,7 +111,7 @@ pub(crate) fn plan_mutation_execution<'s, 'ir>(
     join_id_counter: &mut MonotonicCounter,
 ) -> Result<
     (
-        types::MutationExecutionPlan<'s>,
+        types::UnresolvedMutationExecutionPlan<'s>,
         JoinLocations<RemoteJoin<'s, 'ir>>,
     ),
     error::Error,
@@ -135,13 +139,9 @@ pub(crate) fn plan_mutation_execution<'s, 'ir>(
         )?;
     }
     let mutation_request = types::MutationExecutionPlan {
-        procedure_name: ndc_models::ProcedureName::from(procedure_name.as_str()),
-        procedure_arguments: common::plan_ndc_arguments(
+        procedure_name: procedure_name.clone(),
+        procedure_arguments: arguments::plan_mutation_arguments(
             &ir.command_info.arguments,
-            ir.command_info
-                .data_connector
-                .capabilities
-                .supported_ndc_version,
             &mut collection_relationships,
         )?,
         procedure_fields: ndc_nested_field,

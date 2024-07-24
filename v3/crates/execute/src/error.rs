@@ -6,7 +6,6 @@ use thiserror::Error;
 use tracing_util::{ErrorVisibility, TraceableError};
 use transitive::Transitive;
 
-use crate::ndc;
 use crate::ndc::client as ndc_client;
 
 use super::ir;
@@ -159,9 +158,6 @@ pub enum FieldInternalError {
     #[error("failed to serialise an Expression to JSON: {0}")]
     ExpressionSerializationError(serde_json::Error),
 
-    #[error("error when downgrading ndc request: {0}")]
-    NdcRequestDowngradeError(ndc::migration::NdcDowngradeError),
-
     #[error("internal error: {description}")]
     InternalGeneric { description: String },
 }
@@ -189,7 +185,6 @@ impl TraceableError for FieldInternalError {
             | Self::InternalGeneric { .. }
             | Self::NormalizedAstError(_)
             | Self::ExpressionSerializationError(_)
-            | Self::NdcRequestDowngradeError(_)
             | Self::IntrospectionError(_) => ErrorVisibility::Internal,
         }
     }
@@ -197,6 +192,9 @@ impl TraceableError for FieldInternalError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum FilterPredicateError {
+    #[error("{0}")]
+    RemoteRelationshipPlanError(Box<plan::error::Error>),
+
     #[error("remote connector request error: {0}")]
     RemoteRelationshipNDCRequest(ndc_client::Error),
 
@@ -210,6 +208,7 @@ pub enum FilterPredicateError {
 impl TraceableError for FilterPredicateError {
     fn visibility(&self) -> ErrorVisibility {
         match self {
+            Self::RemoteRelationshipPlanError(error) => error.visibility(),
             Self::RemoteRelationshipNDCRequest(_) | Self::NotASingleRowSet(_) => {
                 ErrorVisibility::Internal
             }

@@ -1,12 +1,12 @@
-use metadata_resolve::Qualified;
-use open_dds::data_connector::DataConnectorColumnName;
+use metadata_resolve::{Qualified, UnaryComparisonOperator};
+use open_dds::data_connector::{DataConnectorColumnName, DataConnectorOperatorName};
 use open_dds::models::ModelName;
 use open_dds::relationships::RelationshipName;
 use serde::Serialize;
-use std::collections::BTreeMap;
 
 use crate::ir::relationship::LocalModelRelationshipInfo;
-use crate::ir::selection_set::NDCRelationshipName;
+use crate::ir::selection_set::NdcRelationshipName;
+use crate::remote_joins::types::VariableName;
 
 /// Represent a boolean expression that can be used to filter data
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -22,8 +22,7 @@ pub enum Expression<'s> {
     },
     LocalField(LocalFieldComparison),
     LocalRelationship {
-        relationship: NDCRelationshipName,
-        arguments: BTreeMap<ndc_models::ArgumentName, ndc_models::RelationshipArgument>,
+        relationship: NdcRelationshipName,
         predicate: Box<Expression<'s>>,
         info: LocalModelRelationshipInfo<'s>,
     },
@@ -37,6 +36,17 @@ pub enum Expression<'s> {
 }
 
 impl<'s> Expression<'s> {
+    pub fn remove_always_true_expression(self) -> Option<Expression<'s>> {
+        match &self {
+            Expression::And { expressions } if expressions.is_empty() => None,
+            Expression::Not { expression } => match expression.as_ref() {
+                Expression::Or { expressions } if expressions.is_empty() => None,
+                _ => Some(self),
+            },
+            _ => Some(self),
+        }
+    }
+
     /// Creates a 'Expression::And' and applies some basic expression simplification logic
     /// to remove redundant boolean logic operators
     pub fn mk_and(expressions: Vec<Expression>) -> Expression {
@@ -114,15 +124,31 @@ impl<'s> Expression<'s> {
 pub enum LocalFieldComparison {
     /// A comparison with just a field without a target value
     UnaryComparison {
-        column: ndc_models::ComparisonTarget,
-        operator: ndc_models::UnaryComparisonOperator,
+        column: ComparisonTarget,
+        operator: UnaryComparisonOperator,
     },
     /// A comparison between a field and a value
     BinaryComparison {
-        column: ndc_models::ComparisonTarget,
-        operator: ndc_models::ComparisonOperatorName,
-        value: ndc_models::ComparisonValue,
+        column: ComparisonTarget,
+        operator: DataConnectorOperatorName,
+        value: ComparisonValue,
     },
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub enum ComparisonTarget {
+    Column {
+        /// The name of the column
+        name: DataConnectorColumnName,
+        /// Path to a nested field within an object column
+        field_path: Vec<DataConnectorColumnName>,
+    },
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub enum ComparisonValue {
+    Scalar { value: serde_json::Value },
+    Variable { name: VariableName },
 }
 
 /// Represent a mapping between a source and target NDC columns
@@ -138,7 +164,7 @@ pub struct SourceNdcColumn {
     /// Column name
     pub column: DataConnectorColumnName,
     /// Field path if the column is part of nested object type
-    pub field_path: Option<Vec<ndc_models::FieldName>>,
+    pub field_path: Vec<DataConnectorColumnName>,
     /// An equality operator needed for resolving remote relationship predicate
-    pub eq_operator: ndc_models::ComparisonOperatorName,
+    pub eq_operator: DataConnectorOperatorName,
 }

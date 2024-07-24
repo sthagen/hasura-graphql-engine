@@ -8,8 +8,6 @@ use datafusion::{
     physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner},
 };
 
-use execute::plan_expression;
-use indexmap::IndexMap;
 use metadata_resolve::FilterPermission;
 use open_dds::identifier::Identifier;
 use open_dds::types::FieldName;
@@ -106,13 +104,7 @@ impl ExtensionPlanner for NDCPushDownPlanner {
                 })?
                 .output
                 .allowed_fields;
-            for (field_name, _field) in ndc_node
-                .query
-                .query
-                .fields
-                .as_ref()
-                .unwrap_or(&IndexMap::new())
-            {
+            for (field_name, _field) in &ndc_node.fields {
                 let field_name = {
                     let field_name = Identifier::new(field_name.as_str()).map_err(|e| {
                         DataFusionError::Internal(format!(
@@ -149,30 +141,35 @@ impl ExtensionPlanner for NDCPushDownPlanner {
                     })?;
 
                     let filter_plan =
-                        plan_expression(&filter_ir, &mut relationships).map_err(|e| {
-                            DataFusionError::Internal(format!(
-                                "error constructing permission filter plan: {e}"
-                            ))
-                        })?;
-                    let filter = filter_plan
-                        .resolve(&table.http_context.clone())
-                        .await
-                        .map_err(|e| {
-                            DataFusionError::Internal(format!(
-                                "error resolving permission filter plan: {e}"
-                            ))
-                        })?;
+                        execute::plan::filter::plan_expression(&filter_ir, &mut relationships)
+                            .map_err(|e| {
+                                DataFusionError::Internal(format!(
+                                    "error constructing permission filter plan: {e}"
+                                ))
+                            })?;
+                    let filter = execute::plan::types::resolve_expression(
+                        filter_plan,
+                        &table.http_context.clone(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        DataFusionError::Internal(format!(
+                            "error resolving permission filter plan: {e}"
+                        ))
+                    })?;
                     Ok(Some(filter))
                 }
             }?;
 
-            let mut query = ndc_node.query.clone();
-            query.query.predicate = permission_filter;
-            query.collection_relationships = relationships;
+            // ndc_node.filter = permission_filter;
+            // ndc_node.collection_relationships = relationships;
             let ndc_pushdown = NDCPushDown::new(
                 table.http_context.clone(),
                 ndc_node.schema.inner().clone(),
-                Arc::new(query),
+                ndc_node.data_source_name.as_ref().clone(),
+                ndc_node.fields.clone(),
+                permission_filter,
+                relationships,
                 Arc::new(model_source.data_connector.clone()),
             );
             Ok(Some(Arc::new(ndc_pushdown)))
