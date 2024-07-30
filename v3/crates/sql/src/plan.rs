@@ -19,16 +19,13 @@ use std::{any::Any, collections::BTreeMap, hash::Hash, sync::Arc};
 use tracing_util::{FutureExt, SpanVisibility, TraceableError};
 
 use execute::{
-    ir::selection_set::{NdcFieldAlias, NdcRelationshipName},
     plan::{
-        self,
-        types::{
-            Relationship, ResolvedField, ResolvedFilterExpression, ResolvedQueryExecutionPlan,
-            ResolvedQueryNode,
-        },
+        self, Relationship, ResolvedField, ResolvedFilterExpression, ResolvedQueryExecutionPlan,
+        ResolvedQueryNode,
     },
     HttpContext,
 };
+use ir::{NdcFieldAlias, NdcRelationshipName};
 use open_dds::data_connector::{CollectionName, DataConnectorColumnName};
 
 #[derive(Debug, thiserror::Error)]

@@ -123,13 +123,13 @@ impl ExtensionPlanner for NDCPushDownPlanner {
                 }?;
             }
 
-            let mut usage_counts = execute::model_tracking::UsagesCounts::default();
+            let mut usage_counts = ir::UsagesCounts::default();
             let mut relationships = BTreeMap::new();
 
             let permission_filter = match &select_permission.filter {
                 FilterPermission::AllowAll => Ok::<_, DataFusionError>(None),
                 FilterPermission::Filter(filter) => {
-                    let filter_ir = execute::ir::permissions::process_model_predicate(
+                    let filter_ir = ir::process_model_predicate(
                         filter,
                         &table.session.variables,
                         &mut usage_counts,
@@ -141,22 +141,21 @@ impl ExtensionPlanner for NDCPushDownPlanner {
                     })?;
 
                     let filter_plan =
-                        execute::plan::filter::plan_expression(&filter_ir, &mut relationships)
-                            .map_err(|e| {
+                        execute::plan::plan_expression(&filter_ir, &mut relationships).map_err(
+                            |e| {
                                 DataFusionError::Internal(format!(
                                     "error constructing permission filter plan: {e}"
                                 ))
+                            },
+                        )?;
+                    let filter =
+                        execute::plan::resolve_expression(filter_plan, &table.http_context.clone())
+                            .await
+                            .map_err(|e| {
+                                DataFusionError::Internal(format!(
+                                    "error resolving permission filter plan: {e}"
+                                ))
                             })?;
-                    let filter = execute::plan::types::resolve_expression(
-                        filter_plan,
-                        &table.http_context.clone(),
-                    )
-                    .await
-                    .map_err(|e| {
-                        DataFusionError::Internal(format!(
-                            "error resolving permission filter plan: {e}"
-                        ))
-                    })?;
                     Ok(Some(filter))
                 }
             }?;
