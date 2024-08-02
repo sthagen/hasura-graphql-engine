@@ -42,7 +42,12 @@ pub fn resolve(
         graphql_config::resolve(&metadata_accessor.graphql_config, metadata_accessor.flags)?;
 
     // Fetch and check schema information for all our data connectors
-    let data_connectors = data_connectors::resolve(&metadata_accessor, &configuration)?;
+    let data_connectors::DataConnectorsOutput {
+        data_connectors,
+        issues,
+    } = data_connectors::resolve(&metadata_accessor, &configuration)?;
+
+    all_warnings.extend(issues.into_iter().map(Warning::from));
 
     // Validate object types defined in metadata
     let object_types::ObjectTypesOutput {
@@ -137,6 +142,7 @@ pub fn resolve(
         models,
         global_id_enabled_types,
         apollo_federation_entity_enabled_types,
+        issues,
     } = models::resolve(
         &metadata_accessor,
         &data_connectors,
@@ -150,7 +156,9 @@ pub fn resolve(
         &aggregate_expressions,
     )?;
 
-    let commands = commands::resolve(
+    all_warnings.extend(issues.into_iter().map(Warning::from));
+
+    let commands::CommandsOutput { commands, issues } = commands::resolve(
         &metadata_accessor,
         &data_connectors,
         &object_types_with_permissions,
@@ -158,6 +166,8 @@ pub fn resolve(
         &object_boolean_expression_types,
         &boolean_expression_types,
     )?;
+
+    all_warnings.extend(issues.into_iter().map(Warning::from));
 
     apollo::resolve(&apollo_federation_entity_enabled_types)?;
 
