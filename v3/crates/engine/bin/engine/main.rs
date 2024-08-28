@@ -1,3 +1,4 @@
+use futures_util::FutureExt;
 use std::fmt::Display;
 use std::hash;
 use std::hash::{Hash, Hasher};
@@ -153,41 +154,6 @@ async fn main() {
     }
 
     tracing_util::shutdown_tracer();
-}
-
-// Connects a signal handler for the unix SIGTERM signal. (This is the standard signal that unix
-// systems send when pressing ctrl+c or running `kill`. It is distinct from the "force kill" signal
-// which is SIGKILL.) This function produces a future that resolves when a SIGTERM is received. We
-// pass the future to axum's `with_graceful_shutdown` method to instruct axum to start a graceful
-// shutdown when the signal is received.
-//
-// Listening for SIGTERM specifically avoids a 10-second delay when stopping the process.
-//
-// Also listens for tokio's cross-platform `ctrl_c` signal polyfill.
-//
-// copied from https://github.com/davidB/axum-tracing-opentelemetry/blob/main/examples/otlp/src/main.rs
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        () = ctrl_c => {},
-        () = terminate => {},
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -398,7 +364,7 @@ async fn start_engine(server: &ServerOptions) -> Result<(), StartupError> {
     // run it with hyper on `addr`
     axum::Server::bind(&address)
         .serve(engine_router.into_make_service())
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(axum_ext::shutdown_signal())
         .await
         .unwrap();
 
@@ -606,15 +572,20 @@ async fn handle_request(
             "Handle request",
             SpanVisibility::User,
             || {
-                Box::pin(execute::execute_query(
-                    state.expose_internal_errors,
-                    &state.http_context,
-                    &state.schema,
-                    &session,
-                    &headers,
-                    request,
-                    None,
-                ))
+                {
+                    Box::pin(
+                        execute::execute_query(
+                            state.expose_internal_errors,
+                            &state.http_context,
+                            &state.schema,
+                            &session,
+                            &headers,
+                            request,
+                            None,
+                        )
+                        .map(|(_operation_type, graphql_response)| graphql_response),
+                    )
+                }
             },
         )
         .await;
@@ -642,14 +613,17 @@ async fn handle_explain_request(
             "Handle explain request",
             SpanVisibility::User,
             || {
-                Box::pin(execute::execute_explain(
-                    state.expose_internal_errors,
-                    &state.http_context,
-                    &state.schema,
-                    &session,
-                    &headers,
-                    request,
-                ))
+                Box::pin(
+                    execute::execute_explain(
+                        state.expose_internal_errors,
+                        &state.http_context,
+                        &state.schema,
+                        &session,
+                        &headers,
+                        request,
+                    )
+                    .map(|(_operation_type, graphql_response)| graphql_response),
+                )
             },
         )
         .await;
