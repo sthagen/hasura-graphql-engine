@@ -2304,7 +2304,7 @@ input_file: crates/metadata-resolve/tests/passing/aggregate_expressions/root_fie
                             },
                         ),
                     },
-                    orderable_relationships: {},
+                    orderable_relationships: ModelV1AllowAll,
                     graphql: None,
                     description: Some(
                         "OrderByExpression for Model Invoice (in subgraph default)",
@@ -2574,13 +2574,7 @@ input_file: crates/metadata-resolve/tests/passing/aggregate_expressions/root_fie
                     "Mutation",
                 ),
             ),
-            subscription_root_type_name: Some(
-                TypeName(
-                    Name(
-                        "Subscription",
-                    ),
-                ),
-            ),
+            subscription_root_type_name: None,
             order_by_input: Some(
                 OrderByInputGraphqlConfig {
                     asc_direction_field_value: Name(
@@ -2597,6 +2591,7 @@ input_file: crates/metadata-resolve/tests/passing/aggregate_expressions/root_fie
                 },
             ),
             enable_apollo_federation_fields: false,
+            bypass_relation_comparisons_ndc_capability: false,
         },
         pre_parse_plugins: [],
         roles: [],

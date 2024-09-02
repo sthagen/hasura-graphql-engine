@@ -8,6 +8,85 @@
 
 ### Changed
 
+## [v2024.09.02]
+
+### Added
+
+#### Enhanced Handling of Relationships in Predicates
+
+Improved support for using relationships in boolean expressions even when the
+data connector lacks the `relation_comparisons` capability. This update
+introduces two strategies for handling relationship predicates:
+
+- **Data Connector Pushdown**: When the source and target connectors are the
+  same and the target connector supports relationship comparisons, predicates
+  are pushed down to the NDC (Data Connector) for more efficient processing.
+  This strategy optimizes query execution by leveraging the data connector’s
+  capabilities.
+
+- **Engine-Based Resolution**: When the data connector does not support
+  relationship comparisons or when dealing with relationships targeting models
+  from other data connectors, predicates are resolved internally within the
+  engine. This approach involves querying the target model’s field values and
+  constructing the necessary comparison expressions.
+
+This enhancement provides greater flexibility of using relationships in
+predicates across data connectors.
+
+#### Filter Nested Arrays
+
+If`institution` is a big JSON document, and `staff` is an array of objects
+inside it, we can now filter `institutions` based on matches that exist within
+that array.
+
+```graphql
+query MyQuery {
+  where_does_john_hughes_work: InstitutionMany(
+    where: { staff: { last_name: { _eq: "Hughes" } } }
+  ) {
+    id
+    location {
+      city
+      campuses
+    }
+  }
+```
+
+This query would return us details of `Chalmers University of Technology`, where
+`John Hughes` is a member of staff.
+
+#### Order by Nested Fields
+
+Add support for ordering by nested fields.
+
+Example query:
+
+```graphql
+query MyQuery {
+  InstitutionMany(order_by: { location: { city: Asc } }) {
+    id
+    location {
+      city
+      campuses
+    }
+  }
+}
+```
+
+This will order by the value of the nested field `city` within the `location`
+JSONB column.
+
+- A new GraphQL config flag `require_valid_ndc_v01_version` to promote warnings
+  about NDC version as errors.
+
+####
+
+### Fixed
+
+- Metrics correctly display whether they are for queries or mutations
+
+### Changed
+
 ## [v2024.08.22]
 
 ### Added
@@ -394,7 +473,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.08.07...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.09.02...HEAD
+[v2024.09.02]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.02
 [v2024.08.07]: https://github.com/hasura/v3-engine/releases/tag/v2024.08.07
 [v2024.07.25]: https://github.com/hasura/v3-engine/releases/tag/v2024.07.25
 [v2024.07.24]: https://github.com/hasura/v3-engine/releases/tag/v2024.07.24

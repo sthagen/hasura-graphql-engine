@@ -29,6 +29,7 @@ pub use stages::boolean_expressions::{
     ResolvedObjectBooleanExpressionType,
 };
 pub use stages::data_connectors::DataConnectorLink;
+pub use stages::graphql_config::GlobalGraphqlConfig;
 pub use stages::model_permissions::{
     ArgumentPresets, FilterPermission, ModelPredicate, ModelTargetSource, ModelWithPermissions,
     SelectPermission, UnaryComparisonOperator,
@@ -55,7 +56,8 @@ pub use stages::object_types::{
 };
 pub use stages::order_by_expressions::{
     OrderByExpression, OrderByExpressionGraphqlConfig, OrderByExpressionIdentifier,
-    OrderByExpressions, OrderableField, OrderableObjectField, OrderableScalarField,
+    OrderByExpressions, OrderableField, OrderableObjectField, OrderableRelationship,
+    OrderableRelationships, OrderableScalarField,
 };
 pub use stages::relationships::{
     relationship_execution_category, CommandRelationshipTarget, ModelAggregateRelationshipTarget,
