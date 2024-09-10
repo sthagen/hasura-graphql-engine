@@ -422,9 +422,9 @@ dependencies = [
 
 [[package]]
 name = "async-graphql-parser"
-version = "7.0.8"
+version = "7.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9352086a0c247c5766f20e78e5cd96260deae097ef9c846630df04aed6d97c50"
+checksum = "2f66edcce4c38c18f7eb181fdf561c3d3aa2d644ce7358fc7a928c00a4ffef17"
 dependencies = [
  "async-graphql-value",
  "pest",
@@ -434,9 +434,9 @@ dependencies = [
 
 [[package]]
 name = "async-graphql-value"
-version = "7.0.8"
+version = "7.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d4c10e68076fd046561fb28b2985c29dfcc437caaf74964597541a4e5a9e1db"
+checksum = "3b0206011cad065420c27988f17dd7fe201a0e056b20c262209b7bffcd6fa176"
 dependencies = [
  "bytes",
  "indexmap 2.5.0",
@@ -479,9 +479,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.81"
+version = "0.1.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e0c28dcc82d7c8ead5cb13beb15405b57b8546e93215673ff8ca0349a028107"
+checksum = "a27b8a3a6e1a44fa4c8baf1f653e4172e81486d4941f2237e20dc2d0cf4ddff1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1781,11 +1781,14 @@ dependencies = [
  "execute",
  "futures-util",
  "goldenfile",
+ "graphql-frontend",
  "hasura-authn-core",
  "hasura-authn-jwt",
  "hasura-authn-noauth",
  "hasura-authn-webhook",
  "json_value_merge",
+ "jsonapi 0.7.0",
+ "jsonapi 3.0.0",
  "lang-graphql",
  "metadata-resolve",
  "mimalloc",
@@ -1849,6 +1852,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "error-chain"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d2f06b9cac1506ece98fe3231e3cc9c4410ec3d5b1f24ae1c8946f0742cdefc"
+dependencies = [
+ "backtrace",
+ "version_check",
+]
+
+[[package]]
 name = "execute"
 version = "3.0.0"
 dependencies = [
@@ -1856,10 +1869,8 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
- "criterion",
  "futures-ext",
  "futures-util",
- "goldenfile",
  "hasura-authn-core",
  "indexmap 2.5.0",
  "ir",
@@ -2134,6 +2145,32 @@ dependencies = [
  "similar-asserts",
  "tempfile",
  "yansi 1.0.1",
+]
+
+[[package]]
+name = "graphql-frontend"
+version = "3.0.0"
+dependencies = [
+ "async-recursion",
+ "axum",
+ "criterion",
+ "execute",
+ "goldenfile",
+ "hasura-authn-core",
+ "indexmap 2.5.0",
+ "ir",
+ "lang-graphql",
+ "metadata-resolve",
+ "ndc-models 0.1.6",
+ "ndc-models 0.2.0",
+ "nonempty",
+ "open-dds",
+ "reqwest",
+ "schema",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing-util",
 ]
 
 [[package]]
@@ -2642,6 +2679,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b0a3aadd8aaadfe2be6fd22bbdb5dbc63494ce22b7c124211f684fd757b3215"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "jsonapi"
+version = "0.7.0"
+source = "git+https://github.com/hasura/jsonapi-rust.git?rev=a7a656c5ce2a552d2a8d6ff7421ec878e2069ba0#a7a656c5ce2a552d2a8d6ff7421ec878e2069ba0"
+dependencies = [
+ "error-chain",
+ "log",
+ "queryst",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
+name = "jsonapi"
+version = "3.0.0"
+dependencies = [
+ "axum",
+ "derive_more",
+ "execute",
+ "hasura-authn-core",
+ "indexmap 2.5.0",
+ "insta",
+ "jsonapi 0.7.0",
+ "metadata-resolve",
+ "open-dds",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing-util",
 ]
 
 [[package]]
@@ -3778,6 +3847,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "queryst"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1cbeb75ac695daf201ca2d66d9c684f873b135f28af4f2c79952478cab3b9d9"
+dependencies = [
+ "lazy_static",
+ "percent-encoding",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4206,9 +4288,9 @@ checksum = "a3f0bf26fd526d2a95683cd0f87bf103b8539e2ca1ef48ce002d67aad59aa0b4"
 
 [[package]]
 name = "serde"
-version = "1.0.209"
+version = "1.0.210"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99fce0ffe7310761ca6bf9faf5115afbc19688edd00171d81b1bb1b116c63e09"
+checksum = "c8e3592472072e6e22e0a54d5904d9febf8508f65fb8552499a1abc7d1078c3a"
 dependencies = [
  "serde_derive",
 ]
@@ -4224,9 +4306,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.209"
+version = "1.0.210"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5831b979fd7b5439637af1752d535ff49f4860c0f341d1baeb6faf0f4242170"
+checksum = "243902eda00fad750862fc144cea25caca5e20d615af0a81bee94ca738f1df1f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4379,9 +4461,9 @@ dependencies = [
 
 [[package]]
 name = "similar-asserts"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e041bb827d1bfca18f213411d51b665309f1afb37a04a5d1464530e13779fc0f"
+checksum = "cfe85670573cd6f0fa97940f26e7e6601213c3b0555246c24234131f88c5709e"
 dependencies = [
  "console",
  "similar",
@@ -4837,9 +4919,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.11"
+version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cf6b47b3771c49ac75ad09a6162f53ad4b8088b76ac60e8ec1455b31a189fe1"
+checksum = "61e7c3654c13bcd040d4a03abee2c75b1d14a37b423cf5a813ceae1cc903ec6a"
 dependencies = [
  "bytes",
  "futures-core",
@@ -5306,7 +5388,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

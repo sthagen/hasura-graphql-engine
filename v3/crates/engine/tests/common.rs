@@ -18,7 +18,8 @@ use std::{
     path::PathBuf,
 };
 
-use execute::{execute_query, HttpContext};
+use execute::HttpContext;
+use graphql_frontend::execute_query;
 use schema::GDS;
 
 extern crate json_value_merge;
@@ -488,6 +489,7 @@ pub fn test_execute_explain(
                 enable_order_by_expressions: false,
                 enable_ndc_v02_support: true,
                 enable_subscriptions: false,
+                enable_jsonapi: false,
             },
             ..Default::default()
         };
@@ -512,7 +514,7 @@ pub fn test_execute_explain(
             query,
             variables: None,
         };
-        let (_, raw_response) = execute::execute_explain(
+        let (_, raw_response) = graphql_frontend::execute_explain(
             execute::ExposeInternalErrors::Expose,
             &test_ctx.http_context,
             &schema,
@@ -522,7 +524,7 @@ pub fn test_execute_explain(
         )
         .await;
 
-        let response = execute::redact_ndc_explain(raw_response);
+        let response = graphql_frontend::redact_ndc_explain(raw_response);
 
         let mut expected = test_ctx.mint.new_goldenfile_with_differ(
             expected_response_file,
@@ -550,6 +552,7 @@ pub(crate) fn test_metadata_resolve_configuration() -> metadata_resolve::configu
             enable_order_by_expressions: false,
             enable_ndc_v02_support: true,
             enable_subscriptions: true,
+            enable_jsonapi: false,
         },
     }
 }
