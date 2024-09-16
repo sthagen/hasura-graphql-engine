@@ -6,7 +6,19 @@
 
 ### Fixed
 
-- Disallow recursive types in SQL table column types
+### Changed
+
+## [v2024.09.16]
+
+### Fixed
+
+- Raise a warning when nested array comparisons are used without the necessary
+  data connector capability. A new OpenDD flag
+  `require_nested_array_filtering_capability` can be used to promote this
+  warning to an error.
+
+- Disallow recursive types in SQL table column types.
+
 - Previously, if you had `AggregateExpressions` that were configured to be used
   in GraphQL, or `Models` configured for aggregates in GraphQL, but you did not
   set the appropriate configuration in
@@ -17,13 +29,13 @@
   `AggregateExpressions` and configure your `Model` but update your
   `GraphqlConfig` separately, which is useful if they are in separate
   repositories.
-- Add a missing typecheck of `ValueExpression` while resolving model predicates
+
 - A build error is now raised if an `AggregateExpression` specifies an
   `aggregatableField` that has field arguments. This is an unsupported scenario
   and previously would have allowed invalid queries that omitted the required
   field arguments. These queries may have failed with errors at query time.
 
-### Changed
+- Add a missing typecheck of `ValueExpression` while resolving model predicates.
 
 ## [v2024.09.05]
 
@@ -509,7 +521,9 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.09.02...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.09.16...HEAD
+[v2024.09.16]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.16
+[v2024.09.05]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.05
 [v2024.09.02]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.02
 [v2024.08.07]: https://github.com/hasura/v3-engine/releases/tag/v2024.08.07
 [v2024.07.25]: https://github.com/hasura/v3-engine/releases/tag/v2024.07.25
