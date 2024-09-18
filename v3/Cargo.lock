@@ -1783,6 +1783,7 @@ dependencies = [
  "futures-util",
  "goldenfile",
  "graphql-frontend",
+ "graphql-schema",
  "hasura-authn-core",
  "hasura-authn-jwt",
  "hasura-authn-noauth",
@@ -1801,7 +1802,6 @@ dependencies = [
  "pre-execution-plugin",
  "pretty_assertions",
  "reqwest",
- "schema",
  "schemars",
  "serde",
  "serde_json",
@@ -1874,9 +1874,10 @@ dependencies = [
  "bytes",
  "futures-ext",
  "futures-util",
+ "graphql-ir",
+ "graphql-schema",
  "hasura-authn-core",
  "indexmap 2.5.0",
- "ir",
  "json-ext",
  "lang-graphql",
  "metadata-resolve",
@@ -1888,7 +1889,6 @@ dependencies = [
  "pretty_assertions",
  "query-usage-analytics",
  "reqwest",
- "schema",
  "serde",
  "serde_json",
  "thiserror",
@@ -2159,9 +2159,10 @@ dependencies = [
  "criterion",
  "execute",
  "goldenfile",
+ "graphql-ir",
+ "graphql-schema",
  "hasura-authn-core",
  "indexmap 2.5.0",
- "ir",
  "lang-graphql",
  "metadata-resolve",
  "ndc-models 0.1.6",
@@ -2169,11 +2170,35 @@ dependencies = [
  "nonempty",
  "open-dds",
  "reqwest",
- "schema",
  "serde",
  "serde_json",
  "thiserror",
  "tracing-util",
+]
+
+[[package]]
+name = "graphql-ir"
+version = "3.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "derive_more",
+ "graphql-schema",
+ "hasura-authn-core",
+ "indexmap 2.5.0",
+ "json-ext",
+ "lang-graphql",
+ "metadata-resolve",
+ "ndc-models 0.2.0",
+ "nonempty",
+ "open-dds",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "smol_str",
+ "thiserror",
+ "tracing-util",
+ "transitive",
 ]
 
 [[package]]
@@ -2183,6 +2208,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2ebc8013b4426d5b81a4364c419a95ed0b404af2b82e2457de52d9348f0e474"
 dependencies = [
  "combine",
+ "thiserror",
+]
+
+[[package]]
+name = "graphql-schema"
+version = "3.0.0"
+dependencies = [
+ "hasura-authn-core",
+ "indexmap 2.5.0",
+ "insta",
+ "json-ext",
+ "lang-graphql",
+ "metadata-resolve",
+ "open-dds",
+ "serde",
+ "serde_json",
+ "strum_macros",
  "thiserror",
 ]
 
@@ -2575,31 +2617,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f518f335dce6725a761382244631d86cf0ccb2863413590b31338feb467f9c3"
 
 [[package]]
-name = "ir"
-version = "3.0.0"
-dependencies = [
- "base64 0.22.1",
- "derive_more",
- "hasura-authn-core",
- "indexmap 2.5.0",
- "json-ext",
- "lang-graphql",
- "metadata-resolve",
- "ndc-models 0.2.0",
- "nonempty",
- "open-dds",
- "reqwest",
- "schema",
- "schemars",
- "serde",
- "serde_json",
- "smol_str",
- "thiserror",
- "tracing-util",
- "transitive",
-]
-
-[[package]]
 name = "is-terminal"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2687,7 +2704,7 @@ dependencies = [
 [[package]]
 name = "jsonapi"
 version = "0.7.0"
-source = "git+https://github.com/hasura/jsonapi-rust.git?rev=a7a656c5ce2a552d2a8d6ff7421ec878e2069ba0#a7a656c5ce2a552d2a8d6ff7421ec878e2069ba0"
+source = "git+https://github.com/hasura/jsonapi-rust.git?rev=b908b340ddfc620d33b71f279b88a0233bd5ff5c#b908b340ddfc620d33b71f279b88a0233bd5ff5c"
 dependencies = [
  "error-chain",
  "log",
@@ -2704,13 +2721,17 @@ dependencies = [
  "axum",
  "derive_more",
  "execute",
+ "graphql-ir",
+ "graphql-schema",
  "hasura-authn-core",
  "indexmap 2.5.0",
  "insta",
  "jsonapi 0.7.0",
+ "lang-graphql",
  "metadata-resolve",
+ "ndc-models 0.2.0",
  "open-dds",
- "serde",
+ "reqwest",
  "serde_json",
  "tokio",
  "tracing-util",
@@ -4213,23 +4234,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "schema"
-version = "3.0.0"
-dependencies = [
- "hasura-authn-core",
- "indexmap 2.5.0",
- "insta",
- "json-ext",
- "lang-graphql",
- "metadata-resolve",
- "open-dds",
- "serde",
- "serde_json",
- "strum_macros",
- "thiserror",
-]
-
-[[package]]
 name = "schemars"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4594,14 +4598,14 @@ dependencies = [
  "datafusion",
  "execute",
  "futures",
+ "graphql-ir",
+ "graphql-schema",
  "hasura-authn-core",
  "indexmap 2.5.0",
- "ir",
  "metadata-resolve",
  "ndc-models 0.2.0",
  "open-dds",
  "reqwest",
- "schema",
  "serde",
  "serde_json",
  "thiserror",

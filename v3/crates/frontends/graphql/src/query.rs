@@ -7,11 +7,11 @@ use execute::{
     ExecuteQueryResult, HttpContext, ProjectId,
 };
 
+use graphql_schema::GDS;
 use hasura_authn_core::Session;
 use lang_graphql as gql;
 use lang_graphql::ast::common as ast;
 use lang_graphql::{http::RawRequest, schema::Schema};
-use schema::GDS;
 use tracing_util::{set_attribute_on_active_span, AttributeVisibility, SpanVisibility};
 
 pub async fn execute_query(
@@ -101,7 +101,7 @@ pub async fn execute_query_internal(
                     // execute the query plan
                     let response = tracer
                         .in_span_async("execute", display_name, SpanVisibility::User, || {
-                            let all_usage_counts = ir::get_all_usage_counts_in_query(&ir);
+                            let all_usage_counts = graphql_ir::get_all_usage_counts_in_query(&ir);
                             let serialized_data = serde_json::to_string(&all_usage_counts).unwrap();
 
                             set_attribute_on_active_span(

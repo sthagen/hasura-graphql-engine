@@ -10,7 +10,7 @@ use transitive::Transitive;
 use crate::ndc::client as ndc_client;
 
 use super::plan;
-use schema::Annotation;
+use graphql_schema::Annotation;
 
 /// Request errors are raised before execution of root fields begins.
 /// Ref: <https://spec.graphql.org/October2021/#sec-Errors.Request-errors>
@@ -23,7 +23,7 @@ pub enum RequestError {
     ValidationFailed(#[from] gql::validation::Error),
 
     #[error("{0}")]
-    IRConversionError(#[from] ir::Error),
+    IRConversionError(#[from] graphql_ir::Error),
 
     #[error("error while generating plan: {0}")]
     PlanError(#[from] plan::error::Error),
@@ -40,7 +40,7 @@ impl RequestError {
         let message = match (self, expose_internal_errors) {
             // Error messages for internal errors from IR conversion and Plan generations are masked.
             (
-                Self::IRConversionError(ir::Error::Internal(_))
+                Self::IRConversionError(graphql_ir::Error::Internal(_))
                 | Self::PlanError(plan::error::Error::Internal(_)),
                 crate::ExposeInternalErrors::Censor,
             ) => "internal error".into(),
