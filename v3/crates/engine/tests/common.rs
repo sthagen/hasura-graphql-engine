@@ -18,13 +18,22 @@ use std::{
     path::PathBuf,
 };
 
-use execute::HttpContext;
+use execute::{HttpContext, ProjectId};
 use graphql_frontend::execute_query;
 use graphql_schema::GDS;
 
 extern crate json_value_merge;
 use json_value_merge::Merge;
 use serde_json::Value;
+
+// which OpenDD IR pipeline tests should we include for this test?
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub enum TestOpenDDPipeline {
+    Skip,
+    GenerateOpenDDQuery,
+    GenerateExecutionPlan,
+}
 
 pub struct GoldenTestContext {
     pub(crate) http_context: HttpContext,
@@ -157,11 +166,13 @@ pub(crate) fn test_introspection_expectation(
 pub fn test_execution_expectation(
     test_path_string: &str,
     common_metadata_paths: &[&str],
+    opendd_tests: TestOpenDDPipeline,
 ) -> anyhow::Result<()> {
     test_execution_expectation_for_multiple_ndc_versions(
         test_path_string,
         common_metadata_paths,
         BTreeMap::new(),
+        opendd_tests,
     )
 }
 
@@ -170,6 +181,7 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
     test_path_string: &str,
     common_metadata_paths: &[&str],
     common_metadata_paths_per_ndc_version: BTreeMap<NdcVersion, Vec<&str>>,
+    opendd_tests: TestOpenDDPipeline,
 ) -> anyhow::Result<()> {
     tokio_test::block_on(async {
         let root_test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -279,10 +291,20 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
                 None => {
                     let raw_request = RawRequest {
                         operation_name: None,
-                        query,
+                        query: query.clone(),
                         variables: None,
                     };
                     for session in &sessions {
+                        // attempt to create open ir for this request
+                        open_dd_pipeline_test(
+                            opendd_tests,
+                            &query,
+                            &schema,
+                            session,
+                            raw_request.clone(),
+                        );
+
+                        // do actual test
                         let (_, response) = execute_query(
                             execute::ExposeInternalErrors::Expose,
                             &test_ctx.http_context,
@@ -293,7 +315,19 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
                             None,
                         )
                         .await;
-                        responses.push(response.inner());
+                        let http_response = response.inner();
+                        let graphql_ws_response = run_query_graphql_ws(
+                            execute::ExposeInternalErrors::Expose,
+                            &test_ctx.http_context,
+                            &schema,
+                            session,
+                            &request_headers,
+                            raw_request.clone(),
+                            None,
+                        )
+                        .await;
+                        compare_graphql_responses(&http_response, &graphql_ws_response);
+                        responses.push(http_response);
                     }
                 }
                 Some(vars) => {
@@ -303,6 +337,15 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
                             query: query.clone(),
                             variables: Some(variables),
                         };
+                        // attempt to create open ir for this request
+                        open_dd_pipeline_test(
+                            opendd_tests,
+                            &query,
+                            &schema,
+                            session,
+                            raw_request.clone(),
+                        );
+                        // do actual test
                         let (_, response) = execute_query(
                             execute::ExposeInternalErrors::Expose,
                             &test_ctx.http_context,
@@ -313,7 +356,19 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
                             None,
                         )
                         .await;
-                        responses.push(response.inner());
+                        let http_response = response.inner();
+                        let graphql_ws_response = run_query_graphql_ws(
+                            execute::ExposeInternalErrors::Expose,
+                            &test_ctx.http_context,
+                            &schema,
+                            session,
+                            &request_headers,
+                            raw_request.clone(),
+                            None,
+                        )
+                        .await;
+                        compare_graphql_responses(&http_response, &graphql_ws_response);
+                        responses.push(http_response);
                     }
                 }
             }
@@ -349,6 +404,38 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
 
         Ok(())
     })
+}
+
+// generate open_dd_ir for each test and see what happens
+fn open_dd_pipeline_test(
+    opendd_tests: TestOpenDDPipeline,
+    query: &str,
+    schema: &Schema<GDS>,
+    session: &Session,
+    raw_request: lang_graphql::http::RawRequest,
+) {
+    match opendd_tests {
+        TestOpenDDPipeline::Skip => {}
+        TestOpenDDPipeline::GenerateOpenDDQuery => {
+            // parse the raw request into a GQL query
+            let query = graphql_frontend::parse_query(query).unwrap();
+
+            // normalize the parsed GQL query
+            if let Ok(normalized_request) =
+                graphql_frontend::normalize_request(schema, session, query, raw_request)
+            {
+                // we can only generate for queries that would have worked,
+                // `normalize_request` fails when we try and access a field we're not allowed to,
+                // for instance
+                let ir = graphql_frontend::to_opendd_ir(&normalized_request);
+
+                insta::assert_debug_snapshot!("opendd_ir", ir);
+            }
+        }
+        TestOpenDDPipeline::GenerateExecutionPlan => {
+            todo!("GenerateExecutionPlan not implemented yet")
+        }
+    }
 }
 
 fn read_json(path: &Path) -> anyhow::Result<Value> {
@@ -590,4 +677,98 @@ async fn snapshot_sql(
 /// Prints path on error to help debugging
 fn read_to_string(path: &Path) -> anyhow::Result<String> {
     fs::read_to_string(path).map_err(|e| anyhow!("path: {}, error: {}", path.to_string_lossy(), e))
+}
+
+fn compare_graphql_responses(
+    http_response: &lang_graphql::http::Response,
+    ws_response: &lang_graphql::http::Response,
+) {
+    assert_eq!(
+        http_response.status_code, ws_response.status_code,
+        "Status Codes donot match {}, {}",
+        http_response.status_code, ws_response.status_code,
+    );
+
+    assert_eq!(
+        http_response.errors, ws_response.errors,
+        "Errors do not match",
+    );
+
+    assert_eq!(http_response.data, ws_response.data, "Data do not match");
+}
+
+/// Execute a GraphQL query over a dummy WebSocket connection.
+async fn run_query_graphql_ws(
+    expose_internal_errors: execute::ExposeInternalErrors,
+    http_context: &HttpContext,
+    schema: &Schema<GDS>,
+    session: &Session,
+    request_headers: &reqwest::header::HeaderMap,
+    request: RawRequest,
+    project_id: Option<&ProjectId>,
+) -> lang_graphql::http::Response {
+    use graphql_ws;
+
+    // Dummy auth config. We never use it in the test. It is only used to create a dummy connection.
+    let dummy_auth_config = hasura_authn::AuthConfig::V1(hasura_authn::AuthConfigV1 {
+        allow_role_emulation_by: None,
+        mode: hasura_authn::AuthModeConfig::NoAuth(hasura_authn_noauth::NoAuthConfig {
+            role: Role::new("admin"),
+            session_variables: HashMap::new(),
+        }),
+    });
+
+    let context = graphql_ws::Context {
+        http_context: http_context.clone(),
+        expose_internal_errors,
+        project_id: project_id.cloned(),
+        schema: schema.clone(),
+        auth_config: dummy_auth_config,
+    };
+    let (channel_sender, mut channel_receiver) =
+        tokio::sync::mpsc::channel::<graphql_ws::Message>(10);
+    let dummy_conn = graphql_ws::Connection::new(context, channel_sender);
+    let operation_id = graphql_ws::OperationId("some-operation-id".to_string());
+    graphql_ws::execute_request(
+        operation_id.clone(),
+        expose_internal_errors,
+        session.clone(),
+        request_headers.clone(),
+        &dummy_conn,
+        request,
+    )
+    .await;
+
+    // Assert response
+    let message = channel_receiver.recv().await.expect("Expected a message");
+    let response = match message {
+        graphql_ws::Message::Protocol(graphql_ws::ServerMessage::Next { id, payload }) => {
+            assert_eq!(operation_id, id);
+            payload
+        }
+        graphql_ws::Message::Protocol(graphql_ws::ServerMessage::Error {
+            id,
+            payload: errors,
+        }) => {
+            assert_eq!(operation_id, id);
+            lang_graphql::http::Response::errors(errors)
+        }
+        _ => {
+            panic!("Expected a Next or Error message")
+        }
+    };
+
+    // Assert completion when no errors
+    if response.errors.is_none() {
+        let message = channel_receiver.recv().await.expect("Expected a message");
+        match message {
+            graphql_ws::Message::Protocol(graphql_ws::ServerMessage::Complete { id }) => {
+                assert_eq!(operation_id, id);
+            }
+            _ => {
+                panic!("Expected a Complete message")
+            }
+        };
+    }
+    response
 }
