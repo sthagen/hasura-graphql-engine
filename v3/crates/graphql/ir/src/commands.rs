@@ -19,7 +19,6 @@ use std::sync::Arc;
 use super::arguments;
 use super::selection_set;
 use super::selection_set::FieldSelection;
-use super::selection_set::NdcFieldAlias;
 use super::selection_set::NestedSelection;
 use super::selection_set::ResultSelectionSet;
 use crate::error;
@@ -29,6 +28,7 @@ use graphql_schema::CommandSourceDetail;
 use graphql_schema::TypeKind;
 use graphql_schema::GDS;
 use metadata_resolve::{Qualified, QualifiedTypeReference};
+use plan_types::NdcFieldAlias;
 
 /// IR for the 'command' operations
 #[derive(Serialize, Debug)]
@@ -40,7 +40,7 @@ pub struct CommandInfo<'s> {
     pub field_name: ast::Name,
 
     /// The data connector backing this model.
-    pub data_connector: &'s metadata_resolve::DataConnectorLink,
+    pub data_connector: Arc<metadata_resolve::DataConnectorLink>,
 
     /// Arguments for the NDC table
     pub arguments: BTreeMap<DataConnectorArgumentName, arguments::Argument<'s>>,
@@ -140,7 +140,7 @@ pub fn generate_command_info<'n, 's>(
     Ok(CommandInfo {
         command_name: Arc::new(command_name.clone()),
         field_name: field_call.name.clone(),
-        data_connector: &command_source.data_connector,
+        data_connector: command_source.data_connector.clone(),
         arguments: command_arguments,
         selection,
         type_container: field.type_container.clone(),

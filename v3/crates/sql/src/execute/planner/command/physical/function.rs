@@ -25,12 +25,13 @@ use execute::{
     },
     HttpContext,
 };
-use graphql_ir::{NdcFieldAlias, NdcRelationshipName};
+use graphql_ir::NdcRelationshipName;
 use open_dds::{
     commands::FunctionName,
     data_connector::{CollectionName, DataConnectorColumnName},
     types::{CustomTypeName, DataConnectorArgumentName},
 };
+use plan_types::NdcFieldAlias;
 use tracing_util::{FutureExt, SpanVisibility, TraceableError};
 
 #[derive(Debug, thiserror::Error)]
@@ -226,7 +227,7 @@ impl ExecutionPlan for NDCFunctionPushDown {
                 .collect(),
             collection_relationships: self.collection_relationships.clone(),
             variables: None,
-            data_connector: &self.data_connector,
+            data_connector: self.data_connector.clone(),
         };
         let query_request = plan::ndc_request::make_ndc_query_request(query_execution_plan)
             .map_err(|e| DataFusionError::Internal(format!("error creating ndc request: {e}")))?;

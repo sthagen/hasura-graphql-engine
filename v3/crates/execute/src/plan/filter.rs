@@ -9,8 +9,9 @@ use super::ndc_request;
 use super::query;
 use super::relationships::{self, process_model_relationship_definition};
 use crate::{error, ndc, HttpContext};
-use graphql_ir::{NdcFieldAlias, NdcRelationshipName};
+use graphql_ir::NdcRelationshipName;
 use open_dds::data_connector::DataConnectorColumnName;
+use plan_types::NdcFieldAlias;
 
 /// Plan the filter expression IR.
 /// This function will take the filter expression IR and convert it into a planned filter expression
@@ -413,7 +414,7 @@ where
                                 arguments: BTreeMap::new(),
                                 collection_relationships,
                                 variables: None,
-                                data_connector: &target_model_source.data_connector,
+                                data_connector: target_model_source.data_connector.clone(),
                             };
 
                             let ndc_query_request =

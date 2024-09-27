@@ -6,7 +6,9 @@ use open_dds::query::{
     QueryRequest,
 };
 use open_dds::types::CustomTypeName;
+use plan_types::NdcFieldAlias;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 // this is the thing we do
 pub fn plan_query_request<'req, 'metadata>(
@@ -62,10 +64,7 @@ fn get_limit(model_selection: &ModelSelection) -> Result<Option<u32>, PlanError>
 fn get_fields<'metadata>(
     model_selection: &ModelSelection,
     type_mappings: &'metadata TypeMapping,
-) -> Result<
-    Option<IndexMap<graphql_ir::NdcFieldAlias, Field<graphql_ir::Expression<'metadata>>>>,
-    PlanError,
-> {
+) -> Result<Option<IndexMap<NdcFieldAlias, Field<graphql_ir::Expression<'metadata>>>>, PlanError> {
     let mut fields = IndexMap::new();
 
     for (alias, field) in &model_selection.selection {
@@ -91,7 +90,7 @@ fn get_fields<'metadata>(
                     field_name
                 };
 
-                let ndc_field_alias = graphql_ir::NdcFieldAlias::from(alias.as_str());
+                let ndc_field_alias = NdcFieldAlias::from(alias.as_str());
                 let data_connector_column_name = match type_mappings {
                     TypeMapping::Object { field_mappings, .. } => field_mappings
                         .get(open_dd_field_name)
@@ -198,9 +197,9 @@ where
 
 fn lookup_data_connector(
     model: &ModelWithPermissions,
-) -> Result<&metadata_resolve::DataConnectorLink, PlanError> {
+) -> Result<Arc<metadata_resolve::DataConnectorLink>, PlanError> {
     match &model.model.source {
-        Some(source) => Ok(&source.data_connector),
+        Some(source) => Ok(source.data_connector.clone()),
         None => Err(PlanError::InternalError(
             "Data connector not found".to_string(),
         )),
