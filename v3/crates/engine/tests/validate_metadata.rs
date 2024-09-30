@@ -230,9 +230,9 @@ fn test_disallow_object_mapped_to_scalar() -> anyhow::Result<()> {
         matches!(
             gds,
             Err(SchemaError::ResolveError {
-                error: ResolveError::ModelsError(
+                error: metadata_resolve::WithContext::Raw(ResolveError::ModelsError(
                     metadata_resolve::ModelsError::ModelTypeMappingCollectionError { .. }
-                )
+                ))
             })
         ),
         "actual: {gds:?}"
@@ -252,7 +252,9 @@ fn test_disallow_filter_expression_without_source() -> anyhow::Result<()> {
         matches!(
             gds,
             Err(SchemaError::ResolveError {
-                error: ResolveError::CannotUseFilterExpressionsWithoutSource { .. }
+                error: metadata_resolve::WithContext::Raw(
+                    ResolveError::CannotUseFilterExpressionsWithoutSource { .. }
+                )
             })
         ),
         "actual: {gds:?}"
@@ -270,9 +272,9 @@ fn test_disallow_filter_expression_with_object_type_mismatch() -> anyhow::Result
         matches!(
             gds,
             Err(SchemaError::ResolveError {
-                error: ResolveError::BooleanExpressionError(
+                error: metadata_resolve::WithContext::Raw(ResolveError::BooleanExpressionError(
                     BooleanExpressionError::BooleanExpressionTypeForInvalidObjectTypeInModel { .. }
-                )
+                ))
             })
         ),
         "actual: {gds:?}"
@@ -291,7 +293,8 @@ fn test_disallow_boolean_expression_without_mapping() -> anyhow::Result<()> {
         matches!(
             gds,
             Err(SchemaError::ResolveError {
-                error: ResolveError::BooleanExpressionError (BooleanExpressionError::NoDataConnectorTypeMappingForObjectTypeInBooleanExpression { .. })
+                error: metadata_resolve::WithContext::Raw(
+                           ResolveError::BooleanExpressionError (BooleanExpressionError::NoDataConnectorTypeMappingForObjectTypeInBooleanExpression { .. }))
             })
         ),
         "actual: {gds:?}"

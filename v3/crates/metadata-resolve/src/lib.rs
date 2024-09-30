@@ -35,6 +35,7 @@ pub use stages::model_permissions::{
     SelectPermission, UnaryComparisonOperator,
 };
 pub use stages::models::{Model, ModelSource, ModelsError};
+pub use stages::plugins::LifecyclePluginConfigs;
 pub use stages::scalar_boolean_expressions::ResolvedScalarBooleanExpressionType;
 pub use stages::{
     command_permissions::CommandWithPermissions,
@@ -70,10 +71,11 @@ pub use stages::scalar_types::ScalarTypeRepresentation;
 pub use stages::type_permissions::{FieldPresetInfo, TypeInputPermission};
 pub use stages::{resolve, Metadata};
 pub use types::configuration;
-pub use types::error::Error;
+pub use types::error::{Error, WithContext};
 pub use types::permission::{ValueExpression, ValueExpressionOrPredicate};
 pub use types::subgraph::{
     deserialize_non_string_key_btreemap, deserialize_qualified_btreemap,
     serialize_non_string_key_btreemap, serialize_qualified_btreemap, ArgumentInfo, ArgumentKind,
     Qualified, QualifiedBaseType, QualifiedTypeName, QualifiedTypeReference,
+    UnTaggedQualifiedTypeName,
 };

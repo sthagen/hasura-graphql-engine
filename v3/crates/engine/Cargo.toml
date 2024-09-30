@@ -35,7 +35,8 @@ lang-graphql = { path = "../lang-graphql" }
 metadata-resolve = {path = "../metadata-resolve" }
 open-dds = { path = "../open-dds" }
 plan = { path = "../plan" }
-pre-execution-plugin = { path = "../plugins/pre-execution-plugin" }
+pre-parse-plugin = { path = "../plugins/pre-parse-plugin" }
+pre-response-plugin = { path = "../plugins/pre-response-plugin" }
 sql = { path = "../sql" }
 tracing-util = { path = "../utils/tracing-util" }
 
@@ -63,7 +64,7 @@ build-data = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
 goldenfile = { workspace = true }
-insta = { workspace = true }
+insta = { workspace = true, features = ["json"] }
 pretty_assertions = { workspace = true }
 tokio-test = { workspace = true }
 
