@@ -4,6 +4,25 @@
 
 ### Added
 
+### Fixed
+
+- Fixed double string escaping when forwarding headers to a data connector
+
+### Changed
+
+## [v2024.10.01]
+
+### Added
+
+#### Metadata build error contexts
+
+Contexts are being added to errors raised during the build process to allow
+users to locate the source of the issue more quickly. These contexts will be
+surfaced in the Build Server API responses. The first example and test bed for
+developing the scaffolding is the error raised when a model refers to a
+nonexistent data connector. This error will now also contain the path to the
+offending data connector name.
+
 #### Pre-response Plugin
 
 Engine now supports calling a HTTP webhook in the pre-response execution step.
@@ -47,6 +66,9 @@ the following customizations:
 ### Fixed
 
 - Fix poor performance of `process_response` for large and deeply-nested results
+- Fixed issue in partial supergraph builds where a `BooleanExpressionType` that
+  referenced a relationship that targeted an unknown subgraph would incorrectly
+  produce an error rather than ignoring the relationship
 
 ### Changed
 
@@ -609,7 +631,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.09.23...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.10.01...HEAD
+[v2024.10.01]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.01
 [v2024.09.23]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.23
 [v2024.09.16]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.16
 [v2024.09.05]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.05

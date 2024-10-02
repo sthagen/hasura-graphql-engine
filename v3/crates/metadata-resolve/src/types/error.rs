@@ -6,6 +6,7 @@ use crate::stages::{
     type_permissions,
 };
 use crate::types::subgraph::{Qualified, QualifiedTypeReference};
+use lang_graphql::ast::common as ast;
 use open_dds::data_connector::DataConnectorColumnName;
 use open_dds::flags;
 use open_dds::order_by_expression::OrderByExpressionName;
@@ -28,7 +29,29 @@ use crate::helpers::{
 #[derive(Debug, thiserror::Error)]
 pub enum WithContext<T> {
     Raw(#[from] T),
-    Contextualised { error: T, path: jsonpath::JSONPath },
+    Contextualised {
+        error: T,
+        context: error_context::Context,
+    },
+}
+
+impl<T> WithContext<T> {
+    pub fn context(&self) -> Option<error_context::Context> {
+        match self {
+            WithContext::Contextualised { context, .. } => Some(context.clone()),
+            WithContext::Raw(_) => None,
+        }
+    }
+
+    pub fn coerce<S: From<T>>(self) -> WithContext<S> {
+        match self {
+            WithContext::Raw(err) => WithContext::Raw(S::from(err)),
+            WithContext::Contextualised { error, context } => WithContext::Contextualised {
+                error: S::from(error),
+                context,
+            },
+        }
+    }
 }
 
 impl<T: Display> Display for WithContext<T> {
@@ -198,9 +221,10 @@ pub enum Error {
     #[error("{0}")]
     DeserializationError(#[from] serde_json::Error),
     #[error(
-        "duplicate relationship {relationship_name:} associated with source type {type_name:}"
+        "duplicate relationship field {field_name} from {relationship_name} associated with source type {type_name}"
     )]
-    DuplicateRelationshipInSourceType {
+    DuplicateRelationshipFieldInSourceType {
+        field_name: ast::Name,
         type_name: Qualified<CustomTypeName>,
         relationship_name: RelationshipName,
     },
@@ -220,11 +244,6 @@ pub enum Error {
         type_name: Qualified<CustomTypeName>,
         relationship_name: RelationshipName,
         command_name: Qualified<CommandName>,
-    },
-    #[error("Source type {type_name:} referenced in the definition of relationship(s) {relationship_name:} is not defined ")]
-    RelationshipDefinedOnUnknownType {
-        relationship_name: RelationshipName,
-        type_name: Qualified<CustomTypeName>,
     },
     #[error("{reason:}")]
     NotSupported { reason: String },
