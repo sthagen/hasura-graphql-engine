@@ -2,8 +2,8 @@ use graphql_schema::GDS;
 use lang_graphql::ast::common::{self as ast};
 use lang_graphql::normalized_ast::Operation;
 use open_dds::query::{
-    Alias, ModelSelection, ModelTarget, ObjectFieldSelection, ObjectFieldTarget,
-    ObjectSubSelection, Query, QueryRequest, QueryRequestV1, Value,
+    Alias, CommandSelection, CommandTarget, ModelSelection, ModelTarget, ObjectFieldSelection,
+    ObjectFieldTarget, ObjectSubSelection, Query, QueryRequest, QueryRequestV1, Value,
 };
 use open_dds::{arguments::ArgumentName, identifier::Identifier};
 
@@ -34,15 +34,19 @@ pub fn to_opendd_ir(operation: &Operation<GDS>) -> QueryRequest {
 
                     let selection = to_model_selection(&query.selection_set.fields);
 
-                    let arguments = to_model_arguments(&field_call.arguments);
+                    let ArgumentOutputs {
+                        arguments,
+                        offset,
+                        limit,
+                    } = to_model_arguments(&field_call.arguments);
 
                     let query = Query::Model(ModelSelection {
                         selection,
                         target: ModelTarget {
                             arguments,
                             filter: None,
-                            limit: None,
-                            offset: None,
+                            limit,
+                            offset,
                             order_by: vec![],
                             model_name: name.name.clone(),
                             subgraph: name.subgraph.clone(),
@@ -51,6 +55,31 @@ pub fn to_opendd_ir(operation: &Operation<GDS>) -> QueryRequest {
 
                     queries.insert(opendd_alias, query);
                 }
+                graphql_schema::Annotation::Output(
+                    graphql_schema::OutputAnnotation::RootField(
+                        graphql_schema::RootFieldAnnotation::FunctionCommand { name, .. },
+                    ),
+                ) => {
+                    let opendd_alias =
+                        Alias::new(Identifier::new(field_call.name.as_str()).unwrap());
+
+                    let selection = to_model_selection(&query.selection_set.fields);
+
+                    let ArgumentOutputs { arguments, .. } =
+                        to_model_arguments(&field_call.arguments);
+
+                    let query = Query::Command(CommandSelection {
+                        selection: Some(selection),
+                        target: CommandTarget {
+                            arguments,
+                            command_name: name.name.clone(),
+                            subgraph: name.subgraph.clone(),
+                        },
+                    });
+
+                    queries.insert(opendd_alias, query);
+                }
+
                 _ => todo!("not implemented yet"),
             }
         }
@@ -59,18 +88,53 @@ pub fn to_opendd_ir(operation: &Operation<GDS>) -> QueryRequest {
     QueryRequest::V1(QueryRequestV1 { queries })
 }
 
+struct ArgumentOutputs {
+    arguments: IndexMap<ArgumentName, Value>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
 fn to_model_arguments(
     arguments: &IndexMap<ast::Name, lang_graphql::normalized_ast::InputField<GDS>>,
-) -> IndexMap<ArgumentName, Value> {
+) -> ArgumentOutputs {
     let mut model_arguments = IndexMap::new();
-    for (name, argument) in arguments {
-        let argument_name = ArgumentName::new(Identifier::new(name.as_str()).unwrap());
-        let argument_value = open_dds::query::Value::Literal(argument.value.as_json());
+    let mut model_offset = None;
+    let mut model_limit = None;
 
-        model_arguments.insert(argument_name, argument_value);
+    for (name, argument) in arguments {
+        // unfortunately we've just got to string match on arguments
+        // with built-in meaning
+        if name.as_str() == "offset" {
+            if let Some(offset_value) = match &argument.value {
+                lang_graphql::normalized_ast::Value::SimpleValue(
+                    lang_graphql::normalized_ast::SimpleValue::Integer(i),
+                ) => usize::try_from(*i).ok(),
+                _ => None,
+            } {
+                model_offset = Some(offset_value);
+            }
+        } else if name.as_str() == "limit" {
+            if let Some(limit_value) = match &argument.value {
+                lang_graphql::normalized_ast::Value::SimpleValue(
+                    lang_graphql::normalized_ast::SimpleValue::Integer(i),
+                ) => usize::try_from(*i).ok(),
+                _ => None,
+            } {
+                model_limit = Some(limit_value);
+            }
+        } else {
+            let argument_name = ArgumentName::new(Identifier::new(name.as_str()).unwrap());
+            let argument_value = open_dds::query::Value::Literal(argument.value.as_json());
+
+            model_arguments.insert(argument_name, argument_value);
+        }
     }
 
-    model_arguments
+    ArgumentOutputs {
+        arguments: model_arguments,
+        offset: model_offset,
+        limit: model_limit,
+    }
 }
 
 fn to_model_selection(
