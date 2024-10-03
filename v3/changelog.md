@@ -6,11 +6,13 @@
 
 ### Fixed
 
-- Fixed double string escaping when forwarding headers to a data connector
+- Fix local `docker-compose.yaml` file so that running `docker compose up`
+  builds the engine and serves it along with a sample schema using
+  `ndc-postgres` and a `postgres` database.
 
 ### Changed
 
-## [v2024.10.01]
+## [v2024.10.02]
 
 ### Added
 
@@ -69,6 +71,7 @@ the following customizations:
 - Fixed issue in partial supergraph builds where a `BooleanExpressionType` that
   referenced a relationship that targeted an unknown subgraph would incorrectly
   produce an error rather than ignoring the relationship
+- Fixed double string escaping when forwarding headers to a data connector
 
 ### Changed
 
@@ -631,8 +634,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.10.01...HEAD
-[v2024.10.01]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.01
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.10.02...HEAD
+[v2024.10.02]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.02
 [v2024.09.23]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.23
 [v2024.09.16]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.16
 [v2024.09.05]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.05
