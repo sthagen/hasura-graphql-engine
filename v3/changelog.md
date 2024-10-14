@@ -4,6 +4,14 @@
 
 ### Added
 
+### Fixed
+
+### Changed
+
+## [v2024.10.14]
+
+### Added
+
 - Added contexts to more MBS errors: when a model refers to a collection that
   doesn't exist, the path to the offending reference will be reported.
 
@@ -17,6 +25,8 @@
   run locally and no longer fail with missing subgraph errors. Subgraph builds
   are marked with a new OpenDD flag and when these builds are run by the engine
   relationships to unknown subgraphs are automatically pruned.
+
+- Aggregate queries now support `__typename` introspection fields.
 
 ### Changed
 
@@ -649,7 +659,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.10.02...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.10.14...HEAD
+[v2024.10.14]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.14
 [v2024.10.02]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.02
 [v2024.09.23]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.23
 [v2024.09.16]: https://github.com/hasura/v3-engine/releases/tag/v2024.09.16
