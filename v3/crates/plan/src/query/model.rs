@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use execute::{
-    plan::{field::Field, Argument, ResolvedFilterExpression},
+    plan::{field::Field, ResolvedFilterExpression},
     QueryExecutionPlan, QueryNode,
 };
 use graphql_ir::AggregateFieldSelection;
@@ -26,6 +26,7 @@ pub async fn from_model_aggregate_selection(
     metadata: &Metadata,
     session: &Arc<Session>,
     http_context: &Arc<execute::HttpContext>,
+    request_headers: &reqwest::header::HeaderMap,
 ) -> Result<
     (
         Qualified<CustomTypeName>,
@@ -95,6 +96,7 @@ pub async fn from_model_aggregate_selection(
         session,
         http_context,
         metadata,
+        request_headers,
         model,
         model_source,
         model_object_type,
@@ -109,6 +111,7 @@ pub async fn from_model_selection(
     metadata: &Metadata,
     session: &Arc<Session>,
     http_context: &Arc<execute::HttpContext>,
+    request_headers: &reqwest::header::HeaderMap,
 ) -> Result<
     (
         Qualified<CustomTypeName>,
@@ -226,6 +229,7 @@ pub async fn from_model_selection(
         session,
         http_context,
         metadata,
+        request_headers,
         model,
         model_source,
         model_object_type,
@@ -260,28 +264,24 @@ pub fn ndc_query_to_query_execution_plan(
         })
     };
 
+    // only send an ordering if there are actually elements
+    let order_by = if query.order_by.order_by_elements.is_empty() {
+        None
+    } else {
+        Some(query.order_by.order_by_elements.clone())
+    };
+
     QueryExecutionPlan {
         query_node: QueryNode {
             fields: query_fields,
             aggregates: query_aggregate_fields,
             limit: query.limit,
             offset: query.offset,
-            order_by: Some(query.order_by.order_by_elements.clone()),
+            order_by,
             predicate: query.filter.clone(),
         },
         collection: query.collection_name.clone(),
-        arguments: query
-            .arguments
-            .iter()
-            .map(|(argument, value)| {
-                (
-                    argument.clone(),
-                    Argument::Literal {
-                        value: value.clone(),
-                    },
-                )
-            })
-            .collect(),
+        arguments: query.arguments.clone(),
         collection_relationships: query.collection_relationships.clone(),
         variables: None,
         data_connector: query.data_connector.clone(),
