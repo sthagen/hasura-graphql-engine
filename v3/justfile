@@ -85,6 +85,7 @@ watch: start-docker-test-deps start-docker-run-deps
       --otlp-endpoint http://localhost:4317 \
       --authn-config-path static/auth/auth_config.json \
       --metadata-path static/sample-schema.json \
+      --unstable-feature enable-subscriptions \
       --unstable-feature enable-json-api \
       --expose-internal-errors'
 
@@ -99,7 +100,7 @@ machete:
 
 # update golden tests
 update-golden-files: start-docker-test-deps
-    UPDATE_GOLDENFILES=1 cargo test
+    UPDATE_GOLDENFILES=1 just test
     just fix-format
 
 update-custom-connector-schema-in-test-metadata:
@@ -174,5 +175,6 @@ run METADATA_PATH="static/sample-schema.json": start-docker-test-deps start-dock
     --otlp-endpoint http://localhost:4317 \
     --authn-config-path static/auth/auth_config.json \
     --metadata-path {{ METADATA_PATH }} \
+    --unstable-feature enable-subscriptions \
     --unstable-feature enable-json-api \
     --expose-internal-errors
