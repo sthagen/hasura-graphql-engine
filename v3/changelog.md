@@ -8,6 +8,14 @@
 
 ### Changed
 
+## [v2024.10.25]
+
+### Fixed
+
+- `ModelPermissions` and `CommandPermissions` can now correctly preset
+  predicate-typed arguments that are nullable. Previously, trying to do so
+  resulted in a build error.
+
 ## [v2024.10.23]
 
 ### Added
@@ -692,7 +700,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.10.23...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.10.25...HEAD
+[v2024.10.25]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.25
 [v2024.10.23]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.23
 [v2024.10.21]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.21
 [v2024.10.14]: https://github.com/hasura/v3-engine/releases/tag/v2024.10.14
