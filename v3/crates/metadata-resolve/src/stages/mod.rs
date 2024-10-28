@@ -172,6 +172,8 @@ pub fn resolve(
     } = order_by_expressions::resolve(
         &metadata_accessor,
         &object_types_with_permissions,
+        &relationships,
+        &scalar_types,
         graphql_types,
     )?;
 

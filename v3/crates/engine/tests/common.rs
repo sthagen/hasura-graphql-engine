@@ -478,7 +478,6 @@ pub fn test_execute_explain(
 
         let configuration = metadata_resolve::configuration::Configuration {
             unstable_features: metadata_resolve::configuration::UnstableFeatures {
-                enable_order_by_expressions: false,
                 enable_ndc_v02_support: true,
                 enable_jsonapi: false,
                 ..Default::default()
@@ -539,7 +538,6 @@ pub(crate) fn test_metadata_resolve_configuration() -> metadata_resolve::configu
 {
     metadata_resolve::configuration::Configuration {
         unstable_features: metadata_resolve::configuration::UnstableFeatures {
-            enable_order_by_expressions: false,
             enable_ndc_v02_support: true,
             enable_jsonapi: false,
             ..Default::default()
@@ -727,6 +725,7 @@ async fn run_query_graphql_ws(
     });
 
     let context = graphql_ws::Context {
+        connection_expiry: graphql_ws::ConnectionExpiry::Never,
         http_context: http_context.clone(),
         expose_internal_errors,
         project_id: project_id.cloned(),

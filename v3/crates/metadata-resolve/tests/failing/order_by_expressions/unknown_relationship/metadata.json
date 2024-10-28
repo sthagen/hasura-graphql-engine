@@ -38,16 +38,12 @@
             "operand": {
               "object": {
                 "orderedType": "RowType",
-                "orderableFields": [
+                "orderableFields": [],
+                "orderableRelationships": [
                   {
-                    "fieldName": "test",
-                    "enableOrderByDirections": {
-                      "enableAll": true
-                    },
-                    "orderByExpression": "Foo"
+                    "relationshipName": "NonExistentRelationship"
                   }
-                ],
-                "orderableRelationships": []
+                ]
               }
             },
             "graphql": {
