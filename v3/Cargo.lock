@@ -139,9 +139,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.91"
+version = "1.0.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c042108f3ed77fd83760a5fd79b53be043192bb3b9dba91d8c574c0ada7850c8"
+checksum = "74f37166d7d48a0284b99dd824694c26119c700b53bf0d1540cdb147dbdaaf13"
 
 [[package]]
 name = "apollo-parser"
@@ -1018,12 +1018,6 @@ checksum = "f7144d30dcf0fafbce74250a3963025d8d52177934239851c917d29f1df280c2"
 
 [[package]]
 name = "convert_case"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
-
-[[package]]
-name = "convert_case"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca"
@@ -1638,19 +1632,6 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
-version = "0.99.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f33878137e4dafd7fa914ad4e259e18a4e8e532b9617a2d0150262bf53abfce"
-dependencies = [
- "convert_case 0.4.0",
- "proc-macro2",
- "quote",
- "rustc_version",
- "syn 2.0.82",
-]
-
-[[package]]
-name = "derive_more"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
@@ -1664,6 +1645,7 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
 dependencies = [
+ "convert_case",
  "proc-macro2",
  "quote",
  "syn 2.0.82",
@@ -2279,7 +2261,7 @@ version = "3.0.0"
 dependencies = [
  "axum",
  "blake2",
- "derive_more 0.99.18",
+ "derive_more",
  "execute",
  "futures-util",
  "graphql-frontend",
@@ -2425,7 +2407,7 @@ version = "3.0.0"
 dependencies = [
  "axum",
  "axum-core",
- "derive_more 0.99.18",
+ "derive_more",
  "http 1.1.0",
  "lang-graphql",
  "open-dds",
@@ -2785,9 +2767,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.40.0"
+version = "1.41.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6593a41c7a73841868772495db7dc1e8ecab43bb5c0b6da2059246c4b506ab60"
+checksum = "7e9ffc4d4892617c50a928c52b2961cb5174b6fc6ebf252b2fac9d21955c48b8"
 dependencies = [
  "console",
  "globset",
@@ -2927,7 +2909,7 @@ version = "3.0.0"
 dependencies = [
  "axum",
  "axum-core",
- "derive_more 0.99.18",
+ "derive_more",
  "execute",
  "hasura-authn-core",
  "indexmap 2.6.0",
@@ -2940,6 +2922,7 @@ dependencies = [
  "open-dds",
  "plan",
  "reqwest",
+ "serde",
  "serde_json",
  "tokio",
  "tracing-util",
@@ -3215,7 +3198,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 name = "metadata-resolve"
 version = "3.0.0"
 dependencies = [
- "derive_more 0.99.18",
+ "derive_more",
  "error-context",
  "hasura-authn-core",
  "indexmap 2.6.0",
@@ -3490,7 +3473,7 @@ version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caad8a11807e43c49ab8f9527c96d0ec926f525549e65e5cd3b502115704a58e"
 dependencies = [
- "derive_more 1.0.0",
+ "derive_more",
  "http 1.1.0",
  "log",
  "once_cell",
@@ -3554,7 +3537,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 name = "open-dds"
 version = "3.0.0"
 dependencies = [
- "derive_more 0.99.18",
+ "derive_more",
  "goldenfile",
  "indexmap 2.6.0",
  "jsonpath",
@@ -3578,7 +3561,7 @@ dependencies = [
 name = "opendds-derive"
 version = "3.0.0"
 dependencies = [
- "convert_case 0.6.0",
+ "convert_case",
  "darling",
  "proc-macro2",
  "quote",
@@ -3996,7 +3979,7 @@ checksum = "d231b230927b5e4ad203db57bbcbee2802f6bce620b1e4a9024a07d94e2907ec"
 name = "plan"
 version = "3.0.0"
 dependencies = [
- "derive_more 0.99.18",
+ "derive_more",
  "execute",
  "graphql-ir",
  "graphql-schema",
@@ -4013,7 +3996,7 @@ dependencies = [
 name = "plan-types"
 version = "3.0.0"
 dependencies = [
- "derive_more 0.99.18",
+ "derive_more",
  "metadata-resolve",
  "open-dds",
  "schemars",
@@ -4640,9 +4623,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.128"
+version = "1.0.132"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff5456707a1de34e7e37f2a6fd3d3f808c318259cbd01ab6377795054b483d8"
+checksum = "d726bfaff4b320266d395898905d0eba0345aae23b54aee3a737e260fd46db03"
 dependencies = [
  "indexmap 2.6.0",
  "itoa",
@@ -5191,9 +5174,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.40.0"
+version = "1.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2b070231665d27ad9ec9b8df639893f46727666c6767db40317fbe920a5d998"
+checksum = "145f3413504347a2be84393cc8a7d2fb4d863b375909ea59f2158261aa258bbb"
 dependencies = [
  "backtrace",
  "bytes",
@@ -5443,7 +5426,7 @@ name = "tracing-util"
 version = "3.0.0"
 dependencies = [
  "axum",
- "derive_more 0.99.18",
+ "derive_more",
  "http 1.1.0",
  "opentelemetry",
  "opentelemetry-contrib",
@@ -5779,7 +5762,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

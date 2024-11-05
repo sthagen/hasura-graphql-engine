@@ -15,6 +15,8 @@ let
   buildArgs = {
     inherit pname;
 
+    strictDeps = true;
+
     src =
       let
         isGraphqlFile = path: _type: builtins.match ".*graphql" path != null;
@@ -48,8 +50,7 @@ let
   # Build the dependencies first.
   cargoArtifacts = craneLib.buildDepsOnly (buildArgs //
     {
-      # without this we'll build deps for the entire workspace every time
-      buildPhaseCargoCommand = "cargo build --profile $CARGO_PROFILE --package ${packageName}";
+      inherit cargoExtraArgs;
       doCheck = false;
     }
 
