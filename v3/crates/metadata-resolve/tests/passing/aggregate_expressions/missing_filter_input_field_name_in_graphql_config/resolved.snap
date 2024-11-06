@@ -898,71 +898,6 @@ input_file: crates/metadata-resolve/tests/passing/aggregate_expressions/missing_
                             },
                         },
                     },
-                    scalar_representations: {
-                        FieldName(
-                            Identifier(
-                                "billingAddress",
-                            ),
-                        ): {
-                            String,
-                        },
-                        FieldName(
-                            Identifier(
-                                "billingCity",
-                            ),
-                        ): {
-                            String,
-                        },
-                        FieldName(
-                            Identifier(
-                                "billingCountry",
-                            ),
-                        ): {
-                            String,
-                        },
-                        FieldName(
-                            Identifier(
-                                "billingPostalCode",
-                            ),
-                        ): {
-                            String,
-                        },
-                        FieldName(
-                            Identifier(
-                                "billingState",
-                            ),
-                        ): {
-                            String,
-                        },
-                        FieldName(
-                            Identifier(
-                                "customerId",
-                            ),
-                        ): {
-                            Int32,
-                        },
-                        FieldName(
-                            Identifier(
-                                "invoiceDate",
-                            ),
-                        ): {
-                            Timestamp,
-                        },
-                        FieldName(
-                            Identifier(
-                                "invoiceId",
-                            ),
-                        ): {
-                            Int32,
-                        },
-                        FieldName(
-                            Identifier(
-                                "total",
-                            ),
-                        ): {
-                            BigDecimal,
-                        },
-                    },
                 },
             },
         },
@@ -995,9 +930,7 @@ input_file: crates/metadata-resolve/tests/passing/aggregate_expressions/missing_
                                 "mypg",
                             ),
                         ),
-                    }: FromDataConnectorSchema(
-                        Int32,
-                    ),
+                    }: Int32,
                 },
             },
             Qualified {
@@ -1028,7 +961,7 @@ input_file: crates/metadata-resolve/tests/passing/aggregate_expressions/missing_
                                 "mypg",
                             ),
                         ),
-                    }: AssumeJson,
+                    }: JSON,
                 },
             },
         },
