@@ -165,6 +165,7 @@ pub fn resolve(
         &graphql_config,
         &object_types_with_permissions,
         &relationships,
+        &metadata_accessor.flags,
     )
     .map_err(Error::from)?;
 
@@ -194,6 +195,7 @@ pub fn resolve(
         &object_types_with_permissions,
         graphql_types,
         &graphql_config,
+        &metadata_accessor.flags,
     )
     .map_err(Error::from)?;
 
@@ -262,6 +264,7 @@ pub fn resolve(
         &scalar_types,
         &object_boolean_expression_types,
         &boolean_expression_types,
+        &metadata_accessor.flags,
     )?;
 
     all_issues.extend(issues.into_iter().map(Warning::from));
@@ -280,7 +283,9 @@ pub fn resolve(
         &boolean_expression_types,
         &order_by_expressions,
         &graphql_types,
+        &mut track_root_fields,
         &graphql_config,
+        &metadata_accessor.flags,
     )?;
 
     all_issues.extend(issues);
@@ -306,6 +311,7 @@ pub fn resolve(
         &models_with_graphql,
         &object_boolean_expression_types,
         &boolean_expression_types,
+        &metadata_accessor.flags,
     )?;
 
     // calculate any preset arguments for these models
