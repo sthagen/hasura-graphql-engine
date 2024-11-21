@@ -54,7 +54,7 @@ pub struct ModelSelection<'s> {
     pub selection: Option<selection_set::ResultSelectionSet<'s>>,
 
     // Aggregates requested of the model
-    pub aggregate_selection: Option<aggregates::AggregateSelectionSet>,
+    pub aggregate_selection: Option<plan_types::AggregateSelectionSet>,
 }
 
 struct ModelSelectAggregateArguments<'s> {
@@ -339,7 +339,7 @@ fn read_filter_input_arguments<'s>(
 
                 // Where argument
                 Annotation::Input(InputAnnotation::BooleanExpression(
-                    BooleanExpressionAnnotation::BooleanExpression,
+                    BooleanExpressionAnnotation::BooleanExpressionRootField,
                 )) => {
                     if filter_clause.is_some() {
                         return Err(error::InternalEngineError::UnexpectedAnnotation {
