@@ -8,20 +8,14 @@ pub mod field;
 pub(crate) mod filter;
 mod model_selection;
 mod mutation;
-pub mod ndc_request;
 pub(crate) mod query;
 mod relationships;
 pub(crate) mod selection_set;
 
-pub use arguments::{Argument, MutationArgument, ResolvedArgument};
-pub use field::{ResolvedField, ResolvedNestedField};
-pub use filter::{
-    plan_expression, resolve_expression, PredicateQueryTrees, ResolveFilterExpressionContext,
-    ResolvedFilterExpression,
-};
-pub use mutation::ResolvedMutationExecutionPlan;
-pub use query::{ResolvedQueryExecutionPlan, ResolvedQueryNode, UnresolvedQueryNode};
-pub use relationships::{process_model_relationship_definition, Relationship};
+pub use arguments::{Argument, MutationArgument};
+pub use filter::{plan_expression, resolve_expression, ResolveFilterExpressionContext};
+pub use query::UnresolvedQueryNode;
+pub use relationships::process_model_relationship_definition;
 
 use gql::normalized_ast;
 use gql::schema::NamespacedGetter;
@@ -43,7 +37,8 @@ use crate::process_response::{process_mutation_response, ProcessedResponse};
 use graphql_ir::ModelSelection;
 use graphql_schema::GDSRoleNamespaceGetter;
 use graphql_schema::GDS;
-use plan_types::ProcessResponseAs;
+use plan_types::{ProcessResponseAs, ResolvedFilterExpression};
+
 pub type QueryPlan<'n, 's, 'ir> = IndexMap<ast::Alias, NodeQueryPlan<'n, 's, 'ir>>;
 
 /// Unlike a query, the root nodes of a mutation aren't necessarily independent. Specifically, the
@@ -154,6 +149,7 @@ pub struct ExecutionTree<'s> {
 /// Build a plan to handle a given request. This plan will either be a mutation plan or a query
 /// plan, but currently can't be both. This may change when we support protocols other than
 /// GraphQL.
+/// This should really live in `graphql_ir`
 pub fn generate_request_plan<'n, 's, 'ir>(
     ir: &'ir graphql_ir::IR<'n, 's>,
 ) -> Result<RequestPlan<'n, 's, 'ir>, error::Error> {
@@ -840,7 +836,7 @@ pub async fn resolve_ndc_subscription_execution<'s, 'ir>(
     let resolve_context = ResolveFilterExpressionContext::new_only_allow_ndc_pushdown_expressions();
     let resolved_execution_plan = query_execution_plan.resolve(&resolve_context).await?;
     let data_connector = resolved_execution_plan.data_connector.clone();
-    let query_request = ndc_request::make_ndc_query_request(resolved_execution_plan)?;
+    let query_request = crate::make_ndc_query_request(resolved_execution_plan)?;
     Ok(NDCSubscriptionQuery {
         query_request,
         data_connector,
@@ -920,7 +916,7 @@ async fn execute_ndc_query<'s, 'ir>(
     let resolved_execution_plan = query_execution_plan.resolve(&resolve_context).await?;
 
     let data_connector = resolved_execution_plan.data_connector.clone();
-    let query_request = ndc_request::make_ndc_query_request(resolved_execution_plan)?;
+    let query_request = crate::make_ndc_query_request(resolved_execution_plan)?;
 
     let response = ndc::execute_ndc_query(
         http_context,
@@ -980,7 +976,7 @@ async fn resolve_ndc_mutation_execution(
         ResolveFilterExpressionContext::new_allow_in_engine_resolution(http_context);
     let resolved_execution_plan = execution_node.resolve(&resolve_context).await?;
 
-    let mutation_request = ndc_request::make_ndc_mutation_request(resolved_execution_plan)?;
+    let mutation_request = crate::make_ndc_mutation_request(resolved_execution_plan)?;
 
     let response = ndc::execute_ndc_mutation(
         http_context,
