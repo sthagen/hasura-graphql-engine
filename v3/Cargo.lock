@@ -1899,6 +1899,7 @@ name = "error-context"
 version = "3.0.0"
 dependencies = [
  "jsonpath",
+ "open-dds",
  "serde",
 ]
 
@@ -4129,6 +4130,7 @@ checksum = "d231b230927b5e4ad203db57bbcbee2802f6bce620b1e4a9024a07d94e2907ec"
 name = "plan"
 version = "3.0.0"
 dependencies = [
+ "async-recursion",
  "derive_more",
  "execute",
  "graphql-ir",
@@ -4147,6 +4149,8 @@ version = "3.0.0"
 dependencies = [
  "derive_more",
  "indexmap 2.6.0",
+ "json-ext",
+ "lang-graphql",
  "metadata-resolve",
  "nonempty",
  "open-dds",

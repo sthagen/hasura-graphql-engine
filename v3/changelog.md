@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added support for fetching relationships in JSON:API using the `include`
+  parameter.
+
 ### Fixed
 
 - Fixed an error that occurred when filtering by more than one nested field at a
@@ -12,6 +15,9 @@
   `_and`) from inside a nested field.
 
 ### Changed
+
+- MBS error contexts now contain explicit subgraphs where appropriate for each
+  individual error step.
 
 ## [v2024.11.18]
 
