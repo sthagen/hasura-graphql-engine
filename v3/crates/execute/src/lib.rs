@@ -5,7 +5,6 @@ pub mod plan;
 mod process_response;
 mod query_usage;
 mod remote_joins;
-mod types;
 
 // we explicitly export things used by other crates
 pub use error::{FieldError, QueryUsageAnalyzeError, RequestError};
@@ -21,7 +20,6 @@ pub use plan::{
     execute_mutation_plan, execute_query_plan, generate_request_plan, ExecuteQueryResult,
     RequestPlan, RootFieldResult,
 };
-pub use process_response::process_response;
+pub use process_response::{process_mutation_response, process_response, ProcessedResponse};
 pub use query_usage::analyze_query_usage;
 pub use remote_joins::types::{JoinLocations, JoinNode, RemoteJoin, RemoteJoinType};
-pub use types::{ExposeInternalErrors, HttpContext, ProjectId};

@@ -2,12 +2,12 @@ use super::steps;
 use indexmap::IndexMap;
 
 use super::types::GraphQLResponse;
-use crate::execute::execute_query_plan;
+use crate::execute::{execute_mutation_plan, execute_query_plan};
+use engine_types::{ExposeInternalErrors, HttpContext, ProjectId};
 use execute::{
     plan::{self, RootFieldResult},
-    ExecuteQueryResult, HttpContext, ProjectId,
+    ExecuteQueryResult,
 };
-
 use graphql_schema::GDS;
 use hasura_authn_core::Session;
 use lang_graphql as gql;
@@ -20,7 +20,7 @@ use tracing_util::{set_attribute_on_active_span, AttributeVisibility, SpanVisibi
 static USE_THE_NEW_EXECUTION_PIPELINE: bool = false;
 
 pub async fn execute_query(
-    expose_internal_errors: execute::ExposeInternalErrors,
+    expose_internal_errors: ExposeInternalErrors,
     http_context: &HttpContext,
     schema: &Schema<GDS>,
     session: &Session,
@@ -73,7 +73,7 @@ pub async fn execute_query(
 
 /// Executes a GraphQL query using new pipeline
 pub async fn execute_query_internal_new(
-    expose_internal_errors: execute::ExposeInternalErrors,
+    expose_internal_errors: ExposeInternalErrors,
     http_context: &HttpContext,
     schema: &gql::schema::Schema<GDS>,
     session: &Session,
@@ -118,15 +118,13 @@ pub async fn execute_query_internal_new(
 
                             Box::pin(async {
                                 let execute_query_result = match request_plan {
-                                    graphql_ir::RequestPlan::MutationPlan(_mutation_plan) => {
-                                        todo!("fix execute_mutation_plan");
-                                        /*
-                                        plan::execute_mutation_plan(
+                                    graphql_ir::RequestPlan::MutationPlan(mutation_plan) => {
+                                        execute_mutation_plan(
                                             http_context,
                                             mutation_plan,
                                             project_id,
                                         )
-                                        .await*/
+                                        .await
                                     }
                                     graphql_ir::RequestPlan::QueryPlan(query_plan) => {
                                         execute_query_plan(http_context, query_plan, project_id)
@@ -172,7 +170,7 @@ pub async fn execute_query_internal_new(
 
 /// Executes a GraphQL query
 pub async fn execute_query_internal(
-    expose_internal_errors: execute::ExposeInternalErrors,
+    expose_internal_errors: ExposeInternalErrors,
     http_context: &HttpContext,
     schema: &gql::schema::Schema<GDS>,
     session: &Session,
