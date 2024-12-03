@@ -1,9 +1,7 @@
-//! everything from `plan` slowly moves here, binning as much as possible along the way
-// ideally we'll bin off everything around GraphQL-specific nodes and leave those to the GraphQL
-// frontend
-
+//! functions for executing queries, mutations, joins and remote predicates
+//! should not contain frontend-specific logic
+use crate::error;
 use std::sync::Arc;
-use uuid::Uuid;
 mod ndc_request;
 mod remote_joins;
 mod remote_predicates;
@@ -15,8 +13,9 @@ pub use ndc_request::{make_ndc_mutation_request, make_ndc_query_request};
 use plan_types::{
     ExecutionTree, JoinLocations, NDCMutationExecution, NDCQueryExecution,
     NDCSubscriptionExecution, PredicateQueryTrees, ProcessResponseAs, QueryExecutionPlan,
-    ResolvedFilterExpression,
+    RemotePredicateKey, ResolvedFilterExpression,
 };
+pub use remote_predicates::replace_predicates_in_query_execution_plan;
 use std::collections::BTreeMap;
 
 // run ndc query, do any joins, and process result
@@ -46,14 +45,14 @@ pub async fn resolve_ndc_query_execution(
 
 // run a PredicateQueryTree, turning it into a `ResolvedFilterExpression`
 #[async_recursion]
-async fn execute_remote_predicates(
+pub async fn execute_remote_predicates(
     remote_predicates: &PredicateQueryTrees,
     http_context: &HttpContext,
     field_span_attribute: &str,
     execution_span_attribute: &'static str,
     process_response_as: &ProcessResponseAs,
     project_id: Option<&ProjectId>,
-) -> Result<BTreeMap<Uuid, ResolvedFilterExpression>, FieldError> {
+) -> Result<BTreeMap<RemotePredicateKey, ResolvedFilterExpression>, FieldError> {
     // resolve all our filter expressions into here, ready to && them in
     // at the appropriate moment
     let mut filter_expressions = BTreeMap::new();
@@ -87,7 +86,7 @@ async fn execute_remote_predicates(
         .await?;
 
         // Assume a single row set is returned
-        let single_rowset = crate::process_response::get_single_rowset(result_row_set)?;
+        let single_rowset = get_single_rowset(result_row_set)?;
 
         // Turn the results into a `ResolvedFilterExpression`
         let column_comparison = remote_predicates::build_source_column_comparisons(
@@ -101,6 +100,17 @@ async fn execute_remote_predicates(
     Ok(filter_expressions)
 }
 
+pub(crate) fn get_single_rowset(
+    rows_sets: Vec<ndc_models::RowSet>,
+) -> Result<ndc_models::RowSet, error::FieldError> {
+    Ok(rows_sets
+        .into_iter()
+        .next()
+        .ok_or(error::NDCUnexpectedError::BadNDCResponse {
+            summary: "missing rowset".into(),
+        })?)
+}
+
 #[async_recursion]
 async fn execute_execution_tree<'s>(
     http_context: &HttpContext,
@@ -109,7 +119,7 @@ async fn execute_execution_tree<'s>(
     execution_span_attribute: &'static str,
     process_response_as: &ProcessResponseAs,
     project_id: Option<&ProjectId>,
-    child_filter_expressions: &BTreeMap<Uuid, ResolvedFilterExpression>,
+    child_filter_expressions: &BTreeMap<RemotePredicateKey, ResolvedFilterExpression>,
 ) -> Result<Vec<ndc_models::RowSet>, FieldError> {
     // given an execution tree
     // 1) run remote predicates
@@ -132,11 +142,10 @@ async fn execute_execution_tree<'s>(
     filter_expressions.extend(child_filter_expressions.clone());
 
     // traverse `QueryExecutionPlan`, adding results of remote predicates
-    let query_execution_plan_with_predicates =
-        remote_predicates::replace_predicates_in_query_execution_plan(
-            execution_tree.query_execution_plan,
-            &filter_expressions,
-        )?;
+    let query_execution_plan_with_predicates = replace_predicates_in_query_execution_plan(
+        execution_tree.query_execution_plan,
+        &filter_expressions,
+    )?;
 
     // create our `main` NDC request
     let response_rowsets = execute_ndc_query(

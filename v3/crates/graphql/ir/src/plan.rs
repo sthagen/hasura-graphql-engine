@@ -11,12 +11,13 @@ use crate::{
     SubscriptionRootField, IR,
 };
 pub use error::Error;
+pub use filter::plan_expression;
 use graphql_schema::{GDSRoleNamespaceGetter, GDS};
 use indexmap::IndexMap;
 use lang_graphql as gql;
 use plan_types::{
     ExecutionTree, NDCMutationExecution, NDCQueryExecution, NDCSubscriptionExecution,
-    ProcessResponseAs, QueryExecutionPlan,
+    ProcessResponseAs, QueryExecutionPlan, UniqueNumber,
 };
 pub use relationships::process_model_relationship_definition;
 pub use types::{
@@ -36,11 +37,13 @@ pub use types::{
 pub fn generate_request_plan<'n, 's, 'ir>(
     ir: &'ir IR<'n, 's>,
 ) -> Result<RequestPlan<'n, 's, 'ir>, error::Error> {
+    let mut unique_number = UniqueNumber::new();
+
     match ir {
         IR::Query(ir) => {
             let mut query_plan = IndexMap::new();
             for (alias, field) in ir {
-                query_plan.insert(alias.clone(), plan_query(field)?);
+                query_plan.insert(alias.clone(), plan_query(field, &mut unique_number)?);
             }
             Ok(RequestPlan::QueryPlan(query_plan))
         }
@@ -57,7 +60,7 @@ pub fn generate_request_plan<'n, 's, 'ir>(
                             .insert(alias.clone(), type_name.clone());
                     }
                     MutationRootField::ProcedureBasedCommand { selection_set, ir } => {
-                        let plan = plan_mutation(selection_set, ir)?;
+                        let plan = plan_mutation(selection_set, ir, &mut unique_number)?;
                         mutation_plan
                             .nodes
                             .entry(plan.mutation_execution.data_connector.clone())
@@ -70,7 +73,7 @@ pub fn generate_request_plan<'n, 's, 'ir>(
         }
         IR::Subscription(alias, ir) => Ok(RequestPlan::SubscriptionPlan(
             alias.clone(),
-            plan_subscription(ir)?,
+            plan_subscription(ir, &mut unique_number)?,
         )),
     }
 }
@@ -79,12 +82,13 @@ pub fn generate_request_plan<'n, 's, 'ir>(
 fn plan_mutation<'n, 's>(
     selection_set: &'n gql::normalized_ast::SelectionSet<'s, GDS>,
     ir: &ProcedureBasedCommand<'s>,
+    unique_number: &mut UniqueNumber,
 ) -> Result<MutationSelect<'n, 's>, error::Error> {
     let Plan {
         inner: ndc_ir,
         join_locations,
         remote_predicates,
-    } = commands::plan_mutation_execution(ir.procedure_name, ir)?;
+    } = commands::plan_mutation_execution(ir.procedure_name, ir, unique_number)?;
 
     // _should not_ happen but let's fail rather than do a query with missing filters
     if !remote_predicates.0.is_empty() {
@@ -110,6 +114,7 @@ fn plan_mutation<'n, 's>(
 
 fn plan_subscription<'s, 'ir>(
     root_field: &'ir SubscriptionRootField<'_, 's>,
+    unique_number: &mut UniqueNumber,
 ) -> Result<SubscriptionSelect<'s, 'ir>, error::Error> {
     match root_field {
         SubscriptionRootField::ModelSelectOne {
@@ -117,7 +122,8 @@ fn plan_subscription<'s, 'ir>(
             selection_set,
             polling_interval_ms,
         } => {
-            let execution_tree = model_selection::plan_query_execution(&ir.model_selection)?;
+            let execution_tree =
+                model_selection::plan_query_execution(&ir.model_selection, unique_number)?;
             let query_execution_plan = reject_remote_joins(execution_tree)?;
             Ok(SubscriptionSelect {
                 selection_set,
@@ -138,7 +144,8 @@ fn plan_subscription<'s, 'ir>(
             selection_set,
             polling_interval_ms,
         } => {
-            let execution_tree = model_selection::plan_query_execution(&ir.model_selection)?;
+            let execution_tree =
+                model_selection::plan_query_execution(&ir.model_selection, unique_number)?;
             let query_execution_plan = reject_remote_joins(execution_tree)?;
             Ok(SubscriptionSelect {
                 selection_set,
@@ -159,7 +166,8 @@ fn plan_subscription<'s, 'ir>(
             selection_set,
             polling_interval_ms,
         } => {
-            let execution_tree = model_selection::plan_query_execution(&ir.model_selection)?;
+            let execution_tree =
+                model_selection::plan_query_execution(&ir.model_selection, unique_number)?;
             let query_execution_plan = reject_remote_joins(execution_tree)?;
             Ok(SubscriptionSelect {
                 selection_set,
@@ -185,6 +193,7 @@ fn reject_remote_joins(tree: ExecutionTree) -> Result<QueryExecutionPlan, error:
 // Given a singular root field of a query, plan the execution of that root field.
 fn plan_query<'n, 's, 'ir>(
     ir: &'ir QueryRootField<'n, 's>,
+    unique_number: &mut UniqueNumber,
 ) -> Result<NodeQueryPlan<'n, 's, 'ir>, error::Error> {
     let query_plan = match ir {
         QueryRootField::TypeName { type_name } => NodeQueryPlan::TypeName {
@@ -211,7 +220,8 @@ fn plan_query<'n, 's, 'ir>(
             schema,
         },
         QueryRootField::ModelSelectOne { ir, selection_set } => {
-            let execution_tree = model_selection::plan_query_execution(&ir.model_selection)?;
+            let execution_tree =
+                model_selection::plan_query_execution(&ir.model_selection, unique_number)?;
             NodeQueryPlan::NDCQueryExecution {
                 selection_set,
                 query_execution: NDCQueryExecution {
@@ -226,7 +236,8 @@ fn plan_query<'n, 's, 'ir>(
         }
 
         QueryRootField::ModelSelectMany { ir, selection_set } => {
-            let execution_tree = model_selection::plan_query_execution(&ir.model_selection)?;
+            let execution_tree =
+                model_selection::plan_query_execution(&ir.model_selection, unique_number)?;
             NodeQueryPlan::NDCQueryExecution {
                 selection_set,
                 query_execution: NDCQueryExecution {
@@ -240,7 +251,8 @@ fn plan_query<'n, 's, 'ir>(
             }
         }
         QueryRootField::ModelSelectAggregate { ir, selection_set } => {
-            let execution_tree = model_selection::plan_query_execution(&ir.model_selection)?;
+            let execution_tree =
+                model_selection::plan_query_execution(&ir.model_selection, unique_number)?;
             NodeQueryPlan::NDCQueryExecution {
                 query_execution: NDCQueryExecution {
                     execution_tree,
@@ -253,7 +265,8 @@ fn plan_query<'n, 's, 'ir>(
         }
         QueryRootField::NodeSelect(optional_ir) => match optional_ir {
             Some(ir) => {
-                let execution_tree = model_selection::plan_query_execution(&ir.model_selection)?;
+                let execution_tree =
+                    model_selection::plan_query_execution(&ir.model_selection, unique_number)?;
                 NodeQueryPlan::RelayNodeSelect(Some((
                     NDCQueryExecution {
                         execution_tree,
@@ -267,7 +280,7 @@ fn plan_query<'n, 's, 'ir>(
             None => NodeQueryPlan::RelayNodeSelect(None),
         },
         QueryRootField::FunctionBasedCommand { ir, selection_set } => {
-            let execution_tree = commands::plan_query_execution(ir)?;
+            let execution_tree = commands::plan_query_execution(ir, unique_number)?;
 
             NodeQueryPlan::NDCQueryExecution {
                 selection_set,
@@ -286,7 +299,8 @@ fn plan_query<'n, 's, 'ir>(
         QueryRootField::ApolloFederation(ApolloFederationRootFields::EntitiesSelect(irs)) => {
             let mut ndc_query_executions = Vec::new();
             for ir in irs {
-                let execution_tree = model_selection::plan_query_execution(&ir.model_selection)?;
+                let execution_tree =
+                    model_selection::plan_query_execution(&ir.model_selection, unique_number)?;
                 ndc_query_executions.push((
                     NDCQueryExecution {
                         execution_tree,

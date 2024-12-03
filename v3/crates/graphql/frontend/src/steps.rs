@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::types::{GraphQlParseError, GraphQlValidationError};
 
+use crate::query_usage;
 use gql::normalized_ast::Operation;
 use graphql_schema::{GDSRoleNamespaceGetter, GDS};
 use hasura_authn_core::Session;
@@ -109,21 +110,6 @@ pub fn build_request_plan<'n, 's, 'ir>(
     Ok(plan)
 }
 
-/// Build a plan to execute the request
-/// uses old code in `execute` which we'll soon delete
-pub fn build_request_plan_with_old<'n, 's, 'ir>(
-    ir: &'ir graphql_ir::IR<'n, 's>,
-) -> Result<execute::RequestPlan<'n, 's, 'ir>, execute::PlanError> {
-    let tracer = tracing_util::global_tracer();
-    let plan = tracer.in_span(
-        "plan",
-        "Construct a plan to execute the request",
-        SpanVisibility::Internal,
-        || execute::generate_request_plan(ir),
-    )?;
-    Ok(plan)
-}
-
 pub fn generate_ir<'n, 's>(
     schema: &'s gql::schema::Schema<GDS>,
     session: &Session,
@@ -161,14 +147,14 @@ pub fn generate_ir<'n, 's>(
 
 pub fn analyze_query_usage<'s>(
     normalized_request: &'s Operation<'s, GDS>,
-) -> Result<String, execute::QueryUsageAnalyzeError> {
+) -> Result<String, query_usage::QueryUsageAnalyzeError> {
     let tracer = tracing_util::global_tracer();
     tracer.in_span(
         "analyze_query_usage",
         "Analyze query usage",
         SpanVisibility::Internal,
         || {
-            let query_usage_analytics = execute::analyze_query_usage(normalized_request);
+            let query_usage_analytics = query_usage::analyze_query_usage(normalized_request);
             Ok(serde_json::to_string(&query_usage_analytics)?)
         },
     )

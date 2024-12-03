@@ -2,10 +2,12 @@ use super::{aggregates, arguments, field, filter, order_by, relationships};
 use crate::NdcFieldAlias;
 use crate::{ExecutionTree, NdcRelationshipName, RelationshipColumnMapping, VariableName};
 use indexmap::IndexMap;
-use open_dds::{data_connector::CollectionName, types::DataConnectorArgumentName};
+use metadata_resolve::Qualified;
+use open_dds::{
+    data_connector::CollectionName, models::ModelName, types::DataConnectorArgumentName,
+};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq)]
 // this represents an execution plan. all predicates only refer to local comparisons.
@@ -29,25 +31,56 @@ pub struct QueryExecutionPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PredicateQueryTree {
     pub ndc_column_mapping: Vec<RelationshipColumnMapping>,
+    pub target_model_name: Qualified<ModelName>,
     pub query: ExecutionTree,
     pub children: PredicateQueryTrees,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PredicateQueryTrees(pub BTreeMap<Uuid, PredicateQueryTree>);
+pub struct PredicateQueryTrees(pub BTreeMap<RemotePredicateKey, PredicateQueryTree>);
 
 impl PredicateQueryTrees {
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
-    pub fn insert(&mut self, value: PredicateQueryTree) -> Uuid {
-        let key = Uuid::new_v4();
+    pub fn insert(
+        &mut self,
+        unique_number: &mut UniqueNumber,
+        value: PredicateQueryTree,
+    ) -> RemotePredicateKey {
+        let key = RemotePredicateKey(unique_number.fresh());
         self.0.insert(key, value);
         key
     }
 }
 
 impl Default for PredicateQueryTrees {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, derive_more::Display, Ord, Hash, Clone, Copy)]
+pub struct RemotePredicateKey(pub u64);
+
+// we need to generate unique identifiers for remote predicates
+// in a reproducable fashion so we thread this around
+pub struct UniqueNumber(u64);
+
+impl UniqueNumber {
+    pub fn new() -> Self {
+        UniqueNumber(1)
+    }
+
+    // get the next number, increment internal value
+    pub fn fresh(&mut self) -> u64 {
+        let value = self.0;
+        self.0 += 1;
+        value
+    }
+}
+
+impl Default for UniqueNumber {
     fn default() -> Self {
         Self::new()
     }

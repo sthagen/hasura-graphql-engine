@@ -60,6 +60,13 @@
             ExposedPorts = { "3050/tcp" = { }; };
           };
         };
+
+        # for adding extra packages inside the Docker container
+        dockerExtraContents = {
+          "engine" = [ pkgs.cacert ]; # so local dev can use SSH
+          "multitenant-engine" = [ pkgs.bash pkgs.coreutils ]; # to run sleep in a healthcheck, we should remove this soon
+          "artifact-server" = [ pkgs.curl pkgs.bash ]; # to run healthcheck, we should remove this soon
+        };
       in
       {
         formatter = pkgs.nixpkgs-fmt;
@@ -120,6 +127,7 @@
                     architecture = dockerArchitectures.${targetSystem};
                     image-name = "build.internal/${binaryName}-${targetSystem}";
                     extraConfig = dockerConfig.${binaryName} or { };
+                    extraContents = dockerExtraContents.${binaryName} or [ ];
                   }
               else null;
           })
