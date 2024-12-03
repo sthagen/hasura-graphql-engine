@@ -4,6 +4,14 @@
 
 ### Added
 
+### Fixed
+
+### Changed
+
+## [v2024.12.03]
+
+### Added
+
 - Added support for the sparse fieldset parameter for nested field types in
   JSON:API.
 
@@ -14,8 +22,8 @@
   would have been silently dropped.
 - Row filters configured in `ModelPermissions` are now correctly applied when
   referencing the model across a relationship in a filter predicate.
-
-### Changed
+- Row filters configured in `ModelPermissions` are now correctly applied when
+  referencing the model across a relationship is order by expressions.
 
 ## [v2024.11.25]
 
@@ -856,7 +864,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.11.25...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2024.12.03...HEAD
+[v2024.12.03]: https://github.com/hasura/v3-engine/releases/tag/v2024.12.03
 [v2024.11.25]: https://github.com/hasura/v3-engine/releases/tag/v2024.11.25
 [v2024.11.18]: https://github.com/hasura/v3-engine/releases/tag/v2024.11.18
 [v2024.11.13]: https://github.com/hasura/v3-engine/releases/tag/v2024.11.13

@@ -101,7 +101,11 @@ pub fn select_many_generate_ir<'n, 's>(
                     })?,
                 },
                 ModelInputAnnotation::ModelOrderByExpression => {
-                    order_by = Some(build_ndc_order_by(argument, &mut usage_counts)?);
+                    order_by = Some(build_ndc_order_by(
+                        argument,
+                        session_variables,
+                        &mut usage_counts,
+                    )?);
                 }
                 _ => {
                     return Err(error::InternalEngineError::UnexpectedAnnotation {
@@ -132,7 +136,7 @@ pub fn select_many_generate_ir<'n, 's>(
 
     // the first and only argument seemingly being "args"
     let argument_presets = if let Some((_, field_call_argument)) = &field_call.arguments.first() {
-        permissions::get_argument_presets(field_call_argument.info.namespaced)?
+        permissions::get_argument_presets(field_call_argument.info.namespaced.as_ref())?
     } else {
         None
     };
