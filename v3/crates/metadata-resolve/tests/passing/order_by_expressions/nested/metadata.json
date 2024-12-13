@@ -11,6 +11,10 @@
             "name": "RowType",
             "fields": [
               {
+                "name": "id",
+                "type": "Int!"
+              },
+              {
                 "name": "test",
                 "type": "Foo!"
               }
@@ -20,6 +24,11 @@
                 "dataConnectorName": "myconnector",
                 "dataConnectorObjectType": "row_type",
                 "fieldMapping": {
+                  "id": {
+                    "column": {
+                      "name": "id"
+                    }
+                  },
                   "test": {
                     "column": {
                       "name": "test"
@@ -39,6 +48,10 @@
               {
                 "name": "foo",
                 "type": "String!"
+              },
+              {
+                "name": "row_type_id",
+                "type": "Int"
               }
             ],
             "dataConnectorTypeMapping": [
@@ -49,6 +62,11 @@
                   "foo": {
                     "column": {
                       "name": "foo"
+                    }
+                  },
+                  "row_type_id": {
+                    "column": {
+                      "name": "row_type_id"
                     }
                   }
                 }
@@ -108,7 +126,12 @@
                     "orderByExpression": "StringOrderByExpression"
                   }
                 ],
-                "orderableRelationships": []
+                "orderableRelationships": [
+                  {
+                    "relationshipName": "row_type",
+                    "orderByExpression": "MyOrderByExpression"
+                  }
+                ]
               }
             },
             "graphql": {
@@ -139,6 +162,38 @@
           }
         },
         {
+          "kind": "Relationship",
+          "version": "v1",
+          "definition": {
+            "name": "row_type",
+            "sourceType": "Foo",
+            "target": {
+              "model": {
+                "name": "mymodel",
+                "relationshipType": "Object"
+              }
+            },
+            "mapping": [
+              {
+                "source": {
+                  "fieldPath": [
+                    {
+                      "fieldName": "row_type_id"
+                    }
+                  ]
+                },
+                "target": {
+                  "modelField": [
+                    {
+                      "fieldName": "id"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
           "kind": "DataConnectorLink",
           "version": "v1",
           "definition": {
@@ -156,7 +211,7 @@
             "argumentPresets": [],
             "headers": {},
             "schema": {
-              "version": "v0.1",
+              "version": "v0.2",
               "schema": {
                 "scalar_types": {
                   "Int": {
@@ -164,7 +219,11 @@
                       "type": "int32"
                     },
                     "aggregate_functions": {},
-                    "comparison_operators": {}
+                    "comparison_operators": {
+                      "_eq": {
+                        "type": "equal"
+                      }
+                    }
                   },
                   "String": {
                     "representation": {
@@ -177,13 +236,20 @@
                 "object_types": {
                   "row_type": {
                     "fields": {
+                      "id": {
+                        "type": {
+                          "type": "named",
+                          "name": "Int"
+                        }
+                      },
                       "test": {
                         "type": {
                           "type": "named",
                           "name": "foo"
                         }
                       }
-                    }
+                    },
+                    "foreign_keys": {}
                   },
                   "foo": {
                     "fields": {
@@ -192,8 +258,18 @@
                           "type": "named",
                           "name": "String"
                         }
+                      },
+                      "row_type_id": {
+                        "type": {
+                          "type": "nullable",
+                          "underlying_type": {
+                            "type": "named",
+                            "name": "Int"
+                          }
+                        }
                       }
-                    }
+                    },
+                    "foreign_keys": {}
                   }
                 },
                 "collections": [
@@ -201,7 +277,6 @@
                     "name": "mycollection",
                     "arguments": {},
                     "type": "row_type",
-                    "foreign_keys": {},
                     "uniqueness_constraints": {}
                   }
                 ],
@@ -209,12 +284,15 @@
                 "procedures": []
               },
               "capabilities": {
-                "version": "0.1.0",
+                "version": "0.2.0",
                 "capabilities": {
                   "query": {
                     "aggregates": {},
                     "variables": {},
-                    "explain": {}
+                    "explain": {},
+                    "nested_fields": {
+                      "order_by": {}
+                    }
                   },
                   "mutation": {
                     "transactional": {},
@@ -222,7 +300,10 @@
                   },
                   "relationships": {
                     "relation_comparisons": {},
-                    "order_by_aggregate": {}
+                    "order_by_aggregate": {},
+                    "nested": {
+                      "array": {}
+                    }
                   }
                 }
               }
@@ -255,5 +336,8 @@
         }
       ]
     }
-  ]
+  ],
+  "flags": {
+    "require_nested_support_for_order_by_expressions": true
+  }
 }
