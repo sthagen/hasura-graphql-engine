@@ -8,6 +8,12 @@
   address of the client who made the request. This allows for the implementation
   of plugins such as IP allow lists and per-user traffic control.
 
+- `count` and `countDistinct` in `AggregateExpression`s now support a
+  `resultType` field. This allows you to specify the type of the result of the
+  count aggregation. Currently, only `Int` is supported, but this will change in
+  the future once data connector support arrives. Omitting this field will
+  default to `Int`.
+
 ### Fixed
 
 - Fixed the `include` query parameter and `included` response field in JSON:API
@@ -44,6 +50,10 @@
   nested relationships were allowed to be used with `Model`s that source from
   data connectors that did not support ordering by nested fields and nested
   relationships. Such a configuration will now result in a build error.
+
+- Fixed a bug where `OrderByExpressions` could refer to array relationships in
+  an `orderableRelationship`. Such a configuration will now result in a build
+  error.
 
 ### Changed
 

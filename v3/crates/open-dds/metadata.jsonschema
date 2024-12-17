@@ -78,6 +78,17 @@
             "string",
             "null"
           ]
+        },
+        "returnType": {
+          "description": "The scalar type that the count aggregation function returns. Must be an integer type. If omitted, Int is used as the default.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TypeName"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -3612,6 +3623,10 @@
           "type": "boolean"
         },
         "disallow_model_v1_ordering_non_scalar_fields": {
+          "default": false,
+          "type": "boolean"
+        },
+        "disallow_array_relationship_in_order_by": {
           "default": false,
           "type": "boolean"
         }
