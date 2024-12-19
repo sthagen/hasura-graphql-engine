@@ -4,7 +4,12 @@
 
 ### Added
 
+- Added support for relationships targeting commands in JSON:API.
+
 ### Fixed
+
+- Fix syntax error in descriptions in generated SDL, when description strings
+  contained a trailing double-quote
 
 ### Changed
 
