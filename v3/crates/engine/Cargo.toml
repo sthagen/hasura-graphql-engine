@@ -40,7 +40,6 @@ plan = { path = "../plan" }
 pre-parse-plugin = { path = "../plugins/pre-parse-plugin" }
 pre-response-plugin = { path = "../plugins/pre-response-plugin" }
 pre-route-plugin = { path = "../plugins/pre-route-plugin" }
-sql = { path = "../sql" }
 tracing-util = { path = "../utils/tracing-util" }
 
 anyhow = { workspace = true }
@@ -68,12 +67,10 @@ tower-http = { workspace = true }
 build-data = { workspace = true }
 
 [dev-dependencies]
-plan-types = { path = "../plan-types" }
 graphql-ir = { path = "../graphql/ir" }
 
 criterion = { workspace = true }
 goldenfile = { workspace = true }
-insta = { workspace = true }
 pretty_assertions = { workspace = true }
 tokio-test = { workspace = true }
 

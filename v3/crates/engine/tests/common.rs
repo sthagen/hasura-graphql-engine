@@ -6,18 +6,13 @@ use graphql_schema::GDS;
 use hasura_authn_core::{
     Identity, JsonSessionVariableValue, Role, Session, SessionError, SessionVariableValue,
 };
-use indexmap::IndexMap;
 use lang_graphql::ast::common as ast;
 use lang_graphql::{http::RawRequest, schema::Schema};
 use metadata_resolve::{data_connectors::NdcVersion, LifecyclePluginConfigs};
 use open_dds::session_variables::{SessionVariableName, SESSION_VARIABLE_ROLE};
-use plan_types::{NDCQueryExecution, ProcessResponseAs};
 use pretty_assertions::assert_eq;
 use serde_json as json;
-use sql::catalog::CatalogSerializable;
-use sql::execute::SqlRequest;
 use std::collections::BTreeMap;
-use std::iter;
 use std::sync::Arc;
 use std::{
     collections::HashMap,
@@ -70,6 +65,7 @@ pub(crate) fn resolve_session(
 pub(crate) fn test_introspection_expectation(
     test_path_string: &str,
     common_metadata_paths: &[&str],
+    opendd_tests: TestOpenDDPipeline,
 ) -> anyhow::Result<()> {
     tokio_test::block_on(async {
         // Setup test context
@@ -151,7 +147,7 @@ pub(crate) fn test_introspection_expectation(
         // TODO: also run with new pipeline if test is suitably configured
         let mut responses = Vec::new();
         for session in &sessions {
-            let (_, response) = execute_query(
+            let (_, http_response) = execute_query(
                 GraphqlRequestPipeline::Old,
                 ExposeInternalErrors::Expose,
                 &test_ctx.http_context,
@@ -163,7 +159,31 @@ pub(crate) fn test_introspection_expectation(
                 None,
             )
             .await;
-            responses.push(response.inner());
+            let response = http_response.inner();
+
+            // we'll switch on OpenDD pipeline tests for each test case
+            // as we fix stuff. eventually we'll skip this check and run it every time.
+            match opendd_tests {
+                TestOpenDDPipeline::Skip => (),
+                TestOpenDDPipeline::YesPlease => {
+                    let (_, open_dd_response) = execute_query(
+                        GraphqlRequestPipeline::OpenDd, // the interesting part
+                        ExposeInternalErrors::Expose,
+                        &test_ctx.http_context,
+                        &schema,
+                        &arc_resolved_metadata,
+                        session,
+                        &request_headers,
+                        raw_request.clone(),
+                        None,
+                    )
+                    .await;
+
+                    compare_graphql_responses(&response, &open_dd_response.inner());
+                }
+            }
+
+            responses.push(response);
         }
 
         let mut expected = test_ctx.mint.new_goldenfile_with_differ(
@@ -277,21 +297,8 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
             // future metadata tests that may be added.
             let serialized_metadata =
                 serde_json::to_string(&schema).expect("Failed to serialize schema");
-            let deserialized_metadata: Schema<GDS> =
+            let _deserialized_metadata: Schema<GDS> =
                 serde_json::from_str(&serialized_metadata).expect("Failed to deserialize metadata");
-
-            // Ensure sql_context can be serialized and deserialized
-            let sql_context = sql::catalog::Catalog::from_metadata(&gds.metadata);
-            let sql_context_str = serde_json::to_string(&sql_context.clone().to_serializable())?;
-            let sql_context_parsed: CatalogSerializable = serde_json::from_str(&sql_context_str)?;
-            assert_eq!(
-                sql_context,
-                sql_context_parsed.from_serializable(&gds.metadata)
-            );
-            assert_eq!(
-                schema, deserialized_metadata,
-                "initial built metadata does not match deserialized metadata"
-            );
 
             let query = read_to_string(&request_path)?;
 
@@ -340,22 +347,6 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
                         variables: None,
                     };
                     for session in &sessions {
-                        // attempt to create open ir for this request
-                        open_dd_pipeline_test(
-                            test_path_string,
-                            opendd_tests,
-                            &query,
-                            &schema,
-                            &arc_resolved_metadata.clone(),
-                            session,
-                            raw_request.clone(),
-                            &test_ctx.http_context.clone().into(),
-                            &request_headers,
-                        )
-                        .await;
-
-                        // do actual test
-                        // TODO: maybe do OpenDD test too?
                         let (_, response) = execute_query(
                             GraphqlRequestPipeline::Old,
                             ExposeInternalErrors::Expose,
@@ -381,6 +372,32 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
                         )
                         .await;
                         compare_graphql_responses(&http_response, &graphql_ws_response);
+
+                        // we'll switch on OpenDD pipeline tests for each test case
+                        // as we fix stuff. eventually we'll skip this check and run it every time.
+                        match opendd_tests {
+                            TestOpenDDPipeline::Skip => (),
+                            TestOpenDDPipeline::YesPlease => {
+                                // run tests with new pipeline and diff them
+                                let (_, open_dd_response) = execute_query(
+                                    GraphqlRequestPipeline::OpenDd, // the interesting part
+                                    ExposeInternalErrors::Expose,
+                                    &test_ctx.http_context,
+                                    &schema,
+                                    &arc_resolved_metadata,
+                                    session,
+                                    &request_headers,
+                                    raw_request.clone(),
+                                    None,
+                                )
+                                .await;
+                                compare_graphql_responses(
+                                    &http_response,
+                                    &open_dd_response.inner(),
+                                );
+                            }
+                        }
+
                         responses.push(http_response);
                     }
                 }
@@ -391,19 +408,6 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
                             query: query.clone(),
                             variables: Some(variables),
                         };
-                        // attempt to create open ir for this request
-                        open_dd_pipeline_test(
-                            test_path_string,
-                            opendd_tests,
-                            &query,
-                            &schema,
-                            &gds.metadata,
-                            session,
-                            raw_request.clone(),
-                            &Arc::new(test_ctx.http_context.clone()),
-                            &request_headers,
-                        )
-                        .await;
                         // do actual test
                         let (_, response) = execute_query(
                             GraphqlRequestPipeline::Old,
@@ -430,6 +434,31 @@ pub fn test_execution_expectation_for_multiple_ndc_versions(
                         )
                         .await;
                         compare_graphql_responses(&http_response, &graphql_ws_response);
+
+                        // we'll switch on OpenDD pipeline tests for each test case
+                        // as we fix stuff. eventually we'll skip this check and run it every time.
+                        match opendd_tests {
+                            TestOpenDDPipeline::Skip => (),
+                            TestOpenDDPipeline::YesPlease => {
+                                // run tests with new pipeline and diff them
+                                let (_, open_dd_response) = execute_query(
+                                    GraphqlRequestPipeline::OpenDd, // the interesting part
+                                    ExposeInternalErrors::Expose,
+                                    &test_ctx.http_context,
+                                    &schema,
+                                    &arc_resolved_metadata,
+                                    session,
+                                    &request_headers,
+                                    raw_request.clone(),
+                                    None,
+                                )
+                                .await;
+                                compare_graphql_responses(
+                                    &http_response,
+                                    &open_dd_response.inner(),
+                                );
+                            }
+                        }
                         responses.push(http_response);
                     }
                 }
@@ -582,146 +611,6 @@ pub(crate) fn test_metadata_resolve_configuration() -> metadata_resolve::configu
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn test_sql(test_path_string: &str) -> anyhow::Result<()> {
-    tokio_test::block_on(async {
-        // Setup test context
-        let root_test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
-        let mut test_ctx = setup(&root_test_dir);
-        let test_path = root_test_dir.join(test_path_string);
-
-        let request_path = test_path.join("query.sql");
-        let request_path_json = test_path.join("query.json");
-        let headers_path_json = test_path.join("headers.json");
-        let response_path = test_path_string.to_string() + "/expected.json";
-        let explain_path = test_path_string.to_string() + "/plan.json";
-        let metadata_path = root_test_dir.join("sql/metadata.json");
-
-        let metadata_json_value = merge_with_common_metadata(&metadata_path, iter::empty())?;
-
-        let metadata =
-            open_dds::traits::OpenDd::deserialize(metadata_json_value, jsonpath::JSONPath::new())?;
-
-        // TODO: remove this assert once we have stopped manually implementing Serialize for OpenDD types.
-        assert_eq!(
-            open_dds::Metadata::from_json_str(&serde_json::to_string(&metadata)?)?,
-            metadata
-        );
-
-        let gds = GDS::new(metadata, &test_metadata_resolve_configuration())?;
-        let schema = GDS::build_schema(&gds)?;
-
-        // Ensure schema is serialized successfully.
-        serde_json::to_string(&schema)?;
-
-        // Ensure sql_context can be serialized and deserialized
-        let sql_context = sql::catalog::Catalog::from_metadata(&gds.metadata);
-        let sql_context_str = serde_json::to_string(&sql_context.clone().to_serializable())?;
-        let sql_context_parsed: CatalogSerializable = serde_json::from_str(&sql_context_str)?;
-        assert_eq!(
-            sql_context,
-            sql_context_parsed.from_serializable(&gds.metadata)
-        );
-
-        let request = if let Ok(content) = read_to_string(&request_path) {
-            SqlRequest::new(content)
-        } else {
-            let json_content = read_to_string(&request_path_json)?;
-            serde_json::from_str(&json_content)?
-        };
-
-        let header_map = if let Ok(content) = read_to_string(&headers_path_json) {
-            let header_map: HashMap<String, String> = serde_json::from_str(&content)?;
-            Arc::new(reqwest::header::HeaderMap::try_from(&header_map)?)
-        } else {
-            Arc::new(reqwest::header::HeaderMap::new())
-        };
-
-        let session = Arc::new({
-            let session_vars_path = &test_path.join("session_variables.json");
-            let session_variables: HashMap<SessionVariableName, JsonSessionVariableValue> =
-                serde_json::from_str(read_to_string(session_vars_path)?.as_ref())?;
-            resolve_session(
-                session_variables
-                    .into_iter()
-                    .map(|(k, v)| (k, v.into()))
-                    .collect(),
-            )
-        }?);
-
-        let catalog = Arc::new(sql::catalog::Catalog::from_metadata(&gds.metadata));
-        let http_context = Arc::new(test_ctx.http_context);
-
-        // Execute the test
-        snapshot_sql(
-            &catalog,
-            &gds.metadata,
-            &session,
-            &http_context,
-            &mut test_ctx.mint,
-            explain_path,
-            &header_map,
-            &SqlRequest::new(format!("EXPLAIN {}", request.sql)),
-        )
-        .await?;
-
-        snapshot_sql(
-            &catalog,
-            &gds.metadata,
-            &session,
-            &http_context,
-            &mut test_ctx.mint,
-            response_path,
-            &header_map,
-            &request,
-        )
-        .await?;
-
-        Ok(())
-    })
-}
-
-async fn snapshot_sql(
-    catalog: &Arc<sql::catalog::Catalog>,
-    metadata: &Arc<metadata_resolve::Metadata>,
-    session: &Arc<hasura_authn_core::Session>,
-    http_context: &Arc<HttpContext>,
-    mint: &mut Mint,
-    response_path: String,
-    request_headers: &Arc<reqwest::header::HeaderMap>,
-    request: &SqlRequest,
-) -> Result<(), anyhow::Error> {
-    let response = sql::execute::execute_sql(
-        request_headers.clone(),
-        catalog.clone(),
-        metadata.clone(),
-        session.clone(),
-        http_context.clone(),
-        request,
-    )
-    .await;
-
-    let response = match response {
-        Ok(r) => r,
-        Err(e) => serde_json::to_vec(&e.to_error_response())?,
-    };
-    let response = serde_json::from_reader::<_, serde_json::Value>(response.as_slice())?;
-    let mut expected = mint.new_goldenfile_with_differ(
-        response_path,
-        Box::new(|file1, file2| {
-            let json1: serde_json::Value =
-                serde_json::from_reader(File::open(file1).unwrap()).unwrap();
-            let json2: serde_json::Value =
-                serde_json::from_reader(File::open(file2).unwrap()).unwrap();
-            if json1 != json2 {
-                text_diff(file1, file2);
-            }
-        }),
-    )?;
-    write!(expected, "{}", serde_json::to_string_pretty(&response)?)?;
-    Ok(())
-}
-
 /// A utility wrapper around std::read_to_string
 /// Prints path on error to help debugging
 fn read_to_string(path: &Path) -> anyhow::Result<String> {
@@ -730,20 +619,23 @@ fn read_to_string(path: &Path) -> anyhow::Result<String> {
 
 fn compare_graphql_responses(
     http_response: &lang_graphql::http::Response,
-    ws_response: &lang_graphql::http::Response,
+    other_response: &lang_graphql::http::Response,
 ) {
     assert_eq!(
-        http_response.status_code, ws_response.status_code,
-        "Status Codes donot match {}, {}",
-        http_response.status_code, ws_response.status_code,
+        http_response.status_code, other_response.status_code,
+        "HTTP status codes do not match {}, {}",
+        http_response.status_code, other_response.status_code,
     );
 
     assert_eq!(
-        http_response.errors, ws_response.errors,
+        http_response.errors, other_response.errors,
         "Errors do not match",
     );
 
-    assert_eq!(http_response.data, ws_response.data, "Data do not match");
+    assert_eq!(
+        http_response.data, other_response.data,
+        "Data does not match"
+    );
 }
 
 /// Execute a GraphQL query over a dummy WebSocket connection.
@@ -856,135 +748,10 @@ async fn run_query_graphql_ws(
     response
 }
 
-// which OpenDD IR pipeline tests should we include for this test?
+// should we test with the OpenDD pipeline?
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum TestOpenDDPipeline {
     Skip,
-    GenerateOpenDDQuery,
-    TestNDCResponses,
-    GenerateExecutionPlan,
-}
-
-// generate open_dd_ir for each test and see what happens
-// eventually these tests will be deleted once the OpenDD pipeline becomes the main one
-pub async fn open_dd_pipeline_test(
-    test_path_string: &str,
-    opendd_tests: TestOpenDDPipeline,
-    query: &str,
-    schema: &Schema<GDS>,
-    metadata: &metadata_resolve::Metadata,
-    session: &Session,
-    raw_request: lang_graphql::http::RawRequest,
-    http_context: &Arc<HttpContext>,
-    request_headers: &reqwest::header::HeaderMap,
-) {
-    match opendd_tests {
-        TestOpenDDPipeline::Skip => {}
-        TestOpenDDPipeline::GenerateOpenDDQuery => {
-            // parse the raw request into a GQL query
-            let query = graphql_frontend::parse_query(query).unwrap();
-
-            // normalize the parsed GQL query
-            if let Ok(normalized_request) =
-                graphql_frontend::normalize_request(schema, session, query, &raw_request)
-            {
-                // we can only generate for queries that would have worked,
-                // `normalize_request` fails when we try and access a field we're not allowed to,
-                // for instance
-                let ir = graphql_frontend::to_opendd_ir(&normalized_request);
-
-                insta::with_settings!({
-                snapshot_path => test_path_string,
-                snapshot_suffix => "",
-                prepend_module_to_snapshot => false},{
-                    insta::assert_debug_snapshot!(
-                        format!("generate_open_dd_query_for_{}", session.role),
-                        ir
-                    );
-                });
-            }
-        }
-        TestOpenDDPipeline::TestNDCResponses => {
-            // test the partial NDC pipeline so we can sanity check the planning steps
-
-            // parse the raw request into a GQL query
-            let query = graphql_frontend::parse_query(query).unwrap();
-
-            // normalize the parsed GQL query
-            if let Ok(normalized_request) =
-                graphql_frontend::normalize_request(schema, session, query, &raw_request)
-            {
-                // we can only generate for queries that would have worked,
-                // `normalize_request` fails when we try and access a field we're not allowed to,
-                // for instance
-                let query_ir = graphql_frontend::to_opendd_ir(&normalized_request);
-
-                // create a query execution plan for a single node with the new pipeline
-                let plan_result = plan::plan_query_request(
-                    &query_ir,
-                    metadata,
-                    &Arc::new(session.clone()),
-                    request_headers,
-                );
-
-                match plan_result {
-                    Ok(execution_plan) => match execution_plan {
-                        plan::ExecutionPlan::Mutation(_) => {
-                            todo!("Executing mutations in OpenDD IR pipeline tests not implemented yet")
-                        }
-                        plan::ExecutionPlan::Queries(queries) => {
-                            // this should probably happen in `execute`
-                            let mut results = IndexMap::new();
-
-                            for (alias, query_execution) in queries {
-                                let ndc_query_execution = NDCQueryExecution {
-                                    execution_span_attribute:
-                                        "Engine GraphQL OpenDD pipeline tests",
-                                    execution_tree: query_execution.execution_tree,
-                                    field_span_attribute: "Engine GraphQL OpenDD pipeline tests"
-                                        .into(),
-                                    process_response_as: ProcessResponseAs::Array {
-                                        is_nullable: false,
-                                    },
-                                };
-                                let rowsets = execute::resolve_ndc_query_execution(
-                                    http_context,
-                                    ndc_query_execution,
-                                    None,
-                                )
-                                .await
-                                .map_err(|e| e.to_string());
-                                results.insert(alias, rowsets);
-                            }
-
-                            insta::with_settings!({
-                            snapshot_path => test_path_string,
-                            snapshot_suffix => "",
-                            prepend_module_to_snapshot => false},{
-                                        insta::assert_json_snapshot!(
-                                            format!("test_ndc_responses_for_{}", session.role),
-                                            results
-                                        );
-                            });
-                        }
-                    },
-                    Err(err) => {
-                        insta::with_settings!({
-                            snapshot_path => test_path_string,
-                            snapshot_suffix => "",
-                            prepend_module_to_snapshot => false},{
-
-                        insta::assert_debug_snapshot!(
-                            format!("error_in_test_ndc_responses_for_{}", session.role),
-                            err
-                        );});
-                    }
-                }
-            }
-        }
-        TestOpenDDPipeline::GenerateExecutionPlan => {
-            todo!("GenerateExecutionPlan not implemented yet")
-        }
-    }
+    YesPlease,
 }
