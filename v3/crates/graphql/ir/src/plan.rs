@@ -72,7 +72,14 @@ pub fn generate_request_plan<'n, 's, 'ir>(
                             .insert(alias.clone(), type_name.clone());
                     }
                     MutationRootField::ProcedureBasedCommand { selection_set, ir } => {
-                        let plan = plan_mutation(selection_set, ir, &mut unique_number)?;
+                        let plan = plan_mutation(
+                            selection_set,
+                            ir,
+                            metadata,
+                            session,
+                            request_headers,
+                            &mut unique_number,
+                        )?;
                         mutation_plan
                             .nodes
                             .entry(plan.mutation_execution.data_connector.clone())
@@ -94,13 +101,23 @@ pub fn generate_request_plan<'n, 's, 'ir>(
 fn plan_mutation<'n, 's>(
     selection_set: &'n gql::normalized_ast::SelectionSet<'s, GDS>,
     ir: &ProcedureBasedCommand<'s>,
+    metadata: &'s Metadata,
+    session: &Arc<Session>,
+    request_headers: &reqwest::header::HeaderMap,
     unique_number: &mut UniqueNumber,
 ) -> Result<MutationSelect<'n, 's>, error::Error> {
     let Plan {
         inner: ndc_ir,
         join_locations,
         remote_predicates,
-    } = commands::plan_mutation_execution(ir.procedure_name, ir, unique_number)?;
+    } = commands::plan_mutation_execution(
+        ir.procedure_name,
+        ir,
+        metadata,
+        session,
+        request_headers,
+        unique_number,
+    )?;
 
     // _should not_ happen but let's fail rather than do a query with missing filters
     if !remote_predicates.0.is_empty() {
@@ -139,11 +156,17 @@ fn plan_subscription<'s, 'ir>(
         } => {
             let execution_tree = match ir.model_selection {
                 ModelSelectOneSelection::Ir(ref model_selection) => {
-                    model_selection::plan_query_execution(model_selection, unique_number)
+                    model_selection::plan_query_execution(
+                        model_selection,
+                        metadata,
+                        session,
+                        request_headers,
+                        unique_number,
+                    )
                 }
                 ModelSelectOneSelection::OpenDd(ref model_selection) => {
                     // TODO: expose more specific function in `plan` for just model selections
-                    let (single_node_execution_plan, _) = plan::query_to_plan(
+                    let single_node_execution_plan = plan::query_to_plan(
                         &open_dds::query::Query::Model(model_selection.clone()),
                         metadata,
                         session,
@@ -183,11 +206,17 @@ fn plan_subscription<'s, 'ir>(
         } => {
             let execution_tree = match ir.model_selection {
                 ModelSelectManySelection::Ir(ref model_selection) => {
-                    model_selection::plan_query_execution(model_selection, unique_number)
+                    model_selection::plan_query_execution(
+                        model_selection,
+                        metadata,
+                        session,
+                        request_headers,
+                        unique_number,
+                    )
                 }
                 ModelSelectManySelection::OpenDd(ref model_selection) => {
                     // TODO: expose more specific function in `plan` for just model selections
-                    let (single_node_execution_plan, _) = plan::query_to_plan(
+                    let single_node_execution_plan = plan::query_to_plan(
                         &open_dds::query::Query::Model(model_selection.clone()),
                         metadata,
                         session,
@@ -227,11 +256,17 @@ fn plan_subscription<'s, 'ir>(
         } => {
             let execution_tree = match &ir.model_selection {
                 ModelSelectAggregateSelection::Ir(model_selection) => {
-                    model_selection::plan_query_execution(model_selection, unique_number)
+                    model_selection::plan_query_execution(
+                        model_selection,
+                        metadata,
+                        session,
+                        request_headers,
+                        unique_number,
+                    )
                 }
                 ModelSelectAggregateSelection::OpenDd(model_aggregate_selection) => {
                     // TODO: expose more specific function in `plan` for just model selections
-                    let (single_node_execution_plan, _) = plan::query_to_plan(
+                    let single_node_execution_plan = plan::query_to_plan(
                         &open_dds::query::Query::ModelAggregate(model_aggregate_selection.clone()),
                         metadata,
                         session,
@@ -306,11 +341,17 @@ fn plan_query<'n, 's, 'ir>(
         QueryRootField::ModelSelectOne { ir, selection_set } => {
             let execution_tree = match ir.model_selection {
                 ModelSelectOneSelection::Ir(ref model_selection) => {
-                    model_selection::plan_query_execution(model_selection, unique_number)
+                    model_selection::plan_query_execution(
+                        model_selection,
+                        metadata,
+                        session,
+                        request_headers,
+                        unique_number,
+                    )
                 }
                 ModelSelectOneSelection::OpenDd(ref model_selection) => {
                     // TODO: expose more specific function in `plan` for just model selections
-                    let (single_node_execution_plan, _) = plan::query_to_plan(
+                    let single_node_execution_plan = plan::query_to_plan(
                         &open_dds::query::Query::Model(model_selection.clone()),
                         metadata,
                         session,
@@ -345,11 +386,17 @@ fn plan_query<'n, 's, 'ir>(
         QueryRootField::ModelSelectMany { ir, selection_set } => {
             let execution_tree = match ir.model_selection {
                 ModelSelectManySelection::Ir(ref model_selection) => {
-                    model_selection::plan_query_execution(model_selection, unique_number)
+                    model_selection::plan_query_execution(
+                        model_selection,
+                        metadata,
+                        session,
+                        request_headers,
+                        unique_number,
+                    )
                 }
                 ModelSelectManySelection::OpenDd(ref model_selection) => {
                     // TODO: expose more specific function in `plan` for just model selections
-                    let (single_node_execution_plan, _) = plan::query_to_plan(
+                    let single_node_execution_plan = plan::query_to_plan(
                         &open_dds::query::Query::Model(model_selection.clone()),
                         metadata,
                         session,
@@ -384,11 +431,17 @@ fn plan_query<'n, 's, 'ir>(
             let execution_tree = {
                 match &ir.model_selection {
                     ModelSelectAggregateSelection::Ir(model_selection) => {
-                        model_selection::plan_query_execution(model_selection, unique_number)
+                        model_selection::plan_query_execution(
+                            model_selection,
+                            metadata,
+                            session,
+                            request_headers,
+                            unique_number,
+                        )
                     }
                     ModelSelectAggregateSelection::OpenDd(model_aggregate_selection) => {
                         // TODO: expose more specific function in `plan` for just model selections
-                        let (single_node_execution_plan, _) = plan::query_to_plan(
+                        let single_node_execution_plan = plan::query_to_plan(
                             &open_dds::query::Query::ModelAggregate(
                                 model_aggregate_selection.clone(),
                             ),
@@ -425,7 +478,13 @@ fn plan_query<'n, 's, 'ir>(
             Some(ir) => {
                 let execution_tree = match ir.model_selection {
                     ModelNodeSelection::Ir(ref model_selection) => {
-                        model_selection::plan_query_execution(model_selection, unique_number)
+                        model_selection::plan_query_execution(
+                            model_selection,
+                            metadata,
+                            session,
+                            request_headers,
+                            unique_number,
+                        )
                     }
                     ModelNodeSelection::OpenDd(_) => todo!("Plan NodeSelect for OpenDd"),
                 }?;
@@ -443,7 +502,13 @@ fn plan_query<'n, 's, 'ir>(
             None => NodeQueryPlan::RelayNodeSelect(None),
         },
         QueryRootField::FunctionBasedCommand { ir, selection_set } => {
-            let execution_tree = commands::plan_query_execution(ir, unique_number)?;
+            let execution_tree = commands::plan_query_execution(
+                ir,
+                metadata,
+                session,
+                request_headers,
+                unique_number,
+            )?;
 
             NodeQueryPlan::NDCQueryExecution {
                 selection_set,
@@ -464,7 +529,13 @@ fn plan_query<'n, 's, 'ir>(
             for ir in irs {
                 let execution_tree = match ir.model_selection {
                     ModelEntitySelection::Ir(ref model_selection) => {
-                        model_selection::plan_query_execution(model_selection, unique_number)?
+                        model_selection::plan_query_execution(
+                            model_selection,
+                            metadata,
+                            session,
+                            request_headers,
+                            unique_number,
+                        )?
                     }
                     ModelEntitySelection::OpenDd(_) => {
                         todo!("ApolloFederationRootFields for OpenDd")

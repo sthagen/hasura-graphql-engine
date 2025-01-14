@@ -444,7 +444,7 @@ fn test_model_select_many_where_nested_select_object() -> anyhow::Result<()> {
     common::test_execution_expectation(
         test_path_string,
         &[shared_metadata, common_metadata_path_string],
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -1198,7 +1198,7 @@ fn test_command_functions_object_output_type_command_permissions() -> anyhow::Re
                 vec!["execute/common_metadata/custom_connector_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
