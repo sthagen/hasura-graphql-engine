@@ -71,6 +71,11 @@ struct FilterInputArguments<'s> {
 pub fn model_selection_open_dd_ir(
     selection_set: &normalized_ast::SelectionSet<'_, GDS>,
     model_name: &Qualified<ModelName>,
+    type_mappings: &BTreeMap<
+        metadata_resolve::Qualified<CustomTypeName>,
+        metadata_resolve::TypeMapping,
+    >,
+    model_arguments: Option<IndexMap<open_dds::query::ArgumentName, open_dds::query::Value>>,
     where_clause: Option<open_dds::query::BooleanExpression>,
     limit: Option<u32>,
     offset: Option<u32>,
@@ -81,6 +86,7 @@ pub fn model_selection_open_dd_ir(
     let selection = selection_set::generate_selection_set_open_dd_ir(
         selection_set,
         metadata_resolve::FieldNestedness::NotNested,
+        type_mappings,
         session_variables,
         request_headers,
         usage_counts,
@@ -105,8 +111,6 @@ pub fn model_selection_open_dd_ir(
     // TODO: these will be replaced with correct values as we go
     let order_by = vec![];
 
-    let arguments = IndexMap::new();
-
     // END OF MADE UP VALUES
 
     let target = open_dds::query::ModelTarget {
@@ -114,7 +118,7 @@ pub fn model_selection_open_dd_ir(
         model_name: model_name.name.clone(),
         offset,
         order_by,
-        arguments,
+        arguments: model_arguments.unwrap_or_default(), // Permission presets are handled during planning
         filter,
         limit,
     };
@@ -129,6 +133,7 @@ pub fn model_aggregate_selection_open_dd_ir<'s>(
     data_type: &Qualified<CustomTypeName>,
     model_source: &'s metadata_resolve::ModelSource,
     model_name: &Qualified<ModelName>,
+    model_arguments: Option<IndexMap<open_dds::query::ArgumentName, open_dds::query::Value>>,
     where_clause: Option<open_dds::query::BooleanExpression>,
     limit: Option<u32>,
     offset: Option<u32>,
@@ -157,8 +162,6 @@ pub fn model_aggregate_selection_open_dd_ir<'s>(
     // TODO: these will be replaced with correct values as we go
     let order_by = vec![];
 
-    let arguments = IndexMap::new();
-
     // END OF MADE UP VALUES
 
     let target = open_dds::query::ModelTarget {
@@ -166,7 +169,7 @@ pub fn model_aggregate_selection_open_dd_ir<'s>(
         model_name: model_name.name.clone(),
         offset,
         order_by,
-        arguments,
+        arguments: model_arguments.unwrap_or_default(), // Permission presets are handled during planning
         filter,
         limit,
     };
@@ -244,6 +247,7 @@ pub fn generate_aggregate_model_selection_ir<'s>(
     let mut arguments = read_model_select_aggregate_arguments(
         field_call,
         model_source,
+        data_type,
         session_variables,
         usage_counts,
     )?;
@@ -286,6 +290,7 @@ pub fn generate_aggregate_model_selection_ir<'s>(
 fn read_model_select_aggregate_arguments<'s>(
     field_call: &normalized_ast::FieldCall<'s, GDS>,
     model_source: &'s metadata_resolve::ModelSource,
+    data_type: &Qualified<open_dds::types::CustomTypeName>,
     session_variables: &SessionVariables,
     usage_counts: &mut UsagesCounts,
 ) -> Result<ModelSelectAggregateArguments<'s>, error::Error> {
@@ -356,6 +361,7 @@ fn read_model_select_aggregate_arguments<'s>(
     let filter_input_arguments = read_filter_input_arguments(
         filter_input_props,
         model_source,
+        data_type,
         session_variables,
         usage_counts,
     )?;
@@ -369,6 +375,7 @@ fn read_model_select_aggregate_arguments<'s>(
 fn read_filter_input_arguments<'s>(
     filter_input_field_props: Option<&IndexMap<ast::Name, normalized_ast::InputField<'s, GDS>>>,
     model_source: &'s metadata_resolve::ModelSource,
+    data_type: &Qualified<open_dds::types::CustomTypeName>,
     session_variables: &SessionVariables,
     usage_counts: &mut UsagesCounts,
 ) -> Result<FilterInputArguments<'s>, error::Error> {
@@ -430,6 +437,9 @@ fn read_filter_input_arguments<'s>(
                         filter_input_field_arg,
                         session_variables,
                         usage_counts,
+                        &model_source.type_mappings,
+                        &model_source.data_connector,
+                        data_type,
                     )?);
                 }
 
