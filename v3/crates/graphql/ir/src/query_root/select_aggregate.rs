@@ -2,10 +2,12 @@
 //!
 //! A 'select_aggregate' operation fetches a set of aggregates over rows of a model
 
+use std::collections::BTreeMap;
+
 use graphql_schema::{self, Annotation, BooleanExpressionAnnotation, ModelInputAnnotation};
 use graphql_schema::{InputAnnotation, GDS};
 /// Generates the IR for a 'select_aggregate' operation
-use hasura_authn_core::SessionVariables;
+use hasura_authn_core::Session;
 use lang_graphql::ast::common as ast;
 use lang_graphql::normalized_ast;
 use metadata_resolve;
@@ -19,6 +21,7 @@ use crate::arguments;
 use crate::error;
 use crate::filter;
 use crate::model_selection;
+use crate::order_by;
 use crate::GraphqlRequestPipeline;
 
 #[derive(Debug, Serialize)]
@@ -49,8 +52,13 @@ pub(crate) fn select_aggregate_generate_ir<'n, 's>(
     field: &'n normalized_ast::Field<'s, GDS>,
     field_call: &'n normalized_ast::FieldCall<'s, GDS>,
     data_type: &Qualified<open_dds::types::CustomTypeName>,
+    model: &'s metadata_resolve::ModelWithPermissions,
     model_source: &'s metadata_resolve::ModelSource,
-    session_variables: &SessionVariables,
+    object_types: &'s BTreeMap<
+        Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     model_name: &'s Qualified<open_dds::models::ModelName>,
 ) -> Result<ModelSelectAggregate<'n, 's>, error::Error> {
@@ -62,9 +70,11 @@ pub(crate) fn select_aggregate_generate_ir<'n, 's>(
                     field,
                     field_call,
                     data_type,
+                    model,
                     model_source,
                     model_name,
-                    session_variables,
+                    object_types,
+                    session,
                     request_headers,
                     // Get all the models/commands that were used as relationships
                     &mut usage_counts,
@@ -77,6 +87,7 @@ pub(crate) fn select_aggregate_generate_ir<'n, 's>(
             let mut offset = None;
             let mut where_input = None;
             let mut model_arguments_input = None;
+            let mut order_by_input = None;
 
             // Add the name of the root model
             count_model(model_name, &mut usage_counts);
@@ -142,7 +153,7 @@ pub(crate) fn select_aggregate_generate_ir<'n, 's>(
                                 Annotation::Input(InputAnnotation::Model(
                                     ModelInputAnnotation::ModelOrderByExpression,
                                 )) => {
-                                    //TODO: Handle order_by
+                                    order_by_input = Some(&filter_input_field_arg.value);
                                 }
 
                                 // Where argument
@@ -185,7 +196,7 @@ pub(crate) fn select_aggregate_generate_ir<'n, 's>(
             let where_clause = match where_input {
                 Some(where_input) => Some(filter::resolve_filter_expression_open_dd(
                     where_input,
-                    session_variables,
+                    &session.variables,
                     &mut usage_counts,
                 )?),
                 None => None,
@@ -195,11 +206,21 @@ pub(crate) fn select_aggregate_generate_ir<'n, 's>(
                     arguments::resolve_model_arguments_input_opendd(
                         arguments_input,
                         &model_source.type_mappings,
-                        session_variables,
+                        &session.variables,
                         &mut usage_counts,
                     )
                 })
                 .transpose()?;
+
+            let order_by = match order_by_input {
+                None => vec![],
+                Some(order_by_input) => order_by::build_order_by_open_dd_ir(
+                    order_by_input,
+                    &mut usage_counts,
+                    &model_source.data_connector,
+                    data_type,
+                )?,
+            };
 
             ModelSelectAggregateSelection::OpenDd(
                 model_selection::model_aggregate_selection_open_dd_ir(
@@ -209,6 +230,7 @@ pub(crate) fn select_aggregate_generate_ir<'n, 's>(
                     model_name,
                     model_arguments,
                     where_clause,
+                    order_by,
                     limit,
                     offset,
                     &mut usage_counts,

@@ -1,4 +1,4 @@
-use hasura_authn_core::SessionVariables;
+use hasura_authn_core::{Session, SessionVariables};
 use indexmap::IndexMap;
 use lang_graphql::ast::common::Alias;
 use lang_graphql::normalized_ast;
@@ -136,6 +136,10 @@ pub fn generate_nested_selection_open_dd_ir(
     qualified_type_reference: &metadata_resolve::QualifiedTypeReference,
     field_base_type_kind: TypeKind,
     selection_set_field_nestedness: metadata_resolve::FieldNestedness,
+    models: &IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
     type_mappings: &BTreeMap<
         metadata_resolve::Qualified<CustomTypeName>,
         metadata_resolve::TypeMapping,
@@ -166,6 +170,7 @@ pub fn generate_nested_selection_open_dd_ir(
                 element_type,
                 field_base_type_kind,
                 new_nestedness,
+                models,
                 type_mappings,
                 NestedSelectionType::NestedSelection,
                 field,
@@ -185,6 +190,7 @@ pub fn generate_nested_selection_open_dd_ir(
                             let nested_selection = generate_selection_set_open_dd_ir(
                                 &field.selection_set,
                                 selection_set_field_nestedness,
+                                models,
                                 type_mappings,
                                 session_variables,
                                 request_headers,
@@ -210,7 +216,19 @@ pub fn generate_nested_selection<'s>(
         metadata_resolve::Qualified<CustomTypeName>,
         metadata_resolve::TypeMapping,
     >,
-    session_variables: &SessionVariables,
+    models: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    commands: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::commands::CommandName>,
+        metadata_resolve::CommandWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        metadata_resolve::Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<Option<NestedSelection<'s>>, error::Error> {
@@ -235,7 +253,10 @@ pub fn generate_nested_selection<'s>(
                 field,
                 data_connector,
                 type_mappings,
-                session_variables,
+                models,
+                commands,
+                object_types,
+                session,
                 request_headers,
                 usage_counts,
             )?;
@@ -262,7 +283,10 @@ pub fn generate_nested_selection<'s>(
                                 data_connector,
                                 type_mappings,
                                 field_mappings,
-                                session_variables,
+                                models,
+                                commands,
+                                object_types,
+                                session,
                                 request_headers,
                                 usage_counts,
                             )?;
@@ -279,6 +303,10 @@ pub fn generate_nested_selection<'s>(
 pub fn generate_selection_set_open_dd_ir(
     selection_set: &normalized_ast::SelectionSet<'_, GDS>,
     selection_set_field_nestedness: metadata_resolve::FieldNestedness,
+    models: &IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
     type_mappings: &BTreeMap<
         metadata_resolve::Qualified<CustomTypeName>,
         metadata_resolve::TypeMapping,
@@ -305,6 +333,7 @@ pub fn generate_selection_set_open_dd_ir(
                             *field_base_type_kind,
                             selection_set_field_nestedness
                                 .max(metadata_resolve::FieldNestedness::ObjectNested),
+                            models,
                             type_mappings,
                             NestedSelectionType::NestedSelection,
                             field,
@@ -396,6 +425,7 @@ pub fn generate_selection_set_open_dd_ir(
                             open_dds::query::ObjectSubSelection::Relationship(
                                 relationship::generate_model_relationship_open_dd_ir(
                                     field,
+                                    models,
                                     type_mappings,
                                     relationship_annotation,
                                     session_variables,
@@ -561,7 +591,19 @@ pub fn generate_selection_set_ir<'s>(
         metadata_resolve::TypeMapping,
     >,
     field_mappings: &BTreeMap<FieldName, metadata_resolve::FieldMapping>,
-    session_variables: &SessionVariables,
+    models: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    commands: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::commands::CommandName>,
+        metadata_resolve::CommandWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        metadata_resolve::Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<ResultSelectionSet<'s>, error::Error> {
@@ -591,7 +633,10 @@ pub fn generate_selection_set_ir<'s>(
                         field,
                         data_connector,
                         type_mappings,
-                        session_variables,
+                        models,
+                        commands,
+                        object_types,
+                        session,
                         request_headers,
                         usage_counts,
                     )?;
@@ -685,7 +730,10 @@ pub fn generate_selection_set_ir<'s>(
                             selection_set_field_nestedness,
                             data_connector,
                             type_mappings,
-                            session_variables,
+                            models,
+                            commands,
+                            object_types,
+                            session,
                             request_headers,
                             usage_counts,
                         )?,
@@ -700,7 +748,9 @@ pub fn generate_selection_set_ir<'s>(
                             selection_set_field_nestedness,
                             data_connector,
                             type_mappings,
-                            session_variables,
+                            models,
+                            object_types,
+                            session,
                             request_headers,
                             usage_counts,
                         )?,
@@ -715,7 +765,10 @@ pub fn generate_selection_set_ir<'s>(
                             selection_set_field_nestedness,
                             data_connector,
                             type_mappings,
-                            session_variables,
+                            models,
+                            commands,
+                            object_types,
+                            session,
                             request_headers,
                             usage_counts,
                         )?,

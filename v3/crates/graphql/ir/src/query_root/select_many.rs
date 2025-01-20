@@ -3,7 +3,8 @@
 //! A 'select_many' operation fetches zero or one row from a model
 
 /// Generates the IR for a 'select_many' operation
-use hasura_authn_core::SessionVariables;
+use hasura_authn_core::Session;
+use indexmap::IndexMap;
 use lang_graphql::ast::common as ast;
 use lang_graphql::normalized_ast;
 
@@ -15,14 +16,14 @@ use crate::arguments;
 use crate::error;
 use crate::filter;
 use crate::model_selection;
-use crate::order_by::build_ndc_order_by;
+use crate::order_by::{build_ndc_order_by, build_order_by_open_dd_ir};
 use crate::permissions;
 use crate::GraphqlRequestPipeline;
 use graphql_schema::GDS;
 use graphql_schema::{self, Annotation, BooleanExpressionAnnotation, ModelInputAnnotation};
 use metadata_resolve;
 use metadata_resolve::Qualified;
-use plan::{count_model, process_argument_presets};
+use plan::{count_model, process_argument_presets_for_model};
 use plan_types::UsagesCounts;
 
 #[derive(Debug, Serialize)]
@@ -54,8 +55,21 @@ pub fn select_many_generate_ir<'n, 's>(
     field: &'n normalized_ast::Field<'s, GDS>,
     field_call: &'n normalized_ast::FieldCall<'s, GDS>,
     data_type: &Qualified<open_dds::types::CustomTypeName>,
+    model: &'s metadata_resolve::ModelWithPermissions,
     model_source: &'s metadata_resolve::ModelSource,
-    session_variables: &SessionVariables,
+    models: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    commands: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::commands::CommandName>,
+        metadata_resolve::CommandWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     model_name: &'s Qualified<open_dds::models::ModelName>,
 ) -> Result<ModelSelectMany<'n, 's>, error::Error> {
@@ -67,6 +81,7 @@ pub fn select_many_generate_ir<'n, 's>(
 
     // For opendd execution pipeline
     let mut model_arguments_input = None;
+    let mut order_by_input = None;
 
     // Add the name of the root model
     let mut usage_counts = UsagesCounts::new();
@@ -101,7 +116,7 @@ pub fn select_many_generate_ir<'n, 's>(
                                 argument,
                                 &model_source.type_mappings,
                                 &model_source.data_connector,
-                                session_variables,
+                                &session.variables,
                                 &mut usage_counts,
                             )?;
 
@@ -116,12 +131,14 @@ pub fn select_many_generate_ir<'n, 's>(
                 ModelInputAnnotation::ModelOrderByExpression => {
                     order_by = Some(build_ndc_order_by(
                         argument,
-                        session_variables,
+                        &session.variables,
                         &mut usage_counts,
                         &model_source.type_mappings,
                         &model_source.data_connector,
                         data_type,
                     )?);
+                    // For opendd execution pipeline
+                    order_by_input = Some(&argument.value);
                 }
                 _ => {
                     return Err(error::InternalEngineError::UnexpectedAnnotation {
@@ -144,22 +161,13 @@ pub fn select_many_generate_ir<'n, 's>(
         }
     }
 
-    // the first and only argument seemingly being "args"
-    let argument_presets = if let Some((_, field_call_argument)) = &field_call.arguments.first() {
-        permissions::get_argument_presets(field_call_argument.info.namespaced.as_ref())?
-    } else {
-        None
-    };
-
     // add any preset arguments from model permissions
-    model_arguments = process_argument_presets(
-        &model_source.data_connector,
-        &model_source.type_mappings,
-        argument_presets,
-        &model_source.data_connector_link_argument_presets,
-        session_variables,
-        request_headers,
+    model_arguments = process_argument_presets_for_model(
         model_arguments,
+        model,
+        object_types,
+        session,
+        request_headers,
         &mut usage_counts,
     )?;
 
@@ -168,7 +176,7 @@ pub fn select_many_generate_ir<'n, 's>(
             let where_clause = match where_input {
                 Some(where_input) => Some(filter::resolve_filter_expression_open_dd(
                     where_input,
-                    session_variables,
+                    &session.variables,
                     &mut usage_counts,
                 )?),
                 None => None,
@@ -179,21 +187,32 @@ pub fn select_many_generate_ir<'n, 's>(
                     arguments::resolve_model_arguments_input_opendd(
                         arguments_input,
                         &model_source.type_mappings,
-                        session_variables,
+                        &session.variables,
                         &mut usage_counts,
                     )
                 })
                 .transpose()?;
+            let order_by = match order_by_input {
+                None => vec![],
+                Some(order_by_input) => build_order_by_open_dd_ir(
+                    order_by_input,
+                    &mut usage_counts,
+                    &model_source.data_connector,
+                    data_type,
+                )?,
+            };
 
             ModelSelectManySelection::OpenDd(model_selection::model_selection_open_dd_ir(
                 &field.selection_set,
                 model_name,
+                models,
                 &model_source.type_mappings,
                 model_arguments,
                 where_clause,
+                order_by,
                 limit,
                 offset,
-                session_variables,
+                &session.variables,
                 request_headers,
                 // Get all the models/commands that were used as relationships
                 &mut usage_counts,
@@ -205,7 +224,7 @@ pub fn select_many_generate_ir<'n, 's>(
                     where_input,
                     &model_source.data_connector,
                     &model_source.type_mappings,
-                    session_variables,
+                    &session.variables,
                     &mut usage_counts,
                 )?),
                 None => None,
@@ -226,7 +245,10 @@ pub fn select_many_generate_ir<'n, 's>(
                 limit,
                 offset,
                 order_by,
-                session_variables,
+                models,
+                commands,
+                object_types,
+                session,
                 request_headers,
                 // Get all the models/commands that were used as relationships
                 &mut usage_counts,

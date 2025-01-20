@@ -1,8 +1,9 @@
-use hasura_authn_core::SessionVariables;
+use hasura_authn_core::{Session, SessionVariables};
 use indexmap::IndexMap;
 use lang_graphql::normalized_ast::{self, Field};
 use open_dds::{
     arguments::ArgumentName,
+    commands::FunctionName,
     relationships::{RelationshipName, RelationshipType},
     types::{CustomTypeName, FieldName},
 };
@@ -19,12 +20,12 @@ use super::{
     selection_set::{generate_selection_set_open_dd_ir, FieldSelection},
 };
 use crate::error;
+use crate::order_by;
 use graphql_schema::{
-    Annotation, BooleanExpressionAnnotation, CommandRelationshipAnnotation, CommandTargetSource,
-    InputAnnotation, ModelAggregateRelationshipAnnotation, ModelInputAnnotation,
-    ModelRelationshipAnnotation, GDS,
+    Annotation, BooleanExpressionAnnotation, CommandRelationshipAnnotation, InputAnnotation,
+    ModelAggregateRelationshipAnnotation, ModelInputAnnotation, ModelRelationshipAnnotation, GDS,
 };
-use metadata_resolve::{self, Qualified, RelationshipModelMapping};
+use metadata_resolve::{self, CommandSource, Qualified, RelationshipModelMapping};
 use plan::{count_command, count_model};
 use plan_types::{
     ComparisonTarget, ComparisonValue, Expression, LocalCommandRelationshipInfo,
@@ -52,6 +53,10 @@ pub type TargetField = (FieldName, metadata_resolve::NdcColumnForComparison);
 
 pub fn generate_model_relationship_open_dd_ir<'s>(
     field: &Field<'s, GDS>,
+    models: &'s IndexMap<
+        Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
     type_mappings: &'s BTreeMap<Qualified<CustomTypeName>, metadata_resolve::TypeMapping>,
     relationship_annotation: &'s ModelRelationshipAnnotation,
     session_variables: &SessionVariables,
@@ -65,53 +70,74 @@ pub fn generate_model_relationship_open_dd_ir<'s>(
     let mut limit = None;
     let mut offset = None;
     let mut where_input = None;
+    let mut order_by = Vec::new();
 
     for argument in field_call.arguments.values() {
         match argument.info.generic {
-            annotation @ Annotation::Input(argument_annotation) => {
-                match argument_annotation {
-                    InputAnnotation::Model(model_argument_annotation) => {
-                        match model_argument_annotation {
-                            ModelInputAnnotation::ModelLimitArgument => {
-                                limit = Some(argument.value.as_int_u32().map_err(
+            annotation @ Annotation::Input(argument_annotation) => match argument_annotation {
+                InputAnnotation::Model(model_argument_annotation) => {
+                    match model_argument_annotation {
+                        ModelInputAnnotation::ModelLimitArgument => {
+                            limit =
+                                Some(argument.value.as_int_u32().map_err(
                                     error::Error::map_unexpected_value_to_external_error,
                                 )?);
-                            }
-                            ModelInputAnnotation::ModelOffsetArgument => {
-                                offset = Some(argument.value.as_int_u32().map_err(
+                        }
+                        ModelInputAnnotation::ModelOffsetArgument => {
+                            offset =
+                                Some(argument.value.as_int_u32().map_err(
                                     error::Error::map_unexpected_value_to_external_error,
                                 )?);
-                            }
-                            ModelInputAnnotation::ModelOrderByExpression => {
-                                /*
-                                order_by = Some(build_ndc_order_by(
-                                    argument,
-                                    session_variables,
-                                    usage_counts,
-                                )?);*/
-                            }
-                            _ => {
-                                return Err(error::InternalEngineError::UnexpectedAnnotation {
-                                    annotation: annotation.clone(),
-                                })?
-                            }
                         }
-                    }
-                    InputAnnotation::BooleanExpression(
-                        BooleanExpressionAnnotation::BooleanExpressionRootField,
-                    ) => {
-                        if let Some(_model_source) = &relationship_annotation.target_source {
-                            where_input = Some(argument.value.as_object()?);
+                        ModelInputAnnotation::ModelOrderByExpression => {
+                            let target_model = models
+                                    .get(&relationship_annotation.model_name)
+                                    .ok_or_else(|| {
+                                        error::InternalError::Developer(
+                                            error::InternalDeveloperError::TargetModelNotFoundForRelationship {
+                                                model_name: relationship_annotation.model_name.clone(),
+                                                relationship_name: relationship_annotation.relationship_name.clone(),
+                                            },
+                                        )
+                                    })?;
+                            let target_model_source =
+                                target_model.model.source.as_ref().ok_or_else(|| {
+                                    error::Error::InternalMissingTargetModelSourceForRelationship {
+                                        relationship_name: relationship_annotation
+                                            .relationship_name
+                                            .clone(),
+                                        type_name: relationship_annotation.source_type.clone(),
+                                    }
+                                })?;
+                            order_by.extend(order_by::build_order_by_open_dd_ir(
+                                &argument.value,
+                                usage_counts,
+                                &target_model_source.data_connector,
+                                &relationship_annotation.target_type,
+                            )?);
                         }
-                    }
-
-                    _ => {
-                        return Err(error::InternalEngineError::UnexpectedAnnotation {
-                            annotation: annotation.clone(),
-                        })?
+                        _ => {
+                            return Err(error::InternalEngineError::UnexpectedAnnotation {
+                                annotation: annotation.clone(),
+                            })?
+                        }
                     }
                 }
-            }
+                InputAnnotation::BooleanExpression(
+                    BooleanExpressionAnnotation::BooleanExpressionRootField,
+                ) => {
+                    if let Some(_target_capabilities) = &relationship_annotation.target_capabilities
+                    {
+                        where_input = Some(argument.value.as_object()?);
+                    }
+                }
+
+                _ => {
+                    return Err(error::InternalEngineError::UnexpectedAnnotation {
+                        annotation: annotation.clone(),
+                    })?
+                }
+            },
 
             annotation => {
                 return Err(error::InternalEngineError::UnexpectedAnnotation {
@@ -133,6 +159,7 @@ pub fn generate_model_relationship_open_dd_ir<'s>(
     let selection = generate_selection_set_open_dd_ir(
         &field.selection_set,
         metadata_resolve::FieldNestedness::NotNested,
+        models,
         type_mappings,
         session_variables,
         request_headers,
@@ -160,7 +187,7 @@ pub fn generate_model_relationship_open_dd_ir<'s>(
         filter,
         limit,
         offset,
-        order_by: vec![], // TODO: don't ignore me
+        order_by,
     };
 
     // we're not worrying about local / remote relationships at this point, we'll see if that's
@@ -179,13 +206,48 @@ pub fn generate_model_relationship_ir<'s>(
     relationship_field_nestedness: metadata_resolve::FieldNestedness,
     source_data_connector: &'s metadata_resolve::DataConnectorLink,
     source_type_mappings: &'s BTreeMap<Qualified<CustomTypeName>, metadata_resolve::TypeMapping>,
-    session_variables: &SessionVariables,
+    models: &'s IndexMap<
+        Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    commands: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::commands::CommandName>,
+        metadata_resolve::CommandWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<FieldSelection<'s>, error::Error> {
     // Add the target model being used in the usage counts
     count_model(&relationship_annotation.model_name, usage_counts);
     let field_call = field.field_call()?;
+
+    let target_model = models
+        .get(&relationship_annotation.model_name)
+        .ok_or_else(|| {
+            error::InternalError::Developer(
+                error::InternalDeveloperError::TargetModelNotFoundForRelationship {
+                    model_name: relationship_annotation.model_name.clone(),
+                    relationship_name: relationship_annotation.relationship_name.clone(),
+                },
+            )
+        })?;
+
+    let (target_source, target_capabilities) = target_model
+        .model
+        .source
+        .as_deref()
+        .zip(relationship_annotation.target_capabilities.as_ref())
+        .ok_or_else(
+            || error::Error::InternalMissingTargetModelSourceForRelationship {
+                relationship_name: relationship_annotation.relationship_name.clone(),
+                type_name: relationship_annotation.source_type.clone(),
+            },
+        )?;
 
     let mut limit = None;
     let mut offset = None;
@@ -209,23 +271,14 @@ pub fn generate_model_relationship_ir<'s>(
                                 )?);
                             }
                             ModelInputAnnotation::ModelOrderByExpression => {
-                                if let Some(target_source) =
-                                    relationship_annotation.target_source.as_ref()
-                                {
-                                    order_by = Some(build_ndc_order_by(
-                                        argument,
-                                        session_variables,
-                                        usage_counts,
-                                        &target_source.model.type_mappings,
-                                        source_data_connector,
-                                        &relationship_annotation.source_type,
-                                    )?);
-                                } else {
-                                    Err(error::Error::InternalMissingTargetModelSourceForRelationship {
-                                        relationship_name: relationship_annotation.relationship_name.clone(),
-                                        type_name: relationship_annotation.source_type.clone(),
-                                    })?;
-                                };
+                                order_by = Some(build_ndc_order_by(
+                                    argument,
+                                    &session.variables,
+                                    usage_counts,
+                                    &target_source.type_mappings,
+                                    source_data_connector,
+                                    &relationship_annotation.source_type,
+                                )?);
                             }
                             _ => {
                                 return Err(error::InternalEngineError::UnexpectedAnnotation {
@@ -237,15 +290,13 @@ pub fn generate_model_relationship_ir<'s>(
                     InputAnnotation::BooleanExpression(
                         BooleanExpressionAnnotation::BooleanExpressionRootField,
                     ) => {
-                        if let Some(model_source) = &relationship_annotation.target_source {
-                            where_clause = Some(filter::resolve_filter_expression(
-                                argument.value.as_object()?,
-                                &model_source.model.data_connector,
-                                &model_source.model.type_mappings,
-                                session_variables,
-                                usage_counts,
-                            )?);
-                        }
+                        where_clause = Some(filter::resolve_filter_expression(
+                            argument.value.as_object()?,
+                            &target_source.data_connector,
+                            &target_source.type_mappings,
+                            &session.variables,
+                            usage_counts,
+                        )?);
                     }
 
                     _ => {
@@ -263,19 +314,6 @@ pub fn generate_model_relationship_ir<'s>(
             }
         }
     }
-    let target_source =
-        relationship_annotation
-            .target_source
-            .as_ref()
-            .ok_or_else(|| match &field.selection_set.type_name {
-                Some(type_name) => {
-                    error::Error::from(error::InternalDeveloperError::NoSourceDataConnector {
-                        type_name: type_name.clone(),
-                        field_name: field_call.name.clone(),
-                    })
-                }
-                None => error::Error::from(normalized_ast::Error::NoTypenameFound),
-            })?;
 
     let query_filter = filter::QueryFilter {
         where_clause,
@@ -285,14 +323,17 @@ pub fn generate_model_relationship_ir<'s>(
     let selection_ir = model_selection_ir(
         &field.selection_set,
         &relationship_annotation.target_type,
-        &target_source.model,
+        target_source,
         BTreeMap::new(),
         query_filter,
         permissions::get_select_filter_predicate(&field_call.info)?,
         limit,
         offset,
         order_by,
-        session_variables,
+        models,
+        commands,
+        object_types,
+        session,
         request_headers,
         usage_counts,
     )?;
@@ -300,8 +341,8 @@ pub fn generate_model_relationship_ir<'s>(
     match metadata_resolve::relationship_execution_category(
         relationship_field_nestedness,
         source_data_connector,
-        &target_source.model.data_connector,
-        &target_source.capabilities,
+        &target_source.data_connector,
+        target_capabilities,
     ) {
         metadata_resolve::RelationshipExecutionCategory::Local => {
             Ok(build_local_model_relationship(
@@ -334,33 +375,55 @@ pub fn generate_model_aggregate_relationship_ir<'s>(
     relationship_field_nestedness: metadata_resolve::FieldNestedness,
     source_data_connector: &'s metadata_resolve::DataConnectorLink,
     source_type_mappings: &'s BTreeMap<Qualified<CustomTypeName>, metadata_resolve::TypeMapping>,
-    session_variables: &SessionVariables,
+    models: &'s IndexMap<
+        Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<FieldSelection<'s>, error::Error> {
     let field_call = field.field_call()?;
 
-    let target_source =
-        relationship_annotation
-            .target_source
-            .as_ref()
-            .ok_or_else(|| match &field.selection_set.type_name {
-                Some(type_name) => {
-                    error::Error::from(error::InternalDeveloperError::NoSourceDataConnector {
-                        type_name: type_name.clone(),
-                        field_name: field_call.name.clone(),
-                    })
-                }
-                None => error::Error::from(normalized_ast::Error::NoTypenameFound),
-            })?;
+    let model = models
+        .get(&relationship_annotation.model_name)
+        .ok_or_else(|| {
+            error::InternalError::Developer(
+                error::InternalDeveloperError::TargetModelNotFoundForRelationship {
+                    model_name: relationship_annotation.model_name.clone(),
+                    relationship_name: relationship_annotation.relationship_name.clone(),
+                },
+            )
+        })?;
+
+    let (target_source, target_capabilities) = model
+        .model
+        .source
+        .as_deref()
+        .zip(relationship_annotation.target_capabilities.as_ref())
+        .ok_or_else(|| match &field.selection_set.type_name {
+            Some(type_name) => {
+                error::Error::from(error::InternalDeveloperError::NoSourceDataConnector {
+                    type_name: type_name.clone(),
+                    field_name: field_call.name.clone(),
+                })
+            }
+            None => error::Error::from(normalized_ast::Error::NoTypenameFound),
+        })?;
 
     let selection_ir = model_selection::generate_aggregate_model_selection_ir(
         field,
         field_call,
         &relationship_annotation.target_type,
-        &target_source.model,
+        model,
+        target_source,
         &relationship_annotation.model_name,
-        session_variables,
+        object_types,
+        session,
         request_headers,
         usage_counts,
     )?;
@@ -368,8 +431,8 @@ pub fn generate_model_aggregate_relationship_ir<'s>(
     match metadata_resolve::relationship_execution_category(
         relationship_field_nestedness,
         source_data_connector,
-        &target_source.model.data_connector,
-        &target_source.capabilities,
+        &target_source.data_connector,
+        target_capabilities,
     ) {
         metadata_resolve::RelationshipExecutionCategory::Local => {
             Ok(build_local_model_relationship(
@@ -402,14 +465,35 @@ pub fn generate_command_relationship_ir<'s>(
     relationship_field_nestedness: metadata_resolve::FieldNestedness,
     source_data_connector: &'s metadata_resolve::DataConnectorLink,
     type_mappings: &'s BTreeMap<Qualified<CustomTypeName>, metadata_resolve::TypeMapping>,
-    session_variables: &SessionVariables,
+    models: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    commands: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::commands::CommandName>,
+        metadata_resolve::CommandWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        metadata_resolve::Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<FieldSelection<'s>, error::Error> {
     count_command(&annotation.command_name, usage_counts);
     let field_call = field.field_call()?;
 
-    let target_source =
+    let target_command = commands.get(&annotation.command_name).ok_or_else(|| {
+        error::InternalError::Developer(
+            error::InternalDeveloperError::TargetCommandNotFoundForRelationship {
+                command_name: annotation.command_name.clone(),
+                relationship_name: annotation.relationship_name.clone(),
+            },
+        )
+    })?;
+
+    let target =
         annotation
             .target_source
             .as_ref()
@@ -423,19 +507,36 @@ pub fn generate_command_relationship_ir<'s>(
                 None => error::Error::from(normalized_ast::Error::NoTypenameFound),
             })?;
 
+    let target_source = target_command.command.source.as_deref().ok_or_else(|| {
+        match &field.selection_set.type_name {
+            Some(type_name) => {
+                error::Error::from(error::InternalDeveloperError::NoSourceDataConnector {
+                    type_name: type_name.clone(),
+                    field_name: field_call.name.clone(),
+                })
+            }
+            None => error::Error::from(normalized_ast::Error::NoTypenameFound),
+        }
+    })?;
+
     match metadata_resolve::relationship_execution_category(
         relationship_field_nestedness,
         source_data_connector,
-        &target_source.details.data_connector,
-        &target_source.capabilities,
+        &target_source.data_connector,
+        &target.capabilities,
     ) {
         metadata_resolve::RelationshipExecutionCategory::Local => build_local_command_relationship(
             field,
             field_call,
             annotation,
             type_mappings,
+            target_command,
+            &target.function_name,
             target_source,
-            session_variables,
+            models,
+            commands,
+            object_types,
+            session,
             request_headers,
             usage_counts,
         ),
@@ -445,8 +546,13 @@ pub fn generate_command_relationship_ir<'s>(
                 field_call,
                 annotation,
                 type_mappings,
+                target_command,
+                &target.function_name,
                 target_source,
-                session_variables,
+                models,
+                commands,
+                object_types,
+                session,
                 request_headers,
                 usage_counts,
             )
@@ -462,7 +568,7 @@ pub fn build_local_model_relationship<'s>(
     source_data_connector: &'s metadata_resolve::DataConnectorLink,
     source_type_mappings: &'s BTreeMap<Qualified<CustomTypeName>, metadata_resolve::TypeMapping>,
     target_type: &'s Qualified<CustomTypeName>,
-    target_source: &'s metadata_resolve::ModelTargetSource,
+    target_source: &'s metadata_resolve::ModelSource,
     target_mappings: &'s Vec<RelationshipModelMapping>,
 ) -> FieldSelection<'s> {
     let rel_info = LocalModelRelationshipInfo {
@@ -488,20 +594,38 @@ pub fn build_local_command_relationship<'s>(
     field_call: &normalized_ast::FieldCall<'s, GDS>,
     annotation: &'s CommandRelationshipAnnotation,
     type_mappings: &'s BTreeMap<Qualified<CustomTypeName>, metadata_resolve::TypeMapping>,
-    target_source: &'s CommandTargetSource,
-    session_variables: &SessionVariables,
+    target_command: &'s metadata_resolve::CommandWithPermissions,
+    target_function_name: &'s FunctionName,
+    target_source: &'s CommandSource,
+    models: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    commands: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::commands::CommandName>,
+        metadata_resolve::CommandWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        metadata_resolve::Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<FieldSelection<'s>, error::Error> {
     let relationships_ir = generate_function_based_command(
         &annotation.command_name,
-        &target_source.function_name,
+        target_function_name,
         field,
         field_call,
         &annotation.target_type,
         annotation.target_base_type_kind,
-        &target_source.details,
-        session_variables,
+        target_command,
+        target_source,
+        models,
+        commands,
+        object_types,
+        session,
         request_headers,
         usage_counts,
     )?;
@@ -511,8 +635,8 @@ pub fn build_local_command_relationship<'s>(
         source_type: &annotation.source_type,
         source_type_mappings: type_mappings,
         command_name: &annotation.command_name,
-        argument_mappings: &target_source.details.argument_mappings,
-        function_name: &target_source.function_name,
+        argument_mappings: &target_source.argument_mappings,
+        function_name: target_function_name,
         mappings: &annotation.mappings,
     };
 
@@ -601,8 +725,22 @@ pub fn build_remote_command_relationship<'n, 's>(
     field_call: &'n normalized_ast::FieldCall<'s, GDS>,
     annotation: &'s CommandRelationshipAnnotation,
     type_mappings: &'s BTreeMap<Qualified<CustomTypeName>, metadata_resolve::TypeMapping>,
-    target_source: &'s CommandTargetSource,
-    session_variables: &SessionVariables,
+    target_command: &'s metadata_resolve::CommandWithPermissions,
+    target_function_name: &'s FunctionName,
+    target_source: &'s CommandSource,
+    models: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    commands: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::commands::CommandName>,
+        metadata_resolve::CommandWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        metadata_resolve::Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<FieldSelection<'s>, error::Error> {
@@ -627,13 +765,17 @@ pub fn build_remote_command_relationship<'n, 's>(
     }
     let mut remote_relationships_ir = generate_function_based_command(
         &annotation.command_name,
-        &target_source.function_name,
+        target_function_name,
         field,
         field_call,
         &annotation.target_type,
         annotation.target_base_type_kind,
-        &target_source.details,
-        session_variables,
+        target_command,
+        target_source,
+        models,
+        commands,
+        object_types,
+        session,
         request_headers,
         usage_counts,
     )?;
@@ -643,7 +785,6 @@ pub fn build_remote_command_relationship<'n, 's>(
     for (_source, target_argument_name) in &join_mapping {
         let target_value_variable = format!("${target_argument_name}");
         let ndc_argument_name = target_source
-            .details
             .argument_mappings
             .get(target_argument_name)
             .ok_or_else(|| {

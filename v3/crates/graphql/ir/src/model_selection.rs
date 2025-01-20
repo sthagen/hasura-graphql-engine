@@ -5,7 +5,7 @@ use graphql_schema::GDS;
 use graphql_schema::{
     Annotation, BooleanExpressionAnnotation, InputAnnotation, ModelInputAnnotation,
 };
-use hasura_authn_core::SessionVariables;
+use hasura_authn_core::{Session, SessionVariables};
 use indexmap::IndexMap;
 use lang_graphql::ast::common as ast;
 use lang_graphql::normalized_ast;
@@ -17,7 +17,7 @@ use open_dds::{
     types::{CustomTypeName, DataConnectorArgumentName},
 };
 use plan::UnresolvedArgument;
-use plan::{count_model, process_argument_presets};
+use plan::{count_model, process_argument_presets_for_model};
 use plan_types::{Expression, UsagesCounts};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -71,12 +71,17 @@ struct FilterInputArguments<'s> {
 pub fn model_selection_open_dd_ir(
     selection_set: &normalized_ast::SelectionSet<'_, GDS>,
     model_name: &Qualified<ModelName>,
+    models: &IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
     type_mappings: &BTreeMap<
         metadata_resolve::Qualified<CustomTypeName>,
         metadata_resolve::TypeMapping,
     >,
     model_arguments: Option<IndexMap<open_dds::query::ArgumentName, open_dds::query::Value>>,
     where_clause: Option<open_dds::query::BooleanExpression>,
+    order_by: Vec<open_dds::query::OrderByElement>,
     limit: Option<u32>,
     offset: Option<u32>,
     session_variables: &SessionVariables,
@@ -86,6 +91,7 @@ pub fn model_selection_open_dd_ir(
     let selection = selection_set::generate_selection_set_open_dd_ir(
         selection_set,
         metadata_resolve::FieldNestedness::NotNested,
+        models,
         type_mappings,
         session_variables,
         request_headers,
@@ -106,12 +112,6 @@ pub fn model_selection_open_dd_ir(
 
     // TODO: append select permissions etc
     let filter = where_clause;
-
-    // MADE UP EMPTY VALUES TO GET THINGS STARTED
-    // TODO: these will be replaced with correct values as we go
-    let order_by = vec![];
-
-    // END OF MADE UP VALUES
 
     let target = open_dds::query::ModelTarget {
         subgraph: model_name.subgraph.clone(),
@@ -135,6 +135,7 @@ pub fn model_aggregate_selection_open_dd_ir<'s>(
     model_name: &Qualified<ModelName>,
     model_arguments: Option<IndexMap<open_dds::query::ArgumentName, open_dds::query::Value>>,
     where_clause: Option<open_dds::query::BooleanExpression>,
+    order_by: Vec<open_dds::query::OrderByElement>,
     limit: Option<u32>,
     offset: Option<u32>,
     usage_counts: &mut UsagesCounts,
@@ -157,12 +158,6 @@ pub fn model_aggregate_selection_open_dd_ir<'s>(
 
     // TODO: append select permissions etc
     let filter = where_clause;
-
-    // MADE UP EMPTY VALUES TO GET THINGS STARTED
-    // TODO: these will be replaced with correct values as we go
-    let order_by = vec![];
-
-    // END OF MADE UP VALUES
 
     let target = open_dds::query::ModelTarget {
         subgraph: model_name.subgraph.clone(),
@@ -189,7 +184,19 @@ pub fn model_selection_ir<'s>(
     limit: Option<u32>,
     offset: Option<u32>,
     order_by: Option<order_by::OrderBy<'s>>,
-    session_variables: &SessionVariables,
+    models: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::models::ModelName>,
+        metadata_resolve::ModelWithPermissions,
+    >,
+    commands: &'s IndexMap<
+        metadata_resolve::Qualified<open_dds::commands::CommandName>,
+        metadata_resolve::CommandWithPermissions,
+    >,
+    object_types: &'s BTreeMap<
+        metadata_resolve::Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<ModelSelection<'s>, error::Error> {
@@ -197,7 +204,7 @@ pub fn model_selection_ir<'s>(
         &model_source.data_connector,
         &model_source.type_mappings,
         permissions_predicate,
-        session_variables,
+        &session.variables,
         usage_counts,
     )?;
 
@@ -214,7 +221,10 @@ pub fn model_selection_ir<'s>(
         &model_source.data_connector,
         &model_source.type_mappings,
         field_mappings,
-        session_variables,
+        models,
+        commands,
+        object_types,
+        session,
         request_headers,
         usage_counts,
     )?;
@@ -236,9 +246,14 @@ pub fn generate_aggregate_model_selection_ir<'s>(
     field: &normalized_ast::Field<'s, GDS>,
     field_call: &normalized_ast::FieldCall<'s, GDS>,
     data_type: &Qualified<open_dds::types::CustomTypeName>,
+    model: &'s metadata_resolve::ModelWithPermissions,
     model_source: &'s metadata_resolve::ModelSource,
     model_name: &Qualified<open_dds::models::ModelName>,
-    session_variables: &SessionVariables,
+    object_types: &'s BTreeMap<
+        Qualified<open_dds::types::CustomTypeName>,
+        metadata_resolve::ObjectTypeWithRelationships,
+    >,
+    session: &Session,
     request_headers: &reqwest::header::HeaderMap,
     usage_counts: &mut UsagesCounts,
 ) -> Result<ModelSelection<'s>, error::Error> {
@@ -248,21 +263,16 @@ pub fn generate_aggregate_model_selection_ir<'s>(
         field_call,
         model_source,
         data_type,
-        session_variables,
+        &session.variables,
         usage_counts,
     )?;
 
-    let model_argument_presets =
-        permissions::get_argument_presets(field_call.info.namespaced.as_ref())?;
-
-    arguments.model_arguments = process_argument_presets(
-        &model_source.data_connector,
-        &model_source.type_mappings,
-        model_argument_presets,
-        &model_source.data_connector_link_argument_presets,
-        session_variables,
-        request_headers,
+    arguments.model_arguments = process_argument_presets_for_model(
         arguments.model_arguments,
+        model,
+        object_types,
+        session,
+        request_headers,
         usage_counts,
     )?;
 
@@ -281,7 +291,7 @@ pub fn generate_aggregate_model_selection_ir<'s>(
         arguments.filter_input_arguments.limit,
         arguments.filter_input_arguments.offset,
         arguments.filter_input_arguments.order_by,
-        session_variables,
+        &session.variables,
         // Get all the models/commands that were used as relationships
         usage_counts,
     )
