@@ -135,7 +135,7 @@ fn test_local_relationships_model_to_command() -> anyhow::Result<()> {
                 vec!["execute/common_metadata/custom_connector_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -154,7 +154,7 @@ fn test_local_relationships_command_to_command() -> anyhow::Result<()> {
                 vec!["execute/common_metadata/custom_connector_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -173,7 +173,7 @@ fn test_local_mutually_recursive_relationships_to_command() -> anyhow::Result<()
                 vec!["execute/common_metadata/custom_connector_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -296,7 +296,7 @@ fn test_remote_relationships_model_to_model_array_aggregate() -> anyhow::Result<
     common::test_execution_expectation(
         test_path_string,
         &[common_metadata_path_string],
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
