@@ -352,6 +352,10 @@ impl OrderByElement {
 #[serde(rename_all = "camelCase")]
 /// An aggregate function to execute.
 pub enum AggregationFunction {
+    Sum,
+    Min,
+    Max,
+    Average,
     Count {},
     CountDistinct {},
     Custom {
@@ -425,8 +429,8 @@ pub struct RelationshipOperand {
 /// Operand targeting a metric aggregated over related values of an OpenDD object.
 pub struct RelationshipAggregateOperand {
     #[serde(flatten)]
-    target: Box<RelationshipTarget>,
-    aggregate: Box<Aggregate>,
+    pub target: Box<RelationshipTarget>,
+    pub aggregate: Box<Aggregate>,
 }
 
 #[cfg(test)]
