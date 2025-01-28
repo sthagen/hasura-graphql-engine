@@ -3708,6 +3708,10 @@
         "disallow_duplicate_aggregate_function_definitions_for_scalar_type": {
           "default": false,
           "type": "boolean"
+        },
+        "typecheck_object_type_values_in_presets": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -6395,6 +6399,19 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "title": "ValueFromEnv",
+          "type": "object",
+          "required": [
+            "valueFromEnv"
+          ],
+          "properties": {
+            "valueFromEnv": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -6436,6 +6453,19 @@
           "properties": {
             "booleanExpression": {
               "$ref": "#/definitions/ModelPredicate"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "ValueFromEnv",
+          "type": "object",
+          "required": [
+            "valueFromEnv"
+          ],
+          "properties": {
+            "valueFromEnv": {
+              "type": "string"
             }
           },
           "additionalProperties": false
