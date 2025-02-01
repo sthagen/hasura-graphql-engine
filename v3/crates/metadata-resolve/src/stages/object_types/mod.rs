@@ -2,8 +2,9 @@ mod error;
 pub mod types;
 
 pub use error::{ObjectTypesError, TypeMappingValidationError};
-use open_dds::aggregates::DataConnectorAggregationFunctionName;
-use open_dds::identifier::SubgraphName;
+use open_dds::aggregates::{
+    DataConnectorAggregationFunctionName, DataConnectorExtractionFunctionName,
+};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
@@ -13,15 +14,18 @@ use open_dds::{
     types::CustomTypeName,
 };
 pub use types::{
-    AggregateFunctions, ComparisonOperators, DataConnectorTypeMappingsForObject, FieldArgumentInfo,
-    FieldDefinition, FieldMapping, ObjectTypeRepresentation, ObjectTypeWithTypeMappings,
-    ObjectTypesIssue, ObjectTypesOutput, ObjectTypesWithTypeMappings,
-    ResolvedApolloFederationObjectKey, ResolvedObjectApolloFederationConfig, TypeMapping,
+    AggregateFunctions, ComparisonOperators, DataConnectorTypeMappingsForObject,
+    ExtractionFunctions, FieldArgumentInfo, FieldDefinition, FieldMapping,
+    ObjectTypeRepresentation, ObjectTypeWithTypeMappings, ObjectTypesIssue, ObjectTypesOutput,
+    ObjectTypesWithTypeMappings, ResolvedApolloFederationObjectKey,
+    ResolvedObjectApolloFederationConfig, TypeMapping,
 };
 
 use crate::helpers::ndc_validation::get_underlying_named_type;
-use crate::helpers::types::{mk_name, unwrap_qualified_type_name};
-use crate::stages::{apollo, data_connector_scalar_types, data_connectors, graphql_config};
+use crate::helpers::types::{mk_name, unwrap_custom_type_name, unwrap_qualified_type_name};
+use crate::stages::{
+    apollo, data_connector_scalar_types, data_connectors, graphql_config, scalar_types,
+};
 
 use crate::types::subgraph::{mk_qualified_type_name, mk_qualified_type_reference, Qualified};
 
@@ -36,6 +40,7 @@ pub(crate) fn resolve(
         Qualified<DataConnectorName>,
         data_connector_scalar_types::DataConnectorScalars,
     >,
+    scalar_types: &BTreeMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
     graphql_types: &mut graphql_config::GraphqlTypeNames,
 ) -> Result<ObjectTypesOutput, ObjectTypesError> {
     let mut object_types = BTreeMap::new();
@@ -43,6 +48,7 @@ pub(crate) fn resolve(
     let mut apollo_federation_entity_enabled_types = BTreeMap::new();
     let mut issues = Vec::new();
 
+    let mut raw_object_types = BTreeMap::new();
     for open_dds::accessor::QualifiedObject {
         path: _,
         subgraph,
@@ -51,14 +57,19 @@ pub(crate) fn resolve(
     {
         let qualified_object_type_name =
             Qualified::new(subgraph.clone(), object_type_definition.name.clone());
+        raw_object_types.insert(qualified_object_type_name, object_type_definition);
+    }
 
+    for (qualified_object_type_name, object_type_definition) in &raw_object_types {
         let resolved_object_type = resolve_object_type(
             object_type_definition,
+            qualified_object_type_name,
+            &raw_object_types,
+            scalar_types,
             graphql_types,
-            &qualified_object_type_name,
-            subgraph,
             &mut global_id_enabled_types,
             &mut apollo_federation_entity_enabled_types,
+            &mut issues,
         )?;
 
         let mut type_mappings = DataConnectorTypeMappingsForObject::new();
@@ -66,13 +77,12 @@ pub(crate) fn resolve(
         // resolve object types' type mappings
         for dc_type_mapping in &object_type_definition.data_connector_type_mapping {
             let qualified_data_connector_name = Qualified::new(
-                subgraph.clone(),
+                qualified_object_type_name.subgraph.clone(),
                 dc_type_mapping.data_connector_name.clone(),
             );
             let (type_mapping, new_issues) = resolve_data_connector_type_mapping(
                 dc_type_mapping,
-                &qualified_object_type_name,
-                subgraph,
+                qualified_object_type_name,
                 &resolved_object_type,
                 data_connectors,
                 data_connector_scalar_types,
@@ -106,7 +116,7 @@ pub(crate) fn resolve(
             .is_some()
         {
             return Err(ObjectTypesError::DuplicateTypeDefinition {
-                name: qualified_object_type_name,
+                name: qualified_object_type_name.clone(),
             });
         }
     }
@@ -121,13 +131,34 @@ pub(crate) fn resolve(
 
 fn resolve_field(
     field: &open_dds::types::FieldDefinition,
-    subgraph: &SubgraphName,
     qualified_type_name: &Qualified<CustomTypeName>,
+    raw_object_types: &BTreeMap<Qualified<CustomTypeName>, &open_dds::types::ObjectTypeV1>,
+    scalar_types: &BTreeMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
+    issues: &mut Vec<ObjectTypesIssue>,
 ) -> Result<FieldDefinition, ObjectTypesError> {
+    let qualified_type_reference =
+        mk_qualified_type_reference(&field.field_type, &qualified_type_name.subgraph);
+
+    // let's check that any object or scalar types used in this field exist
+    if let Some(custom_type_name) = unwrap_custom_type_name(&qualified_type_reference) {
+        if raw_object_types.get(custom_type_name).is_none()
+            && scalar_types.get(custom_type_name).is_none()
+        {
+            issues.push(ObjectTypesIssue::FieldTypeNotFound {
+                field_name: field.name.clone(),
+                object_type_name: qualified_type_name.clone(),
+                field_type: custom_type_name.clone(),
+            });
+        }
+    }
+
     let mut field_arguments = IndexMap::new();
     for argument in &field.arguments {
         let field_argument_definition = FieldArgumentInfo {
-            argument_type: mk_qualified_type_reference(&argument.argument_type, subgraph),
+            argument_type: mk_qualified_type_reference(
+                &argument.argument_type,
+                &qualified_type_name.subgraph,
+            ),
             description: argument.description.clone(),
         };
         if field_arguments
@@ -142,7 +173,7 @@ fn resolve_field(
         }
     }
     Ok(FieldDefinition {
-        field_type: mk_qualified_type_reference(&field.field_type, subgraph),
+        field_type: qualified_type_reference,
         description: field.description.clone(),
         deprecated: field.deprecated.clone(),
         field_arguments,
@@ -151,9 +182,10 @@ fn resolve_field(
 
 pub fn resolve_object_type(
     object_type_definition: &open_dds::types::ObjectTypeV1,
-    graphql_types: &mut graphql_config::GraphqlTypeNames,
     qualified_type_name: &Qualified<CustomTypeName>,
-    subgraph: &SubgraphName,
+    raw_object_types: &BTreeMap<Qualified<CustomTypeName>, &open_dds::types::ObjectTypeV1>,
+    scalar_types: &BTreeMap<Qualified<CustomTypeName>, scalar_types::ScalarTypeRepresentation>,
+    graphql_types: &mut graphql_config::GraphqlTypeNames,
     global_id_enabled_types: &mut BTreeMap<
         Qualified<CustomTypeName>,
         Vec<Qualified<open_dds::models::ModelName>>,
@@ -162,6 +194,7 @@ pub fn resolve_object_type(
         Qualified<CustomTypeName>,
         Option<Qualified<open_dds::models::ModelName>>,
     >,
+    issues: &mut Vec<ObjectTypesIssue>,
 ) -> Result<ObjectTypeRepresentation, ObjectTypesError> {
     let mut resolved_fields = IndexMap::new();
     let mut resolved_global_id_fields = Vec::new();
@@ -170,7 +203,13 @@ pub fn resolve_object_type(
         if resolved_fields
             .insert(
                 field.name.clone(),
-                resolve_field(field, subgraph, qualified_type_name)?,
+                resolve_field(
+                    field,
+                    qualified_type_name,
+                    raw_object_types,
+                    scalar_types,
+                    issues,
+                )?,
             )
             .is_some()
         {
@@ -180,6 +219,7 @@ pub fn resolve_object_type(
             });
         }
     }
+
     if let Some(global_id_fields) = &object_type_definition.global_id_fields {
         if !global_id_fields.is_empty() {
             // Throw error if the object type has a field called id" and has global fields configured.
@@ -292,7 +332,6 @@ pub fn resolve_object_type(
 pub fn resolve_data_connector_type_mapping(
     data_connector_type_mapping: &open_dds::types::DataConnectorTypeMapping,
     qualified_type_name: &Qualified<CustomTypeName>,
-    subgraph: &SubgraphName,
     type_representation: &ObjectTypeRepresentation,
     data_connectors: &data_connectors::DataConnectors,
     data_connector_scalar_types: &BTreeMap<
@@ -302,7 +341,7 @@ pub fn resolve_data_connector_type_mapping(
 ) -> Result<(TypeMapping, Vec<ObjectTypesIssue>), TypeMappingValidationError> {
     let mut issues = Vec::new();
     let qualified_data_connector_name = Qualified::new(
-        subgraph.clone(),
+        qualified_type_name.subgraph.clone(),
         data_connector_type_mapping.data_connector_name.clone(),
     );
 
@@ -379,8 +418,10 @@ pub fn resolve_data_connector_type_mapping(
             .get(underlying_column_type.as_str())
             .and_then(|scalar_type| scalar_type.representation.as_ref())
         {
-            let ndc_field_type =
-                mk_qualified_type_name(data_connector_scalar_representation, subgraph);
+            let ndc_field_type = mk_qualified_type_name(
+                data_connector_scalar_representation,
+                &qualified_type_name.subgraph,
+            );
             let opendd_field_type = unwrap_qualified_type_name(&field_definition.field_type);
 
             if ndc_field_type != *opendd_field_type {
@@ -414,12 +455,21 @@ pub fn resolve_data_connector_type_mapping(
             c
         });
 
+        let extraction_functions = scalar_type.map(|ty| {
+            let (c, new_issues) =
+                make_extraction_functions(&scalar_type_name, ty, &qualified_data_connector_name);
+
+            issues.extend(new_issues);
+            c
+        });
+
         let resolved_field_mapping = FieldMapping {
             column: resolved_field_mapping_column.into_owned(),
             column_type: source_column.r#type.clone(),
             column_type_representation,
             comparison_operators,
             aggregate_functions,
+            extraction_functions,
             argument_mappings: resolved_argument_mappings.0,
         };
 
@@ -705,6 +755,183 @@ pub(crate) fn make_aggregate_functions(
     }
 
     (aggregate_functions, issues)
+}
+
+fn make_extraction_functions(
+    scalar_type_name: &ndc_models::ScalarTypeName,
+    scalar_type: &ndc_models::ScalarType,
+    data_connector_name: &Qualified<DataConnectorName>,
+) -> (ExtractionFunctions, Vec<ObjectTypesIssue>) {
+    let mut extraction_functions = ExtractionFunctions::default();
+    let mut issues = Vec::new();
+
+    for (function_name, definition) in &scalar_type.extraction_functions {
+        match definition {
+            ndc_models::ExtractionFunctionDefinition::Year { result_type: _ } => {
+                if extraction_functions.year_function.is_none() {
+                    extraction_functions.year_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateExtractionFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "year".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Month { result_type: _ } => {
+                if extraction_functions.month_function.is_none() {
+                    extraction_functions.month_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "month".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Day { result_type: _ } => {
+                if extraction_functions.day_function.is_none() {
+                    extraction_functions.day_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "day".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Nanosecond { result_type: _ } => {
+                if extraction_functions.nanosecond_function.is_none() {
+                    extraction_functions.nanosecond_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "nanosecond".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Microsecond { result_type: _ } => {
+                if extraction_functions.microsecond_function.is_none() {
+                    extraction_functions.microsecond_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "microsecond".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Second { result_type: _ } => {
+                if extraction_functions.second_function.is_none() {
+                    extraction_functions.second_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "second".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Minute { result_type: _ } => {
+                if extraction_functions.minute_function.is_none() {
+                    extraction_functions.minute_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "minute".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Hour { result_type: _ } => {
+                if extraction_functions.hour_function.is_none() {
+                    extraction_functions.hour_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "hour".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Week { result_type: _ } => {
+                if extraction_functions.week_function.is_none() {
+                    extraction_functions.week_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "week".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Quarter { result_type: _ } => {
+                if extraction_functions.quarter_function.is_none() {
+                    extraction_functions.quarter_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "quarter".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::DayOfWeek { result_type: _ } => {
+                if extraction_functions.day_of_week_function.is_none() {
+                    extraction_functions.day_of_week_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "day_of_week".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::DayOfYear { result_type: _ } => {
+                if extraction_functions.day_of_year_function.is_none() {
+                    extraction_functions.day_of_year_function = Some(
+                        DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                    );
+                } else {
+                    issues.push(ObjectTypesIssue::DuplicateAggregateFunctionsDefined {
+                        scalar_type: scalar_type_name.clone(),
+                        function_name: "day_of_year".to_string(),
+                        data_connector_name: data_connector_name.clone(),
+                    });
+                }
+            }
+            ndc_models::ExtractionFunctionDefinition::Custom { result_type: _ } => {
+                extraction_functions.other_functions.push(
+                    DataConnectorExtractionFunctionName::new(function_name.inner().clone()),
+                );
+            }
+        }
+    }
+
+    (extraction_functions, issues)
 }
 
 fn get_column<'a>(
