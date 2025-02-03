@@ -6,9 +6,22 @@
 
 - Added type checking for object-type values in field presets within type
   permissions and for argument presets in model or command permissions.
-- Allow environment variables to be used in permission filters.
 
 ### Fixed
+
+### Changed
+
+## [v2025.02.03]
+
+### Added
+
+- Allow environment variables to be used in permission filters.
+- Added a OpenDD flag (`disallow_order_by_fields_with_field_arguments`) to
+  disallow fields with field arguments in order by expressions
+
+### Fixed
+
+- Reduce errors for unnecessary GraphQL configuration in aggregates to warnings
 
 - The `args` field for a model is now optional if all arguments are nullable or
   preset.
@@ -1077,7 +1090,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.01.24...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.02.03...HEAD
+[v2025.02.03]: https://github.com/hasura/v3-engine/releases/tag/v2025.02.03
 [v2025.01.24]: https://github.com/hasura/v3-engine/releases/tag/v2025.01.24
 [v2025.01.17]: https://github.com/hasura/v3-engine/releases/tag/v2025.01.17
 [v2025.01.09]: https://github.com/hasura/v3-engine/releases/tag/v2025.01.09
