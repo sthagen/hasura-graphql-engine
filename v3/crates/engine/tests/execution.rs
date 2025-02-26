@@ -901,7 +901,7 @@ fn test_model_select_many_where_object_boolean_array_relationship_nested() -> an
                 vec!["execute/common_metadata/postgres_connector_ndc_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -983,7 +983,7 @@ fn test_model_select_many_where_array_relationship_nested() -> anyhow::Result<()
                 vec!["execute/common_metadata/postgres_connector_ndc_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -1065,7 +1065,7 @@ fn test_model_select_many_where_remote_array_relationship_nested() -> anyhow::Re
                 vec!["execute/models/select_many/where/remote_relationships/boolean_expression_type/pg_connector_ndc_v02.json", "execute/common_metadata/postgres_connector_ndc_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -1125,7 +1125,7 @@ fn test_model_select_many_where_remote_object_relationship_simple_across_subgrap
                 vec!["execute/common_metadata/postgres_connector_ndc_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -1161,7 +1161,7 @@ fn test_model_select_many_where_no_capability_array_relationship_nested() -> any
             common_metadata_path_string,
             test_common_metadata_path_string,
         ],
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -1215,7 +1215,7 @@ fn test_model_select_many_where_nested_relationships() -> anyhow::Result<()> {
                 vec!["execute/common_metadata/custom_connector_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -1235,7 +1235,7 @@ fn test_model_select_many_where_nested_remote_relationships() -> anyhow::Result<
                 vec!["execute/common_metadata/custom_connector_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -1255,7 +1255,7 @@ fn test_model_select_many_where_nested_relationships_different_names() -> anyhow
                 vec!["execute/common_metadata/custom_connector_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -2949,7 +2949,7 @@ fn test_command_query_forwarded_headers() -> anyhow::Result<()> {
                 vec!["execute/common_metadata/custom_connector_v02_schema.json"],
             ),
         ]),
-        common::TestOpenDDPipeline::Skip,
+        common::TestOpenDDPipeline::YesPlease,
     )
 }
 
@@ -2997,87 +2997,6 @@ fn test_session_variables_json_enabled_integer_session_variable() -> anyhow::Res
 fn test_session_variables_json_disabled_integer_session_variable() -> anyhow::Result<()> {
     common::test_execution_expectation_for_multiple_ndc_versions(
         "execute/session_variables/json_disabled/integer_session_variable",
-        &[],
-        BTreeMap::from([
-            (
-                NdcVersion::V01,
-                vec!["execute/common_metadata/postgres_connector_ndc_v01_schema.json"],
-            ),
-            (
-                NdcVersion::V02,
-                vec!["execute/common_metadata/postgres_connector_ndc_v02_schema.json"],
-            ),
-        ]),
-        common::TestOpenDDPipeline::YesPlease,
-    )
-}
-
-// Test of non-null query variables
-#[test]
-fn test_variables_non_null_type_omit_variable() -> anyhow::Result<()> {
-    let test_path_string = "execute/variables/non_null_type_omit_variable";
-    common::test_execution_expectation_for_multiple_ndc_versions(
-        test_path_string,
-        &[],
-        BTreeMap::from([
-            (
-                NdcVersion::V01,
-                vec!["execute/common_metadata/postgres_connector_ndc_v01_schema.json"],
-            ),
-            (
-                NdcVersion::V02,
-                vec!["execute/common_metadata/postgres_connector_ndc_v02_schema.json"],
-            ),
-        ]),
-        common::TestOpenDDPipeline::YesPlease,
-    )
-}
-
-#[test]
-fn test_variables_non_null_type_null_variable() -> anyhow::Result<()> {
-    let test_path_string = "execute/variables/non_null_type_null_variable";
-    common::test_execution_expectation_for_multiple_ndc_versions(
-        test_path_string,
-        &[],
-        BTreeMap::from([
-            (
-                NdcVersion::V01,
-                vec!["execute/common_metadata/postgres_connector_ndc_v01_schema.json"],
-            ),
-            (
-                NdcVersion::V02,
-                vec!["execute/common_metadata/postgres_connector_ndc_v02_schema.json"],
-            ),
-        ]),
-        common::TestOpenDDPipeline::YesPlease,
-    )
-}
-
-#[test]
-fn test_variables_non_null_type_default_value() -> anyhow::Result<()> {
-    let test_path_string = "execute/variables/non_null_type_default_value";
-    common::test_execution_expectation_for_multiple_ndc_versions(
-        test_path_string,
-        &[],
-        BTreeMap::from([
-            (
-                NdcVersion::V01,
-                vec!["execute/common_metadata/postgres_connector_ndc_v01_schema.json"],
-            ),
-            (
-                NdcVersion::V02,
-                vec!["execute/common_metadata/postgres_connector_ndc_v02_schema.json"],
-            ),
-        ]),
-        common::TestOpenDDPipeline::YesPlease,
-    )
-}
-
-#[test]
-fn test_variables_non_null_type_default_value_null() -> anyhow::Result<()> {
-    let test_path_string = "execute/variables/non_null_type_default_value_null";
-    common::test_execution_expectation_for_multiple_ndc_versions(
-        test_path_string,
         &[],
         BTreeMap::from([
             (
