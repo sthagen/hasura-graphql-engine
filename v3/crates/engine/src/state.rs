@@ -14,16 +14,22 @@ pub fn print_warnings<T: Display>(warnings: Vec<T>) {
 }
 
 pub fn resolve_metadata(
-    raw_metadata: &str,
+    opendd_metadata_json: &str,
     raw_auth_config: &str,
     metadata_resolve_configuration: &metadata_resolve::configuration::Configuration,
 ) -> Result<(metadata_resolve::Metadata, hasura_authn::AuthConfig), anyhow::Error> {
+    // Metadata
+    let metadata = open_dds::Metadata::from_json_str(opendd_metadata_json)?;
+
     // Auth Config
-    let (auth_config, auth_warnings) =
+    let (auth_config, mut auth_warnings) =
         resolve_auth_config(raw_auth_config).map_err(StartupError::ReadAuth)?;
 
-    // Metadata
-    let metadata = open_dds::Metadata::from_json_str(raw_metadata)?;
+    auth_warnings = hasura_authn::auth_config_warnings_as_error_by_compatibility(
+        &open_dds::accessor::get_flags(&metadata),
+        auth_warnings,
+    )?;
+
     let (resolved_metadata, warnings) =
         metadata_resolve::resolve(metadata, metadata_resolve_configuration)?;
 
