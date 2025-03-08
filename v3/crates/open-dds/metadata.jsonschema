@@ -3754,6 +3754,10 @@
         "disallow_invalid_headers_in_auth_config": {
           "default": false,
           "type": "boolean"
+        },
+        "require_jwt_audience_validation_if_aud_claim_present": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -6540,6 +6544,31 @@
             },
             "capabilities": {
               "$ref": "https://raw.githubusercontent.com/hasura/ndc-spec/v0.1.6/ndc-models/tests/json_schema/capabilities_response.jsonschema"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "SchemaAndCapabilitiesV02",
+          "description": "Version 0.2 of schema and capabilities for a data connector.",
+          "type": "object",
+          "required": [
+            "capabilities",
+            "schema",
+            "version"
+          ],
+          "properties": {
+            "version": {
+              "type": "string",
+              "enum": [
+                "v0.2"
+              ]
+            },
+            "schema": {
+              "$ref": "https://raw.githubusercontent.com/hasura/ndc-spec/v0.2.0/ndc-models/tests/json_schema/schema_response.jsonschema"
+            },
+            "capabilities": {
+              "$ref": "https://raw.githubusercontent.com/hasura/ndc-spec/v0.2.0/ndc-models/tests/json_schema/capabilities_response.jsonschema"
             }
           },
           "additionalProperties": false

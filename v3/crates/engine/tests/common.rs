@@ -577,7 +577,6 @@ pub fn test_execute_explain(
 
         let configuration = metadata_resolve::configuration::Configuration {
             unstable_features: metadata_resolve::configuration::UnstableFeatures {
-                enable_ndc_v02_support: true,
                 ..Default::default()
             },
         };
@@ -644,7 +643,6 @@ pub(crate) fn test_metadata_resolve_configuration() -> metadata_resolve::configu
 {
     metadata_resolve::configuration::Configuration {
         unstable_features: metadata_resolve::configuration::UnstableFeatures {
-            enable_ndc_v02_support: true,
             ..Default::default()
         },
     }
@@ -693,13 +691,16 @@ async fn run_query_graphql_ws(
     use graphql_ws;
 
     // Dummy auth config. We never use it in the test. It is only used to create a dummy connection.
-    let dummy_auth_config = hasura_authn::AuthConfig::V1(hasura_authn::AuthConfigV1 {
-        allow_role_emulation_by: None,
-        mode: hasura_authn::AuthModeConfig::NoAuth(hasura_authn_noauth::NoAuthConfig {
-            role: Role::new("admin"),
-            session_variables: HashMap::new(),
+    let dummy_auth_config = hasura_authn::ResolvedAuthConfig {
+        auth_config: hasura_authn::AuthConfig::V1(hasura_authn::AuthConfigV1 {
+            allow_role_emulation_by: None,
+            mode: hasura_authn::AuthModeConfig::NoAuth(hasura_authn_noauth::NoAuthConfig {
+                role: Role::new("admin"),
+                session_variables: HashMap::new(),
+            }),
         }),
-    });
+        auth_config_flags: hasura_authn::AuthConfigFlags::default(),
+    };
 
     let context = graphql_ws::Context {
         request_pipeline,
