@@ -4,7 +4,12 @@
 
 ### Added
 
+- Add error contexts and paths to some argument errors for Models and Commands.
+
 ### Changed
+
+- Empty filter expressions are consistent between old and OpenDD execution
+  pipelines
 
 ### Fixed
 
@@ -247,8 +252,9 @@ definition:
 
 #### Other
 
+- Relationships that target models are now able to provide mappings that target
+  model arguments.
 - Pretty print errors where they have had contexts and paths provided
-- Add error contexts and paths to some argument errors for Models and Commands.
 
 ### Fixed
 
@@ -259,6 +265,7 @@ definition:
 - Validate `AuthConfig` headers to ensure they are valid HTTP headers.
 - GraphQL API: Fixed a bug where `null` inputs for nullable query parameters
   like `limit`, `offset`, `order_by` and `where` would cause an error.
+- Disallow relationships targeting procedure based commands.
 
 ### Changed
 
@@ -268,8 +275,6 @@ definition:
 
 - Added validation for command output types to ensure they reference valid types
   in the schema.
-- Relationships that target models are now able to provide mappings that target
-  model arguments.
 
 ### Fixed
 
