@@ -4,6 +4,14 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [v2025.03.11]
+
+### Added
+
 - Add error contexts and paths to some argument errors for Models and Commands.
 
 ### Changed
@@ -11,7 +19,7 @@
 - Empty filter expressions are consistent between old and OpenDD execution
   pipelines
 
-### Fixed
+- Fixed error responses from JSON:API by making it spec-compliant.
 
 ## [v2025.03.10]
 
@@ -1465,7 +1473,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.03.10...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.03.11...HEAD
+[v2025.03.11]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.11
 [v2025.03.10]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.10
 [v2025.02.26]: https://github.com/hasura/v3-engine/releases/tag/v2025.02.26
 [v2025.02.20]: https://github.com/hasura/v3-engine/releases/tag/v2025.02.20
