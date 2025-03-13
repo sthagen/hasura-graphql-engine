@@ -6,10 +6,27 @@
 
 ### Changed
 
+### Fixed
+
+## [v2025.03.13]
+
+### Changed
+
 - Data connectors resolve step now returns multiple errors rather than failing
   on the first one.
+- Improved build errors for when older versions of the ddn CLI generate invalid
+  metadata in the DataConnectorLink; the new error guides users to upgrade their
+  CLI version.
+- Scalar types resolve step now returns multiple errors rather than failing on
+  the first one.
 
 ### Fixed
+
+- Remote joins that map fields that contain objects now correctly pass the whole
+  object contained in that field to the target data connector, instead of
+  sometimes a subset based on what's been selected in the GraphQL query. In
+  addition, the fields of the object are now mapped correctly to the target data
+  connector's field names.
 
 ## [v2025.03.11]
 
@@ -1476,7 +1493,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.03.11...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.03.13...HEAD
+[v2025.03.13]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.13
 [v2025.03.11]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.11
 [v2025.03.10]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.10
 [v2025.02.26]: https://github.com/hasura/v3-engine/releases/tag/v2025.02.26
