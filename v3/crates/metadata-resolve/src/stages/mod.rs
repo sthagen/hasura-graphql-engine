@@ -120,17 +120,21 @@ fn resolve_internal(
         &scalar_types,
         &graphql_config,
         &mut graphql_types,
-    )?;
+    )
+    .map_err(flatten_multiple_errors)?;
 
     all_issues.extend(issues.into_iter().map(Warning::from));
 
     // Fetch and validate permissions, and attach them to the relevant object types
     let (object_types_with_permissions, type_permission_issues) =
-        type_permissions::resolve(&metadata_accessor, object_types)?;
+        type_permissions::resolve(&metadata_accessor, object_types)
+            .map_err(flatten_multiple_errors)?;
+
     all_issues.extend(type_permission_issues.into_iter().map(Warning::from));
 
     // collect raw relationships information
-    let relationships = relationships::resolve(&metadata_accessor, &object_types_with_permissions)?;
+    let relationships = relationships::resolve(&metadata_accessor, &object_types_with_permissions)
+        .map_err(flatten_multiple_errors)?;
 
     // Check aggregate expressions
     let aggregates::AggregateExpressionsOutput {
@@ -144,7 +148,8 @@ fn resolve_internal(
         &scalar_types,
         &graphql_config,
         &mut graphql_types,
-    )?;
+    )
+    .map_err(flatten_multiple_errors)?;
 
     all_issues.extend(issues.into_iter().map(Warning::from));
 
@@ -162,7 +167,8 @@ fn resolve_internal(
         &scalar_types,
         &graphql_config,
         &mut graphql_types,
-    )?;
+    )
+    .map_err(flatten_multiple_errors)?;
 
     all_issues.extend(issues.into_iter().map(Warning::from));
 
@@ -181,7 +187,8 @@ fn resolve_internal(
         &object_types_with_permissions,
         &relationships,
         &mut graphql_types,
-    )?;
+    )
+    .map_err(flatten_multiple_errors)?;
 
     all_issues.extend(issues.into_iter().map(Warning::from));
 
