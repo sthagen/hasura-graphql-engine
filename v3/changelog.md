@@ -8,6 +8,24 @@
 
 ### Fixed
 
+## [v2025.03.25]
+
+### Fixed
+
+- Apply validations for operators in scalar boolean expressions:
+  - Disallow non-list argument types for the `_in` operator.
+  - Argument type must match the scalar type for `_eq`, `_lt`, `_lte`, `_gt` and
+    `_gte` operators.
+  - Operators such as `contains`, `icontains`, `starts_with`, `istarts_with`,
+    `ends_with`, and `iends_with` now only applicable on string scalars, with
+    arguments strictly of type string.
+  - Check if mapped operators exist in the data connector.
+  - Check the argument type compatibility with the mapped operator's NDC
+    argument type.
+- The `value` alias for `literal` fields in `ValueExpression` and
+  `ValueExpressionOrPredicate` was removed in a recent change, and is now
+  reinstated.
+
 ## [v2025.03.20]
 
 ### Changed
@@ -1514,7 +1532,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.03.20...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.03.25...HEAD
+[v2025.03.25]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.25
 [v2025.03.20]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.20
 [v2025.03.17]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.17
 [v2025.03.13]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.13
