@@ -1,7 +1,7 @@
 use super::{field_selection, model_target};
 
 use crate::types::PlanError;
-use crate::{column::to_resolved_column, OutputObjectTypeView};
+use crate::{OutputObjectTypeView, column::to_resolved_column};
 use indexmap::IndexMap;
 use nonempty::NonEmpty;
 use open_dds::{
@@ -115,6 +115,13 @@ pub fn from_model_group_by(
                             extraction_functions.microsecond_function.ok_or_else(|| {
                                 PlanError::Internal(
                                     "microsecond extraction function not found".to_string(),
+                                )
+                            })
+                        }
+                        ExtractionFunction::Millisecond => {
+                            extraction_functions.millisecond_function.ok_or_else(|| {
+                                PlanError::Internal(
+                                    "millisecond extraction function not found".to_string(),
                                 )
                             })
                         }
