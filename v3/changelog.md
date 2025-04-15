@@ -2,11 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
 ### Added
 
 ### Changed
 
+## [v2025.04.14]
+
 ### Fixed
+
+- Fixed a bug in which using a graphql alias in a query involving a remote
+  relationship would result in a runtime error
 
 ## [v2025.04.02]
 
@@ -1570,7 +1577,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.04.02...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.04.14...HEAD
+[v2025.04.14]: https://github.com/hasura/v3-engine/releases/tag/v2025.04.14
 [v2025.04.02]: https://github.com/hasura/v3-engine/releases/tag/v2025.04.02
 [v2025.03.25]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.25
 [v2025.03.20]: https://github.com/hasura/v3-engine/releases/tag/v2025.03.20
