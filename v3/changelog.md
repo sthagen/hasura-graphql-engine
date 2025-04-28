@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+### Changed
+
+### Added
+
+## [v2025.04.28]
+
+### Fixed
+
+- Fixed regression where `is_null` calls on nested array fields would throw an
+  error
+
 ## [v2025.04.23]
 
 ### Added
@@ -1576,7 +1591,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.04.23...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.04.28...HEAD
+[v2025.04.28]: https://github.com/hasura/v3-engine/releases/tag/v2025.04.28
 [v2025.04.23]: https://github.com/hasura/v3-engine/releases/tag/v2025.04.23
 [v2025.04.14]: https://github.com/hasura/v3-engine/releases/tag/v2025.04.14
 [v2025.04.02]: https://github.com/hasura/v3-engine/releases/tag/v2025.04.02
