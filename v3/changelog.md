@@ -6,6 +6,31 @@
 
 ### Changed
 
+### Fixed
+
+- Fixed arguments passed to command relationships
+
+```graphql
+query MyQuery {
+  Analytics {
+    ActorByMovieIdBounds(upper_bound: 7) {
+      name
+    }
+  }
+}
+```
+
+In this query, `ActorByMovieIdBounds` is a relationship from the `Analytics`
+model to a `Command` that takes two arguments.
+
+One argument, `lower_bound`, is provided by the relationship, but the
+`upper_bound` is provided by the user in the query. Previously we were not
+including the user's arguments in the generated plan, but now we are.
+
+## [v2025.07.10]
+
+### Changed
+
 - Added `disallow_literals_as_boolean_expression_arguments` feature flag to
   disallow literals as arguments to boolean expression operators that expect a
   boolean expression.
@@ -1823,7 +1848,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.07.07...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.07.10...HEAD
+[v2025.07.10]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.10
 [v2025.07.07]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.07
 [v2025.07.02]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.02
 [v2025.06.27]: https://github.com/hasura/v3-engine/releases/tag/v2025.06.27
