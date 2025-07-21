@@ -2,14 +2,21 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Check data connector capabilities for nested scalar comparisons in `plan`
+  stage so any errors are returned as user rather than internal errors.
+
+### Fixed
+
+### Added
+
+## [v2025.07.21]
+
 ### Added
 
 - Allow pre-parse plugins to modify the request before it is sent to the engine.
   Use HTTP status code `299` to indicate that the request should be modified.
-
-### Changed
-
-### Fixed
 
 ## [v2025.07.14]
 
@@ -1855,7 +1862,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.07.14...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.07.21...HEAD
+[v2025.07.21]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.21
 [v2025.07.14]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.14
 [v2025.07.10]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.10
 [v2025.07.07]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.07
