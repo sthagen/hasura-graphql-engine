@@ -1,18 +1,18 @@
 ---
 source: crates/metadata-resolve/tests/metadata_golden_tests.rs
 expression: resolved
-input_file: crates/metadata-resolve/tests/passing/object_types/with_boolean_expression_inside/metadata.json
+input_file: crates/metadata-resolve/tests/passing/type_permissions/v2/rules_based/metadata.json
 ---
 (
     Metadata {
         object_types: {
             Qualified {
                 subgraph: SubgraphName(
-                    "default",
+                    "subgraphs",
                 ),
                 name: CustomTypeName(
                     Identifier(
-                        "Dog",
+                        "Album",
                     ),
                 ),
             }: ObjectTypeWithRelationships {
@@ -20,7 +20,7 @@ input_file: crates/metadata-resolve/tests/passing/object_types/with_boolean_expr
                     fields: {
                         FieldName(
                             Identifier(
-                                "age",
+                                "AlbumId",
                             ),
                         ): FieldDefinition {
                             field_type: QualifiedTypeReference {
@@ -35,56 +35,32 @@ input_file: crates/metadata-resolve/tests/passing/object_types/with_boolean_expr
                             deprecated: None,
                             field_arguments: {},
                         },
-                    },
-                    global_id_fields: [],
-                    apollo_federation_config: None,
-                    graphql_output_type_name: None,
-                    graphql_input_type_name: None,
-                    description: None,
-                },
-                type_output_permissions: TypeOutputPermissions {
-                    authorization_rules: [],
-                    by_role: {},
-                },
-                type_input_permissions: TypeInputPermissions {
-                    authorization_rules: [],
-                    by_role: {},
-                },
-                relationship_fields: {},
-                type_mappings: DataConnectorTypeMappingsForObject {
-                    mappings: {},
-                },
-            },
-            Qualified {
-                subgraph: SubgraphName(
-                    "default",
-                ),
-                name: CustomTypeName(
-                    Identifier(
-                        "Zoo",
-                    ),
-                ),
-            }: ObjectTypeWithRelationships {
-                object_type: ObjectTypeRepresentation {
-                    fields: {
                         FieldName(
                             Identifier(
-                                "dogs_filter",
+                                "ArtistId",
                             ),
                         ): FieldDefinition {
                             field_type: QualifiedTypeReference {
                                 underlying_type: Named(
-                                    Custom(
-                                        Qualified {
-                                            subgraph: SubgraphName(
-                                                "default",
-                                            ),
-                                            name: CustomTypeName(
-                                                Identifier(
-                                                    "DogBoolExp",
-                                                ),
-                                            ),
-                                        },
+                                    Inbuilt(
+                                        Int,
+                                    ),
+                                ),
+                                nullable: false,
+                            },
+                            description: None,
+                            deprecated: None,
+                            field_arguments: {},
+                        },
+                        FieldName(
+                            Identifier(
+                                "Title",
+                            ),
+                        ): FieldDefinition {
+                            field_type: QualifiedTypeReference {
+                                underlying_type: Named(
+                                    Inbuilt(
+                                        String,
                                     ),
                                 ),
                                 nullable: false,
@@ -96,12 +72,49 @@ input_file: crates/metadata-resolve/tests/passing/object_types/with_boolean_expr
                     },
                     global_id_fields: [],
                     apollo_federation_config: None,
-                    graphql_output_type_name: None,
-                    graphql_input_type_name: None,
+                    graphql_output_type_name: Some(
+                        TypeName(
+                            Name(
+                                "Album",
+                            ),
+                        ),
+                    ),
+                    graphql_input_type_name: Some(
+                        TypeName(
+                            Name(
+                                "Album_input",
+                            ),
+                        ),
+                    ),
                     description: None,
                 },
                 type_output_permissions: TypeOutputPermissions {
-                    authorization_rules: [],
+                    authorization_rules: [
+                        AllowFields {
+                            fields: [
+                                FieldName(
+                                    Identifier(
+                                        "AlbumId",
+                                    ),
+                                ),
+                                FieldName(
+                                    Identifier(
+                                        "ArtistId",
+                                    ),
+                                ),
+                                FieldName(
+                                    Identifier(
+                                        "Title",
+                                    ),
+                                ),
+                            ],
+                            condition: Some(
+                                ConditionHash(
+                                    14539879520726521060,
+                                ),
+                            ),
+                        },
+                    ],
                     by_role: {},
                 },
                 type_input_permissions: TypeInputPermissions {
@@ -118,47 +131,7 @@ input_file: crates/metadata-resolve/tests/passing/object_types/with_boolean_expr
         models: {},
         commands: {},
         boolean_expression_types: BooleanExpressionTypes {
-            objects: {
-                Qualified {
-                    subgraph: SubgraphName(
-                        "default",
-                    ),
-                    name: CustomTypeName(
-                        Identifier(
-                            "DogBoolExp",
-                        ),
-                    ),
-                }: ResolvedObjectBooleanExpressionType {
-                    name: Qualified {
-                        subgraph: SubgraphName(
-                            "default",
-                        ),
-                        name: CustomTypeName(
-                            Identifier(
-                                "DogBoolExp",
-                            ),
-                        ),
-                    },
-                    object_type: Qualified {
-                        subgraph: SubgraphName(
-                            "default",
-                        ),
-                        name: CustomTypeName(
-                            Identifier(
-                                "Dog",
-                            ),
-                        ),
-                    },
-                    graphql: None,
-                    fields: ResolvedObjectBooleanExpressionTypeFields {
-                        object_fields: {},
-                        scalar_fields: {},
-                        relationship_fields: {},
-                    },
-                    include_logical_operators: Yes,
-                    data_connector: None,
-                },
-            },
+            objects: {},
             scalars: {},
             object_aggregates: {},
             scalar_aggregates: {},
@@ -212,7 +185,25 @@ input_file: crates/metadata-resolve/tests/passing/object_types/with_boolean_expr
         },
         roles: {},
         conditions: Conditions {
-            conditions: {},
+            conditions: {
+                ConditionHash(
+                    14539879520726521060,
+                ): BinaryOperation {
+                    op: Equals,
+                    left: SessionVariable(
+                        SessionVariableReference {
+                            name: SessionVariableName(
+                                "x-hasura-role",
+                            ),
+                            passed_as_json: false,
+                            disallow_unknown_fields: false,
+                        },
+                    ),
+                    right: Literal(
+                        String("admin"),
+                    ),
+                },
+            },
         },
         runtime_flags: RuntimeFlags(
             {},

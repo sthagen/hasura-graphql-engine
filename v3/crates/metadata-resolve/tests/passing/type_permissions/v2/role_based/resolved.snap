@@ -1,18 +1,18 @@
 ---
 source: crates/metadata-resolve/tests/metadata_golden_tests.rs
 expression: resolved
-input_file: crates/metadata-resolve/tests/passing/boolean_expression_type/conflicting_names_warnings/metadata.json
+input_file: crates/metadata-resolve/tests/passing/type_permissions/v2/role_based/metadata.json
 ---
 (
     Metadata {
         object_types: {
             Qualified {
                 subgraph: SubgraphName(
-                    "default",
+                    "subgraphs",
                 ),
                 name: CustomTypeName(
                     Identifier(
-                        "author",
+                        "Album",
                     ),
                 ),
             }: ObjectTypeWithRelationships {
@@ -20,7 +20,7 @@ input_file: crates/metadata-resolve/tests/passing/boolean_expression_type/confli
                     fields: {
                         FieldName(
                             Identifier(
-                                "author_id",
+                                "AlbumId",
                             ),
                         ): FieldDefinition {
                             field_type: QualifiedTypeReference {
@@ -37,13 +37,13 @@ input_file: crates/metadata-resolve/tests/passing/boolean_expression_type/confli
                         },
                         FieldName(
                             Identifier(
-                                "first_name",
+                                "ArtistId",
                             ),
                         ): FieldDefinition {
                             field_type: QualifiedTypeReference {
                                 underlying_type: Named(
                                     Inbuilt(
-                                        String,
+                                        Int,
                                     ),
                                 ),
                                 nullable: false,
@@ -54,7 +54,7 @@ input_file: crates/metadata-resolve/tests/passing/boolean_expression_type/confli
                         },
                         FieldName(
                             Identifier(
-                                "last_name",
+                                "Title",
                             ),
                         ): FieldDefinition {
                             field_type: QualifiedTypeReference {
@@ -75,16 +75,69 @@ input_file: crates/metadata-resolve/tests/passing/boolean_expression_type/confli
                     graphql_output_type_name: Some(
                         TypeName(
                             Name(
-                                "Author",
+                                "Album",
                             ),
                         ),
                     ),
-                    graphql_input_type_name: None,
+                    graphql_input_type_name: Some(
+                        TypeName(
+                            Name(
+                                "Album_input",
+                            ),
+                        ),
+                    ),
                     description: None,
                 },
                 type_output_permissions: TypeOutputPermissions {
-                    authorization_rules: [],
-                    by_role: {},
+                    authorization_rules: [
+                        AllowFields {
+                            fields: [
+                                FieldName(
+                                    Identifier(
+                                        "AlbumId",
+                                    ),
+                                ),
+                                FieldName(
+                                    Identifier(
+                                        "ArtistId",
+                                    ),
+                                ),
+                                FieldName(
+                                    Identifier(
+                                        "Title",
+                                    ),
+                                ),
+                            ],
+                            condition: Some(
+                                ConditionHash(
+                                    5261800314210927403,
+                                ),
+                            ),
+                        },
+                    ],
+                    by_role: {
+                        Role(
+                            "user",
+                        ): TypeOutputPermission {
+                            allowed_fields: {
+                                FieldName(
+                                    Identifier(
+                                        "AlbumId",
+                                    ),
+                                ),
+                                FieldName(
+                                    Identifier(
+                                        "ArtistId",
+                                    ),
+                                ),
+                                FieldName(
+                                    Identifier(
+                                        "Title",
+                                    ),
+                                ),
+                            },
+                        },
+                    },
                 },
                 type_input_permissions: TypeInputPermissions {
                     authorization_rules: [],
@@ -100,73 +153,7 @@ input_file: crates/metadata-resolve/tests/passing/boolean_expression_type/confli
         models: {},
         commands: {},
         boolean_expression_types: BooleanExpressionTypes {
-            objects: {
-                Qualified {
-                    subgraph: SubgraphName(
-                        "default",
-                    ),
-                    name: CustomTypeName(
-                        Identifier(
-                            "author_bool_exp",
-                        ),
-                    ),
-                }: ResolvedObjectBooleanExpressionType {
-                    name: Qualified {
-                        subgraph: SubgraphName(
-                            "default",
-                        ),
-                        name: CustomTypeName(
-                            Identifier(
-                                "author_bool_exp",
-                            ),
-                        ),
-                    },
-                    object_type: Qualified {
-                        subgraph: SubgraphName(
-                            "default",
-                        ),
-                        name: CustomTypeName(
-                            Identifier(
-                                "author",
-                            ),
-                        ),
-                    },
-                    graphql: Some(
-                        BooleanExpressionGraphqlConfig {
-                            type_name: TypeName(
-                                Name(
-                                    "AuthorBoolExpOther",
-                                ),
-                            ),
-                            object_fields: {},
-                            scalar_fields: {},
-                            field_config: BooleanExpressionGraphqlFieldConfig {
-                                where_field_name: Name(
-                                    "where",
-                                ),
-                                logical_operators: LogicalOperatorsGraphqlConfig {
-                                    and_operator_name: Name(
-                                        "_and",
-                                    ),
-                                    or_operator_name: Name(
-                                        "_or",
-                                    ),
-                                    not_operator_name: Name(
-                                        "_not",
-                                    ),
-                                },
-                            },
-                        },
-                    ),
-                    fields: ResolvedObjectBooleanExpressionTypeFields {
-                        object_fields: {},
-                        scalar_fields: {},
-                        relationship_fields: {},
-                    },
-                    include_logical_operators: Yes,
-                    data_connector: None,
-                },
-            },
+            objects: {},
             scalars: {},
             object_aggregates: {},
             scalar_aggregates: {},
@@ -218,28 +205,35 @@ input_file: crates/metadata-resolve/tests/passing/boolean_expression_type/confli
             pre_ndc_request_plugins: {},
             pre_ndc_response_plugins: {},
         },
-        roles: {},
+        roles: {
+            Role(
+                "user",
+            ),
+        },
         conditions: Conditions {
-            conditions: {},
+            conditions: {
+                ConditionHash(
+                    5261800314210927403,
+                ): BinaryOperation {
+                    op: Equals,
+                    left: SessionVariable(
+                        SessionVariableReference {
+                            name: SessionVariableName(
+                                "x-hasura-role",
+                            ),
+                            passed_as_json: false,
+                            disallow_unknown_fields: false,
+                        },
+                    ),
+                    right: Literal(
+                        String("user"),
+                    ),
+                },
+            },
         },
         runtime_flags: RuntimeFlags(
             {},
         ),
     },
-    [
-        BooleanExpressionIssue(
-            DuplicateBooleanExpressionType {
-                type_name: Qualified {
-                    subgraph: SubgraphName(
-                        "default",
-                    ),
-                    name: CustomTypeName(
-                        Identifier(
-                            "author_bool_exp",
-                        ),
-                    ),
-                },
-            },
-        ),
-    ],
+    [],
 )
