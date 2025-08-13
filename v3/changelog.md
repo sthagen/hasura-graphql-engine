@@ -6,7 +6,22 @@
 
 ### Fixed
 
+- Fixed an issue in remote joins where a command that returns headers on the
+  left hand side of the join wouldn't correctly pass arguments to the right hand
+  side.
+
 ### Added
+
+- Added `NDC_RESPONSE_SIZE_LIMIT` that allows limiting response sizes, set in
+  bytes. Defaults to 30MB.
+
+## [v2025.08.13]
+
+### Added
+
+- Add support for wildcard at leaf subdomain level in allowed CORS origins. Eg.
+  `https://*.example.com` will allow `https://api.example.com`,
+  `https://auth.example.com`, and so on.
 
 ## [v2025.07.29]
 
@@ -1922,7 +1937,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.07.29...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.08.13...HEAD
+[v2025.08.13]: https://github.com/hasura/v3-engine/releases/tag/v2025.08.13
 [v2025.07.29]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.29
 [v2025.07.28]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.28
 [v2025.07.22]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.22
