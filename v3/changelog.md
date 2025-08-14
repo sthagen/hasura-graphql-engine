@@ -6,9 +6,21 @@
 
 ### Fixed
 
+### Added
+
+## [v2025.08.14-1]
+
+- No changes
+
+## [v2025.08.14]
+
+### Fixed
+
 - Fixed an issue in remote joins where a command that returns headers on the
   left hand side of the join wouldn't correctly pass arguments to the right hand
   side.
+
+- Fix a bug where remote relationships from fields with aliases wouldn't work.
 
 ### Added
 
@@ -1937,7 +1949,9 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.08.13...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.08.14-1...HEAD
+[v2025.08.14-1]: https://github.com/hasura/v3-engine/releases/tag/v2025.08.14-1
+[v2025.08.14]: https://github.com/hasura/v3-engine/releases/tag/v2025.08.14
 [v2025.08.13]: https://github.com/hasura/v3-engine/releases/tag/v2025.08.13
 [v2025.07.29]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.29
 [v2025.07.28]: https://github.com/hasura/v3-engine/releases/tag/v2025.07.28
