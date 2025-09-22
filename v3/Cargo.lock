@@ -138,9 +138,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.99"
+version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
+checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "apollo-parser"
@@ -314,7 +314,7 @@ dependencies = [
  "arrow-schema",
  "chrono",
  "half",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "lexical-core",
  "memchr",
  "num",
@@ -436,7 +436,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34ecdaff7c9cffa3614a9f9999bf9ee4c3078fe3ce4d6a6e161736b56febf2de"
 dependencies = [
  "bytes",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "serde",
  "serde_json",
 ]
@@ -506,7 +506,7 @@ version = "3.0.0"
 dependencies = [
  "derive_more",
  "hasura-authn-core",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "metadata-resolve",
  "open-dds",
  "serde_json",
@@ -863,9 +863,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.47"
+version = "4.5.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7eac00902d9d136acd712710d71823fb8ac8004ca445a89e73a41d45aa712931"
+checksum = "e2134bb3ea021b78629caa971416385309e0131b351b25e01dc16fb54e1b5fae"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -873,9 +873,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.47"
+version = "4.5.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ad9bbf750e73b5884fb8a211a9424a1906c1e156724260fdae972f31d70e1d6"
+checksum = "c2ba64afa3c0a6df7fa517765e31314e983f51dda798ffba27b988194fb65dc9"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1187,7 +1187,7 @@ dependencies = [
  "axum-ext",
  "datafusion",
  "env_logger",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "iso8601",
  "itertools 0.14.0",
  "ndc-models 0.2.9",
@@ -1373,7 +1373,7 @@ dependencies = [
  "base64 0.22.1",
  "half",
  "hashbrown 0.14.5",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "libc",
  "log",
  "object_store",
@@ -1552,7 +1552,7 @@ dependencies = [
  "datafusion-functions-aggregate-common",
  "datafusion-functions-window-common",
  "datafusion-physical-expr-common",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "paste",
  "recursive",
  "serde_json",
@@ -1567,7 +1567,7 @@ checksum = "70fafb3a045ed6c49cfca0cd090f62cf871ca6326cc3355cb0aaf1260fa760b6"
 dependencies = [
  "arrow",
  "datafusion-common",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "itertools 0.14.0",
  "paste",
 ]
@@ -1722,7 +1722,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "datafusion-physical-expr",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "itertools 0.14.0",
  "log",
  "recursive",
@@ -1745,7 +1745,7 @@ dependencies = [
  "datafusion-physical-expr-common",
  "half",
  "hashbrown 0.14.5",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "itertools 0.14.0",
  "log",
  "paste",
@@ -1807,7 +1807,7 @@ dependencies = [
  "futures",
  "half",
  "hashbrown 0.14.5",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "itertools 0.14.0",
  "log",
  "parking_lot",
@@ -1849,7 +1849,7 @@ dependencies = [
  "bigdecimal",
  "datafusion-common",
  "datafusion-expr",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "log",
  "recursive",
  "regex",
@@ -2149,7 +2149,7 @@ dependencies = [
  "graphql-schema",
  "hasura-authn-core",
  "http 1.3.1",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "lang-graphql",
  "metadata-resolve",
  "mockito",
@@ -2455,7 +2455,7 @@ dependencies = [
  "graphql-schema",
  "hasura-authn-core",
  "http 1.3.1",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "json-ext",
  "lang-graphql",
  "metadata-resolve",
@@ -2479,7 +2479,7 @@ dependencies = [
  "base64 0.22.1",
  "graphql-schema",
  "hasura-authn-core",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "lang-graphql",
  "metadata-resolve",
  "nonempty",
@@ -2509,7 +2509,7 @@ name = "graphql-schema"
 version = "3.0.0"
 dependencies = [
  "hasura-authn-core",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "insta",
  "jsonpath",
  "lang-graphql",
@@ -2536,7 +2536,7 @@ dependencies = [
  "graphql-schema",
  "hasura-authn",
  "hasura-authn-core",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "lang-graphql",
  "metadata-resolve",
  "nonempty",
@@ -2577,7 +2577,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.12",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "slab",
  "tokio",
  "tokio-util",
@@ -2596,7 +2596,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http 1.3.1",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "slab",
  "tokio",
  "tokio-util",
@@ -3113,13 +3113,14 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.11.1"
+version = "2.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "206a8042aec68fa4a62e8d3f7aa4ceb508177d9324faf261e1959e495b7a1921"
+checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
  "hashbrown 0.15.4",
  "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -3177,7 +3178,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3267,7 +3268,7 @@ dependencies = [
 name = "json-annotation-parse"
 version = "0.1.0"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "jsonpath",
  "nom 7.1.3",
  "nom_locate",
@@ -3277,7 +3278,7 @@ dependencies = [
 name = "json-ext"
 version = "3.0.0"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "serde",
  "serde_json",
 ]
@@ -3314,7 +3315,7 @@ dependencies = [
  "engine-types",
  "execute",
  "hasura-authn-core",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "insta",
  "jsonapi 0.7.0",
  "jsonpath",
@@ -3406,7 +3407,7 @@ dependencies = [
  "expect-test",
  "graphql-parser",
  "http 1.3.1",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "json-ext",
  "lexical-core",
  "nonempty",
@@ -3429,9 +3430,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lexical-core"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b765c31809609075565a70b4b71402281283aeda7ecaf4818ac14a7b2ade8958"
+checksum = "7d8d125a277f807e55a77304455eb7b1cb52f2b18c143b60e766c120bd64a594"
 dependencies = [
  "lexical-parse-float",
  "lexical-parse-integer",
@@ -3442,53 +3443,46 @@ dependencies = [
 
 [[package]]
 name = "lexical-parse-float"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de6f9cb01fb0b08060209a057c048fcbab8717b4c1ecd2eac66ebfe39a65b0f2"
+checksum = "52a9f232fbd6f550bc0137dcb5f99ab674071ac2d690ac69704593cb4abbea56"
 dependencies = [
  "lexical-parse-integer",
  "lexical-util",
- "static_assertions",
 ]
 
 [[package]]
 name = "lexical-parse-integer"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72207aae22fc0a121ba7b6d479e42cbfea549af1479c3f3a4f12c70dd66df12e"
+checksum = "9a7a039f8fb9c19c996cd7b2fcce303c1b2874fe1aca544edc85c4a5f8489b34"
 dependencies = [
  "lexical-util",
- "static_assertions",
 ]
 
 [[package]]
 name = "lexical-util"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a82e24bf537fd24c177ffbbdc6ebcc8d54732c35b50a3f28cc3f4e4c949a0b3"
-dependencies = [
- "static_assertions",
-]
+checksum = "2604dd126bb14f13fb5d1bd6a66155079cb9fa655b37f875b3a742c705dbed17"
 
 [[package]]
 name = "lexical-write-float"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5afc668a27f460fb45a81a757b6bf2f43c2d7e30cb5a2dcd3abf294c78d62bd"
+checksum = "50c438c87c013188d415fbabbb1dceb44249ab81664efbd31b14ae55dabb6361"
 dependencies = [
  "lexical-util",
  "lexical-write-integer",
- "static_assertions",
 ]
 
 [[package]]
 name = "lexical-write-integer"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "629ddff1a914a836fb245616a7888b62903aae58fa771e1d83943035efa0f978"
+checksum = "409851a618475d2d5796377cad353802345cba92c867d9fbcde9cf4eac4e14df"
 dependencies = [
  "lexical-util",
- "static_assertions",
 ]
 
 [[package]]
@@ -3625,7 +3619,7 @@ dependencies = [
  "derive_more",
  "error-context",
  "hasura-authn-core",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "insta",
  "json-annotation-parse",
  "jsonpath",
@@ -3750,7 +3744,7 @@ name = "ndc-models"
 version = "0.1.7"
 source = "git+https://github.com/hasura/ndc-spec.git?tag=v0.1.7#0c1a63c6217633a1e79f15ffbafa199793e95326"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "ref-cast",
  "schemars 0.8.22",
  "serde",
@@ -3764,7 +3758,7 @@ name = "ndc-models"
 version = "0.2.9"
 source = "git+https://github.com/hasura/ndc-spec.git?rev=f8036879ce75b31d94d5f08d15fa93e319af00f7#f8036879ce75b31d94d5f08d15fa93e319af00f7"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "ref-cast",
  "schemars 0.8.22",
  "serde",
@@ -3976,7 +3970,7 @@ version = "3.0.0"
 dependencies = [
  "derive_more",
  "goldenfile",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "jsonpath",
  "jsonschema-tidying",
  "ndc-models 0.1.7",
@@ -4326,7 +4320,7 @@ checksum = "54acf3a685220b533e437e264e4d932cfbdc4cc7ec0cd232ed73c08d03b8a7ca"
 dependencies = [
  "fixedbitset",
  "hashbrown 0.15.4",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "serde",
 ]
 
@@ -4402,7 +4396,7 @@ version = "3.0.0"
 dependencies = [
  "authorization-rules",
  "hasura-authn-core",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "insta",
  "jsonpath",
  "metadata-resolve",
@@ -4421,7 +4415,7 @@ name = "plan-types"
 version = "3.0.0"
 dependencies = [
  "derive_more",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "metadata-resolve",
  "nonempty",
  "open-dds",
@@ -5122,7 +5116,7 @@ checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
  "dyn-clone",
  "indexmap 1.9.3",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "schemars_derive",
  "serde",
  "serde_json",
@@ -5235,7 +5229,7 @@ dependencies = [
 name = "serde-ext"
 version = "3.0.0"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
 ]
 
 [[package]]
@@ -5290,7 +5284,7 @@ version = "1.0.143"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d401abef1d108fbd9cbaebc3e46611f4b1021f714a0597a71f41ee463f5f4a5a"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "itoa",
  "memchr",
  "ryu",
@@ -5299,9 +5293,9 @@ dependencies = [
 
 [[package]]
 name = "serde_path_to_error"
-version = "0.1.19"
+version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a30a8abed938137c7183c173848e3c9b3517f5e038226849a4ecc9b21a4b4e2a"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
 dependencies = [
  "itoa",
  "serde",
@@ -5330,7 +5324,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "schemars 0.9.0",
  "schemars 1.0.4",
  "serde",
@@ -5358,7 +5352,7 @@ version = "0.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59e2dd588bf1597a252c3b920e0143eb99b0f76e4e082f4c92ce34fbc9e71ddd"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.4",
  "itoa",
  "libyml",
  "memchr",
@@ -5562,14 +5556,8 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
-
-[[package]]
-name = "static_assertions"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "strsim"
@@ -5664,7 +5652,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6409,7 +6397,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -6499,6 +6487,15 @@ dependencies = [
 
 [[package]]
 name = "windows-sys"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "677d2418bec65e3338edb076e806bc1ec15693c5d0104683f2efe857f61056a9"
+dependencies = [
+ "windows-targets 0.48.5",
+]
+
+[[package]]
+name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
@@ -6541,6 +6538,21 @@ dependencies = [
 
 [[package]]
 name = "windows-targets"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a2fa6e2155d7247be68c096456083145c183cbbbc2764150dda45a87197940c"
+dependencies = [
+ "windows_aarch64_gnullvm 0.48.5",
+ "windows_aarch64_msvc 0.48.5",
+ "windows_i686_gnu 0.48.5",
+ "windows_i686_msvc 0.48.5",
+ "windows_x86_64_gnu 0.48.5",
+ "windows_x86_64_gnullvm 0.48.5",
+ "windows_x86_64_msvc 0.48.5",
+]
+
+[[package]]
+name = "windows-targets"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973"
@@ -6579,6 +6591,12 @@ checksum = "597a5118570b68bc08d8d59125332c54f1ba9d9adeedeef5b99b02ba2b0698f8"
 
 [[package]]
 name = "windows_aarch64_gnullvm"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b38e32f0abccf9987a4e3079dfb67dcd799fb61361e53e2882c3cbaf0d905d8"
+
+[[package]]
+name = "windows_aarch64_gnullvm"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
@@ -6597,6 +6615,12 @@ checksum = "e08e8864a60f06ef0d0ff4ba04124db8b0fb3be5776a5cd47641e942e58c4d43"
 
 [[package]]
 name = "windows_aarch64_msvc"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc35310971f3b2dbbf3f0690a219f40e2d9afcf64f9ab7cc1be722937c26b4bc"
+
+[[package]]
+name = "windows_aarch64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
@@ -6612,6 +6636,12 @@ name = "windows_i686_gnu"
 version = "0.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c61d927d8da41da96a81f029489353e68739737d3beca43145c8afec9a31a84f"
+
+[[package]]
+name = "windows_i686_gnu"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a75915e7def60c94dcef72200b9a8e58e5091744960da64ec734a6c6e9b3743e"
 
 [[package]]
 name = "windows_i686_gnu"
@@ -6645,6 +6675,12 @@ checksum = "44d840b6ec649f480a41c8d80f9c65108b92d89345dd94027bfe06ac444d1060"
 
 [[package]]
 name = "windows_i686_msvc"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f55c233f70c4b27f66c523580f78f1004e8b5a8b659e05a4eb49d4166cca406"
+
+[[package]]
+name = "windows_i686_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
@@ -6660,6 +6696,12 @@ name = "windows_x86_64_gnu"
 version = "0.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8de912b8b8feb55c064867cf047dda097f92d51efad5b491dfb98f6bbb70cb36"
+
+[[package]]
+name = "windows_x86_64_gnu"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53d40abd2583d23e4718fddf1ebec84dbff8381c07cae67ff7768bbf19c6718e"
 
 [[package]]
 name = "windows_x86_64_gnu"
@@ -6681,6 +6723,12 @@ checksum = "26d41b46a36d453748aedef1486d5c7a85db22e56aff34643984ea85514e94a3"
 
 [[package]]
 name = "windows_x86_64_gnullvm"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b7b52767868a23d5bab768e390dc5f5c55825b6d30b86c844ff2dc7414044cc"
+
+[[package]]
+name = "windows_x86_64_gnullvm"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
@@ -6696,6 +6744,12 @@ name = "windows_x86_64_msvc"
 version = "0.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9aec5da331524158c6d1a4ac0ab1541149c0b9505fde06423b02f5ef0106b9f0"
+
+[[package]]
+name = "windows_x86_64_msvc"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed94fce61571a4006852b7389a063ab983c02eb1bb37b47f8272ce92d06d9538"
 
 [[package]]
 name = "windows_x86_64_msvc"
