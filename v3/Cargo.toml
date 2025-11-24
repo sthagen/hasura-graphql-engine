@@ -83,7 +83,7 @@ base64 = "0.22"
 bincode = "1"
 blake2 = "0.10.6"
 bson = "2"
-build-data = "0.2"
+build-data = "0.3"
 bytes = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
@@ -110,7 +110,7 @@ iso8601 = "0.6.3"
 itertools = "0.14.0"
 json_value_merge = "2"
 jsonapi_library = { package = "jsonapi", git = "https://github.com/hasura/jsonapi-rust.git", rev = "9b5a3a08414e559c7285b539acd4d4fc7b31f3b5" }
-jsonptr = "0.4"
+jsonptr = "0.7"
 # We're using a fork of this library that updates the deps to use more recent versions
 # (in particular jsonwebtoken from v8->v9 to fix a vulnerability in its dependency on ring: https://rustsec.org/advisories/RUSTSEC-2025-0009)
 # (the branch uses the code from https://github.com/nhynes/jwk-rs/pull/13)
@@ -122,16 +122,16 @@ log = "0.4"
 mimalloc = "0.1"
 mockito = { version = "~1.4", default-features = false } # v1.5+ depends on http v1
 nonempty = { version = "0.12", features = ["serialize"] }
-oas3 = "0.12.1"
+oas3 = "0.20.1"
 openssl = "0.10"
-opentelemetry = "0.24"
-opentelemetry-contrib = "0.16"
-opentelemetry-http = "0.13"
-opentelemetry-otlp = "0.17"
-opentelemetry-semantic-conventions = "0.16"
-opentelemetry-stdout = { version = "0.5", default-features = false, features = ["trace"] }
-opentelemetry-zipkin = "0.22"
-opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
+opentelemetry = "0.31"
+opentelemetry-contrib = "0.23"
+opentelemetry-http = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "trace"] }
+opentelemetry-semantic-conventions = "0.31"
+opentelemetry-stdout = { version = "0.31", default-features = false, features = ["trace"] }
+opentelemetry-zipkin = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
 partition_eithers = "0.1.0"
 postcard = { version = "1", features = ["use-std"] }
 pretty_assertions = "1"
