@@ -89,11 +89,11 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 convert_case = "0.8"
 cookie = "0.18"
-criterion = { version = "0.7", features = ["html_reports", "async_tokio"] }
+criterion = { version = "0.8", features = ["html_reports", "async_tokio"] }
 darling = "0.21"
 # Keep this in sync with sqlparser
 datafusion = { version = "50.3.0", features = ["serde"] }
-derive_more = { version = "2.0", features = ["full"] }
+derive_more = { version = "2.1", features = ["full"] }
 diffy = "0.4"
 env_logger = "0.11"
 expect-test = "1"
@@ -120,7 +120,7 @@ lazy_static = "1.5.0"
 lexical-core = "1"
 log = "0.4"
 mimalloc = "0.1"
-mockito = { version = "~1.4", default-features = false } # v1.5+ depends on http v1
+mockito = { version = "~1.7", default-features = false } # v1.5+ depends on http v1
 nonempty = { version = "0.12", features = ["serialize"] }
 oas3 = "0.20.1"
 openssl = "0.10"
