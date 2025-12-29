@@ -8,6 +8,12 @@
 
 ### Fixed
 
+## [v2025.12.22]
+
+### Changed
+
+- Webhook responses preserve original HTTP status code
+
 ## [v2025.11.26]
 
 - No changes
@@ -2051,7 +2057,8 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.11.26...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2025.12.22...HEAD
+[v2025.12.22]: https://github.com/hasura/v3-engine/releases/tag/v2025.12.22
 [v2025.11.26]: https://github.com/hasura/v3-engine/releases/tag/v2025.11.26
 [v2025.11.24]: https://github.com/hasura/v3-engine/releases/tag/v2025.11.24
 [v2025.11.17]: https://github.com/hasura/v3-engine/releases/tag/v2025.11.17
