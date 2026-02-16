@@ -152,3 +152,9 @@ cargo bench -p lang-graphql "lexer"
 cargo bench -p lang-graphql "parser"
 cargo bench -p lang-graphql "validation/.*"
 ```
+
+To run metadata resolution benchmarks:
+
+```bash
+cargo bench --bench metadata_resolve
+```
