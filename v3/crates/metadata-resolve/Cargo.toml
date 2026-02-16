@@ -7,6 +7,10 @@ license.workspace = true
 [lib]
 bench = false
 
+[[bench]]
+name = "metadata_resolve"
+harness = false
+
 [dependencies]
 error-context = { path = "../utils/error-context" }
 hasura-authn-core = { path = "../auth/hasura-authn-core" }
@@ -37,6 +41,7 @@ url = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+criterion = { workspace = true }
 
 [lints]
 workspace = true
