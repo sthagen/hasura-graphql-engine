@@ -52,12 +52,24 @@
 
         defaultBinary = "engine";
 
+        # Nix's pkgs.cacert places CA certificates at /etc/ssl/certs/ca-bundle.crt,
+        # but openssl-probe 0.2.x only searches for /etc/ssl/certs/ca-certificates.crt
+        # on Linux. Without SSL_CERT_FILE, native-tls/OpenSSL falls back to its
+        # compiled-in default path (/usr/lib/ssl/certs) which doesn't exist in the
+        # Nix image, causing "unable to get local issuer certificate" errors.
+        sslCertFileEnv = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
+
         dockerConfig = {
           "engine" = {
             ExposedPorts = { "3000/tcp" = { }; };
+            Env = sslCertFileEnv;
           };
           "ddn-engine-local-dev" = {
             ExposedPorts = { "3000/tcp" = { }; };
+            Env = sslCertFileEnv;
+          };
+          "multitenant-engine" = {
+            Env = sslCertFileEnv;
           };
           "custom-connector" = {
             ExposedPorts = { "8102/tcp" = { }; };
