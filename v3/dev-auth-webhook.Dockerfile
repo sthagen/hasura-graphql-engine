@@ -16,5 +16,5 @@ COPY --from=builder /app/target/release/dev-auth-webhook /usr/bin
 RUN apt-get update && \
   apt-get install -y openssl
 
-EXPOSE 3050
+EXPOSE 3060
 ENTRYPOINT ["/usr/bin/dev-auth-webhook"]

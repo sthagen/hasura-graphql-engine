@@ -77,7 +77,7 @@ services:
       OTLP_ENDPOINT: "http://jaeger:4317"
       RUST_LOG: debug
     ports:
-      - "3050:3050"
+      - "3060:3060"
     depends_on:
       jaeger:
         condition: service_started

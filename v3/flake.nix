@@ -75,7 +75,7 @@
             ExposedPorts = { "8102/tcp" = { }; };
           };
           "dev-auth-webhook" = {
-            ExposedPorts = { "3050/tcp" = { }; };
+            ExposedPorts = { "3060/tcp" = { }; };
           };
         };
 

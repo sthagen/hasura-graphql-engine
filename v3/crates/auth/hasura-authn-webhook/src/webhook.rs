@@ -129,7 +129,7 @@ impl AuthHookConfig {
         serde_json::from_str(
             r#"
             {
-                "url": "http://auth_hook:3050/validate-request",
+                "url": "http://auth_hook:3060/validate-request",
                 "method": "Post"
             }
         "#,
@@ -174,7 +174,7 @@ impl AuthHookConfigV3 {
             {
                 "method": "GET",
                 "url": {
-                    "value": "http://auth_hook:3050/validate-request"
+                    "value": "http://auth_hook:3060/validate-request"
                 },
                 "customHeadersConfig": {
                     "headers": {
@@ -217,7 +217,7 @@ impl AuthHookConfigV3GET {
             r#"
             {
                 "url": {
-                    "value": "http://auth_hook:3050/validate-request"
+                    "value": "http://auth_hook:3060/validate-request"
                 },
                 "customHeadersConfig": {
                     "headers": {
@@ -283,7 +283,7 @@ impl AuthHookConfigV3POST {
             r#"
             {
                 "url": {
-                    "value": "http://auth_hook:3050/validate-request"
+                    "value": "http://auth_hook:3060/validate-request"
                 },
                 "customHeadersConfig": {
                     "headers": {
