@@ -8,6 +8,10 @@
 
 ### Fixed
 
+## [v2026.02.18]
+
+- No changes
+
 ## [v2026.02.17]
 
 - No changes
@@ -2106,7 +2110,9 @@ Initial release.
 
 <!-- end -->
 
-[Unreleased]: https://github.com/hasura/v3-engine/compare/v2026.02.17...HEAD
+[Unreleased]: https://github.com/hasura/v3-engine/compare/v2026.02.18...HEAD
+[v2026.02.18]: https://github.com/hasura/v3-engine/releases/tag/v2026.02.18
+[v2026.02.17]: https://github.com/hasura/v3-engine/releases/tag/v2026.02.17
 [v2026.02.11]: https://github.com/hasura/v3-engine/releases/tag/v2026.02.11
 [v2026.02.05]: https://github.com/hasura/v3-engine/releases/tag/v2026.02.05
 [v2026.01.26]: https://github.com/hasura/v3-engine/releases/tag/v2026.01.26
