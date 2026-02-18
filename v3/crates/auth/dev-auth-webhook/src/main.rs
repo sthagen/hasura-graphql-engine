@@ -11,7 +11,7 @@ use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 use tracing::debug;
 
-const DEFAULT_PORT: u16 = 3050;
+const DEFAULT_PORT: u16 = 3060;
 
 #[derive(Parser, Serialize)]
 struct ServerOptions {

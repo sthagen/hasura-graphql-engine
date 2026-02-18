@@ -167,7 +167,7 @@
       "description": "The configuration of the authentication webhook.",
       "examples": [
         {
-          "url": "http://auth_hook:3050/validate-request",
+          "url": "http://auth_hook:3060/validate-request",
           "method": "Post"
         }
       ],
@@ -972,7 +972,7 @@
         {
           "method": "GET",
           "url": {
-            "value": "http://auth_hook:3050/validate-request"
+            "value": "http://auth_hook:3060/validate-request"
           },
           "customHeadersConfig": {
             "headers": {
@@ -993,7 +993,7 @@
           "examples": [
             {
               "url": {
-                "value": "http://auth_hook:3050/validate-request"
+                "value": "http://auth_hook:3060/validate-request"
               },
               "customHeadersConfig": {
                 "headers": {
@@ -1048,7 +1048,7 @@
           "examples": [
             {
               "url": {
-                "value": "http://auth_hook:3050/validate-request"
+                "value": "http://auth_hook:3060/validate-request"
               },
               "customHeadersConfig": {
                 "headers": {

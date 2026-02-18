@@ -100,7 +100,7 @@ Imagine being able to specify multiple Auth-Configs like so:
         "identifier": "webhook",
         "config": {
           "webhook": {
-            "url": "http://auth_hook:3050/validate-request",
+            "url": "http://auth_hook:3060/validate-request",
             "method": "POST"
           }
         }

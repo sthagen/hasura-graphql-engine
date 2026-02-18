@@ -4,7 +4,7 @@
     "mode": {
       "webhook": {
         "url": {
-          "value": "http://127.0.0.1:3050/validate-request"
+          "value": "http://127.0.0.1:3060/validate-request"
         },
         "method": "POST"
       }

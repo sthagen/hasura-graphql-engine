@@ -75,7 +75,7 @@ impl AuthConfigV4 {
                         "webhook": {
                             "method": "GET",
                             "url": {
-                                "value": "http://auth_hook:3050/validate-request"
+                                "value": "http://auth_hook:3060/validate-request"
                             },
                             "customHeadersConfig": {
                                 "headers": {
@@ -140,7 +140,7 @@ impl AuthConfigV3 {
                         "webhook": {
                             "method": "GET",
                             "url": {
-                                "value": "http://auth_hook:3050/validate-request"
+                                "value": "http://auth_hook:3060/validate-request"
                             },
                             "customHeadersConfig": {
                                 "headers": {
@@ -187,7 +187,7 @@ impl AuthConfigV2 {
                 {
                     "mode": {
                       "webhook": {
-                        "url": "http://auth_hook:3050/validate-request",
+                        "url": "http://auth_hook:3060/validate-request",
                         "method": "Post"
                       }
                     }
@@ -218,7 +218,7 @@ impl AuthConfigV1 {
                     "allowRoleEmulationBy": "admin",
                     "mode": {
                       "webhook": {
-                        "url": "http://auth_hook:3050/validate-request",
+                        "url": "http://auth_hook:3060/validate-request",
                         "method": "Post"
                       }
                     }

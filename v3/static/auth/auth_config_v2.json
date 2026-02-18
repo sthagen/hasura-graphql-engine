@@ -3,7 +3,7 @@
   "definition": {
     "mode": {
       "webhook": {
-        "url": "http://127.0.0.1:3050/validate-request",
+        "url": "http://127.0.0.1:3060/validate-request",
         "method": "Post"
       }
     }
