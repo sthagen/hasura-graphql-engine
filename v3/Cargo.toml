@@ -179,3 +179,10 @@ unicode-normalization = "0.1"
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 zstd = { version = "0.13" }
+
+
+[patch.crates-io]
+# The azdls backend in opendal 0.55.0 does not call `AzureStorageConfig::from_env()`, so Azure
+# Workload Identity env vars (AZURE_FEDERATED_TOKEN_FILE etc.) are never loaded. This causes
+# reqsign to skip workload identity and fall through to IMDS, which fails on AKS.
+# Upstream tracking: https://github.com/apache/opendal/issues/5534
