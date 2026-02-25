@@ -2328,7 +2328,6 @@ dependencies = [
  "pretty_assertions",
  "reqwest",
  "serde",
- "serde-jsonlines",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -5478,20 +5477,6 @@ name = "serde-ext"
 version = "3.0.0"
 dependencies = [
  "indexmap 2.13.0",
-]
-
-[[package]]
-name = "serde-jsonlines"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "013e069239d98648ea43a9c01845b381445e88de08b5a895ef9302e3bffde03d"
-dependencies = [
- "futures-core",
- "futures-sink",
- "pin-project-lite",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

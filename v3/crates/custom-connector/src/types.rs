@@ -14,6 +14,7 @@ pub mod login;
 pub mod movie;
 pub mod name_query;
 pub mod staff_member;
+pub mod streaming_error;
 pub mod r#where;
 pub mod where_int;
 pub mod where_string;
@@ -237,6 +238,7 @@ pub(crate) fn object_types() -> BTreeMap<ndc_models::ObjectTypeName, ndc_models:
             location_pascalcase::definition(),
         ),
         ("staff_member".into(), staff_member::definition()),
+        ("streaming_error".into(), streaming_error::definition()),
         ("login_response".into(), login::definition_login_response()),
         (
             "session_response".into(),
