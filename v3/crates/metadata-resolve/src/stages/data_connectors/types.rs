@@ -118,13 +118,15 @@ impl<'a> DataConnectorContext<'a> {
             None
         };
 
+        let headers: IndexMap<String, String> = data_connector
+            .headers
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value.clone()))
+            .collect();
+
         let context = DataConnectorContext {
             url: &data_connector.url,
-            headers: data_connector
-                .headers
-                .iter()
-                .map(|(k, v)| (k.clone(), v.value.clone()))
-                .collect(),
+            headers,
             schema: resolved_schema,
             capabilities,
             argument_presets,

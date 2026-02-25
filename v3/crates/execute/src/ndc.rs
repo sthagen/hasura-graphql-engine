@@ -25,6 +25,8 @@ use tracing_util::{AttributeVisibility, SpanVisibility, set_attribute_on_active_
 use crate::error;
 use engine_types::{HttpContext, ProjectId};
 
+const CONNECTOR_NAME_HEADER: &str = "x-hasura-connector-name";
+
 /// Executes a NDC operation
 pub async fn execute_ndc_query(
     http_context: &HttpContext,
@@ -114,8 +116,11 @@ pub async fn fetch_from_data_connector(
             SpanVisibility::Internal,
             || {
                 Box::pin(async {
-                    let headers =
-                        append_project_id_to_headers(&data_connector.headers.0, project_id)?;
+                    let headers = append_request_context_headers(
+                        &data_connector.headers.0,
+                        project_id,
+                        data_connector,
+                    )?;
                     let ndc_config = client::Configuration {
                         base_path: data_connector.url.get_url(ast::OperationType::Query),
                         // This is isn't expensive, reqwest::Client is behind an Arc
@@ -144,22 +149,31 @@ pub async fn fetch_from_data_connector(
     Ok(response)
 }
 
-// This function appends project-id (if present) to the HeaderMap defined by the data_connector object
-pub fn append_project_id_to_headers<'a>(
+// This function appends engine-managed protocol headers to the HeaderMap defined
+// by the data_connector object.
+pub fn append_request_context_headers<'a>(
     headers: &'a HeaderMap,
     project_id: Option<&ProjectId>,
+    data_connector: &metadata_resolve::DataConnectorLink,
 ) -> Result<Cow<'a, HeaderMap>, client::Error> {
-    match project_id {
-        None => Ok(Cow::Borrowed(headers)),
-        Some(project_id) => {
-            let mut modified_headers = headers.clone();
-            modified_headers.append(
-                "project-id",
-                reqwest::header::HeaderValue::from_str(&project_id.0)?,
-            );
-            Ok(Cow::Owned(modified_headers))
-        }
+    let mut modified_headers = headers.clone();
+
+    modified_headers.insert(
+        CONNECTOR_NAME_HEADER,
+        reqwest::header::HeaderValue::from_str(&format!(
+            "{}:{}",
+            data_connector.name.subgraph, data_connector.name.name
+        ))?,
+    );
+
+    if let Some(project_id) = project_id {
+        modified_headers.append(
+            "project-id",
+            reqwest::header::HeaderValue::from_str(&project_id.0)?,
+        );
     }
+
+    Ok(Cow::Owned(modified_headers))
 }
 
 /// Executes a NDC mutation
@@ -251,8 +265,11 @@ pub async fn fetch_from_data_connector_mutation(
             SpanVisibility::Internal,
             || {
                 Box::pin(async {
-                    let headers =
-                        append_project_id_to_headers(&data_connector.headers.0, project_id)?;
+                    let headers = append_request_context_headers(
+                        &data_connector.headers.0,
+                        project_id,
+                        data_connector,
+                    )?;
                     let ndc_config = client::Configuration {
                         base_path: data_connector.url.get_url(ast::OperationType::Mutation),
                         // This is isn't expensive, reqwest::Client is behind an Arc
@@ -319,8 +336,11 @@ pub async fn fetch_from_data_connector_explain(
             SpanVisibility::Internal,
             || {
                 Box::pin(async {
-                    let headers =
-                        append_project_id_to_headers(&data_connector.headers.0, project_id)?;
+                    let headers = append_request_context_headers(
+                        &data_connector.headers.0,
+                        project_id,
+                        data_connector,
+                    )?;
                     let ndc_config = client::Configuration {
                         base_path: data_connector.url.get_url(ast::OperationType::Query),
                         // This is isn't expensive, reqwest::Client is behind an Arc
@@ -390,8 +410,11 @@ pub async fn fetch_from_data_connector_mutation_explain(
             SpanVisibility::Internal,
             || {
                 Box::pin(async {
-                    let headers =
-                        append_project_id_to_headers(&data_connector.headers.0, project_id)?;
+                    let headers = append_request_context_headers(
+                        &data_connector.headers.0,
+                        project_id,
+                        data_connector,
+                    )?;
                     let ndc_config = client::Configuration {
                         base_path: data_connector.url.get_url(ast::OperationType::Mutation),
                         // This is isn't expensive, reqwest::Client is behind an Arc
@@ -436,8 +459,11 @@ pub async fn fetch_from_data_connector_insert_rel(
             SpanVisibility::Internal,
             || {
                 Box::pin(async {
-                    let headers =
-                        append_project_id_to_headers(&data_connector.headers.0, project_id)?;
+                    let headers = append_request_context_headers(
+                        &data_connector.headers.0,
+                        project_id,
+                        data_connector,
+                    )?;
                     let ndc_config = client::Configuration {
                         base_path: data_connector.url.get_url(ast::OperationType::Mutation),
                         // This is isn't expensive, reqwest::Client is behind an Arc
@@ -469,8 +495,11 @@ pub async fn fetch_from_data_connector_update_rel(
             SpanVisibility::Internal,
             || {
                 Box::pin(async {
-                    let headers =
-                        append_project_id_to_headers(&data_connector.headers.0, project_id)?;
+                    let headers = append_request_context_headers(
+                        &data_connector.headers.0,
+                        project_id,
+                        data_connector,
+                    )?;
                     let ndc_config = client::Configuration {
                         base_path: data_connector.url.get_url(ast::OperationType::Mutation),
                         // This is isn't expensive, reqwest::Client is behind an Arc
@@ -502,8 +531,11 @@ pub async fn fetch_from_data_connector_delete_rel(
             SpanVisibility::Internal,
             || {
                 Box::pin(async {
-                    let headers =
-                        append_project_id_to_headers(&data_connector.headers.0, project_id)?;
+                    let headers = append_request_context_headers(
+                        &data_connector.headers.0,
+                        project_id,
+                        data_connector,
+                    )?;
                     let ndc_config = client::Configuration {
                         base_path: data_connector.url.get_url(ast::OperationType::Mutation),
                         // This is isn't expensive, reqwest::Client is behind an Arc
