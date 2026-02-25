@@ -130,6 +130,16 @@ pub enum PermissionError {
 impl TraceableError for PermissionError {
     fn visibility(&self) -> ErrorVisibility {
         match self {
+            // a missing session variable is a user/permission error, not an internal error
+            Self::ConditionEvaluationError(
+                authorization_rules::ConditionError::SessionVariableNotFound { .. },
+            )
+            | Self::ObjectFieldNotFound { .. }
+            | Self::ObjectTypeNotAccessible { .. }
+            | Self::CommandNotAccessible { .. }
+            | Self::ModelNotAccessible { .. }
+            | Self::ViewNotFound { .. }
+            | Self::Other(_) => ErrorVisibility::User,
             Self::ObjectTypeNotFound { .. }
             | Self::CommandNotFound { .. }
             | Self::ModelNotFound { .. }
@@ -139,14 +149,8 @@ impl TraceableError for PermissionError {
             | Self::FieldNotFoundInBooleanExpressionType { .. }
             | Self::RelationshipNotFoundInBooleanExpressionType { .. }
             | Self::ObjectBooleanExpressionTypeNotFound { .. }
-            | Self::ConditionEvaluationError(_)
-            | Self::NestedScalarFilteringNotSupported { .. } => ErrorVisibility::Internal,
-            Self::ObjectFieldNotFound { .. }
-            | Self::ObjectTypeNotAccessible { .. }
-            | Self::CommandNotAccessible { .. }
-            | Self::ModelNotAccessible { .. }
-            | Self::ViewNotFound { .. }
-            | Self::Other(_) => ErrorVisibility::User,
+            | Self::NestedScalarFilteringNotSupported { .. }
+            | Self::ConditionEvaluationError(_) => ErrorVisibility::Internal,
         }
     }
 }
