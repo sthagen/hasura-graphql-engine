@@ -9,7 +9,7 @@ use metadata_resolve::{
 };
 use open_dds::query::ArgumentName;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 // where possible, return references to the original data in the metadata
 // to avoid cloning them until we actually need them
 pub struct ModelPermission<'a> {

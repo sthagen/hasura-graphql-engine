@@ -141,6 +141,7 @@ pub fn get_input_object_type<'metadata>(
     Ok(InputObjectTypeView { field_presets })
 }
 
+#[derive(Debug, Clone)]
 pub struct ModelView<'metadata> {
     pub data_type: &'metadata Qualified<CustomTypeName>,
     pub source: &'metadata metadata_resolve::ModelSource,
