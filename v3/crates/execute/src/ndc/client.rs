@@ -20,7 +20,7 @@ use ndc_models::{
 };
 
 use futures::TryStreamExt;
-use tokio_stream::Stream;
+use tokio_stream::{Stream, StreamExt};
 
 /// Error type for the NDC API client interactions
 #[derive(Debug, thiserror::Error)]
@@ -512,7 +512,7 @@ pub async fn mutation_relational_delete_post(
 pub async fn query_relational_stream(
     configuration: Configuration<'_>,
     request: &ndc_models::RelationalQuery,
-) -> Result<impl Stream<Item = Result<Vec<serde_json::Value>, std::io::Error>> + use<>, Error> {
+) -> Result<impl Stream<Item = Result<Vec<serde_json::Value>, Error>> + use<>, Error> {
     let tracer = tracing_util::global_tracer();
 
     tracer
@@ -541,18 +541,56 @@ pub async fn query_relational_stream(
                             error_response: NdcErrorResponse::V02(response.json().await?),
                         }));
                     }
-                    let reader = StreamReader::new(
-                        response
-                            .error_for_status()
-                            .map_err(Error::Reqwest)?
-                            .bytes_stream()
-                            .map_err(std::io::Error::other),
+                    let byte_stream = response
+                        .error_for_status()
+                        .map_err(Error::Reqwest)?
+                        .bytes_stream()
+                        .map_err(std::io::Error::other);
+                    let reader = StreamReader::new(byte_stream);
+                    let lines = tokio_util::codec::FramedRead::new(
+                        reader,
+                        tokio_util::codec::LinesCodec::new(),
                     );
-                    Ok(serde_jsonlines::AsyncJsonLinesReader::new(reader).read_all())
+                    let parsed_stream = lines.map(
+                        |line_result: Result<String, tokio_util::codec::LinesCodecError>| {
+                            let line = line_result
+                                .map_err(|e| Error::IOError(std::io::Error::other(e)))?;
+                            if line.is_empty() {
+                                return Ok(Vec::new());
+                            }
+                            // Check for JSON-encoded error lines (e.g. [500, "big internal error"])
+                            if let Some(connector_error) = parse_ndjson_error_line(&line) {
+                                return Err(Error::Connector(connector_error));
+                            }
+                            serde_json::from_str::<Vec<serde_json::Value>>(&line)
+                                .map_err(Error::Serde)
+                        },
+                    );
+                    Ok(parsed_stream)
                 })
             },
         )
         .await
+}
+
+/// Parse a line from an NDJSON stream that represents a connector error.
+///
+/// Connectors may emit error lines as JSON arrays `[<status_code>, "<message>"]`
+/// (e.g. `[500, "big internal error"]`). This function detects such lines and
+/// converts them into a `ConnectorError` with the appropriate HTTP status code.
+fn parse_ndjson_error_line(line: &str) -> Option<ConnectorError> {
+    let parsed: (u16, String) = serde_json::from_str(line).ok()?;
+    let status = reqwest::StatusCode::from_u16(parsed.0).ok()?;
+    if status.is_success() {
+        return None;
+    }
+    Some(ConnectorError {
+        status,
+        error_response: NdcErrorResponse::V02(ndc_models::ErrorResponse {
+            message: parsed.1,
+            details: serde_json::Value::Null,
+        }),
+    })
 }
 
 // Private utility functions

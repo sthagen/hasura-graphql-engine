@@ -117,10 +117,21 @@ pub async fn execute_relational_query(
 pub async fn execute_relational_query_stream(
     state: &AppState,
     request: &RelationalQuery,
-) -> Result<impl futures::Stream<Item = std::result::Result<String, std::io::Error>> + use<>> {
+) -> Result<
+    std::pin::Pin<
+        Box<dyn futures::Stream<Item = std::result::Result<String, std::io::Error>> + Send>,
+    >,
+> {
     use futures::{StreamExt, TryStreamExt};
 
     println!("[SELECT STREAM]: query={request:?}");
+
+    // Inject streaming error for error-testing collections
+    if let Some(error_line) = get_injected_error_line(&request.root_relation) {
+        let items: Vec<std::result::Result<String, std::io::Error>> =
+            vec![Ok("[1]\n".to_string()), Ok(error_line)];
+        return Ok(Box::pin(futures::stream::iter(items)));
+    }
 
     let physical_plan = create_physical_plan(request, state).await?;
 
@@ -165,7 +176,34 @@ pub async fn execute_relational_query_stream(
         })
         .try_flatten();
 
-    Ok(row_stream)
+    Ok(Box::pin(row_stream))
+}
+
+/// Returns an error line to inject into the streaming response if the root
+/// collection is an error-testing collection, or `None` otherwise.
+///
+/// Error lines are encoded as JSON arrays: `[<status_code>, "<message>"]`.
+fn get_injected_error_line(relation: &Relation) -> Option<String> {
+    let collection_name = get_root_collection_name(relation)?;
+    match collection_name {
+        "streaming_error" => Some("[500, \"big internal error\"]\n".to_string()),
+        "conflict_error" => Some("[409, \"conflict error\"]\n".to_string()),
+        _ => None,
+    }
+}
+
+fn get_root_collection_name(relation: &Relation) -> Option<&str> {
+    match relation {
+        Relation::From { collection, .. } => Some(collection.as_str()),
+        Relation::Project { input, .. }
+        | Relation::Filter { input, .. }
+        | Relation::Sort { input, .. }
+        | Relation::Paginate { input, .. }
+        | Relation::Aggregate { input, .. }
+        | Relation::Window { input, .. } => get_root_collection_name(input),
+        Relation::Join { left, .. } => get_root_collection_name(left),
+        Relation::Union { relations } => relations.first().and_then(get_root_collection_name),
+    }
 }
 
 fn convert_fields_object_to_row_vec(
@@ -520,6 +558,16 @@ fn get_table_provider(
             crate::collections::continents::rows(&BTreeMap::new(), state)
                 .map_err(|e| DataFusionError::Internal(e.1.0.message))?,
             crate::types::continent::definition().fields,
+        ),
+        "streaming_error" => (
+            crate::collections::streaming_error::rows(&BTreeMap::new(), state)
+                .map_err(|e| DataFusionError::Internal(e.1.0.message))?,
+            crate::types::streaming_error::definition().fields,
+        ),
+        "conflict_error" => (
+            crate::collections::conflict_error::rows(&BTreeMap::new(), state)
+                .map_err(|e| DataFusionError::Internal(e.1.0.message))?,
+            crate::types::streaming_error::definition().fields,
         ),
         "movies" => (
             crate::collections::movies::rows(&BTreeMap::new(), state)

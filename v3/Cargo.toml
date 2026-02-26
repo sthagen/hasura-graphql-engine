@@ -151,7 +151,6 @@ schemars = { version = "0.8", features = ["preserve_order", "smol_str", "url"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_arrow = { version = "0.13.7", features = ["arrow-57"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-serde-jsonlines = { version = "0.7.0", features = ["async"] }
 serde_path_to_error = "0.1"
 serde_with = { version = "3", features = ["indexmap_2"] }
 sha2 = "0.10"

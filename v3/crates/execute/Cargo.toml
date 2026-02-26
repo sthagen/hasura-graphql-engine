@@ -31,7 +31,6 @@ nonempty = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde-jsonlines = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 transitive = { workspace = true }
