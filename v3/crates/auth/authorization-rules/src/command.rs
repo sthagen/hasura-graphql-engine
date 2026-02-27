@@ -12,7 +12,7 @@ use crate::{
     condition::{ConditionError, evaluate_optional_condition_hash},
 };
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArgumentPolicy<'a> {
     ValueExpression {
         argument_type: &'a QualifiedTypeReference,
