@@ -160,6 +160,13 @@ impl Model {
             Model::V2(v2) => &v2.description,
         }
     }
+
+    pub fn unique_identifiers(&self) -> &Option<Vec<Vec<FieldName>>> {
+        match self {
+            Model::V1(v1) => &v1.unique_identifiers,
+            Model::V2(v2) => &v2.unique_identifiers,
+        }
+    }
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
@@ -186,6 +193,9 @@ pub struct ModelV1 {
     pub orderable_fields: Vec<OrderableField>,
     /// The name of the AggregateExpression that defines how to aggregate over this model
     pub aggregate_expression: Option<AggregateExpressionName>,
+    /// Sets of fields that uniquely identify an object in this model.
+    /// Each inner list is a set of fields that, together, form a unique constraint.
+    pub unique_identifiers: Option<Vec<Vec<FieldName>>>,
     /// Configuration for how this model should appear in the GraphQL schema.
     pub graphql: Option<ModelGraphQlDefinition>,
     /// The description of the model.
@@ -218,6 +228,9 @@ pub struct ModelV2 {
     pub order_by_expression: Option<OrderByExpressionName>,
     /// The name of the AggregateExpression that defines how to aggregate over this model
     pub aggregate_expression: Option<AggregateExpressionName>,
+    /// Sets of fields that uniquely identify an object in this model.
+    /// Each inner list is a set of fields that, together, form a unique constraint.
+    pub unique_identifiers: Option<Vec<Vec<FieldName>>>,
     /// Configuration for how this model should appear in the GraphQL schema.
     pub graphql: Option<ModelGraphQlDefinitionV2>,
     /// The description of the model.
@@ -441,14 +454,14 @@ pub enum EnableAllOrSpecific<T> {
     EnableSpecific(Vec<T>),
 }
 
-impl<'de, T: serde::Deserialize<'de> + JsonSchema> OpenDd for EnableAllOrSpecific<T> {
+impl<T: serde::de::DeserializeOwned + JsonSchema> OpenDd for EnableAllOrSpecific<T> {
     fn deserialize(
         json: serde_json::Value,
         _path: jsonpath::JSONPath,
     ) -> Result<Self, OpenDdDeserializeError> {
-        serde_path_to_error::deserialize(json).map_err(|e| OpenDdDeserializeError {
-            path: jsonpath::JSONPath::from_serde_path(e.path()),
-            error: e.into_inner(),
+        serde_json::from_value(json).map_err(|e| OpenDdDeserializeError {
+            path: _path,
+            error: e,
         })
     }
 
