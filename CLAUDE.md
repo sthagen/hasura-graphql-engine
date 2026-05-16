@@ -11,3 +11,5 @@ for release automation so the structure needs to stay intact.
 
 For any haskell code changes use `cabal build all --enable-tests --enable-benchmarks` 
 to check your work and iterate until it builds cleanly.
+
+Make sure to always do a final pass with the above before concluding your work!
