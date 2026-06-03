@@ -194,11 +194,8 @@ saveLockedEventTriggerEvents :: (MonadIO m) => SourceName -> [EventId] -> TVar (
 saveLockedEventTriggerEvents sourceName eventIds lockedEvents =
   liftIO
     $ atomically
-    $ do
-      lockedEventsVals <- readTVar lockedEvents
-      case HashMap.lookup sourceName lockedEventsVals of
-        Nothing -> writeTVar lockedEvents $! HashMap.singleton sourceName (Set.fromList eventIds)
-        Just _ -> writeTVar lockedEvents $! HashMap.insertWith Set.union sourceName (Set.fromList eventIds) lockedEventsVals
+    $ modifyTVar' lockedEvents
+    $ HashMap.insertWith Set.union sourceName (Set.fromList eventIds)
 
 removeEventTriggerEventFromLockedEvents ::
   (MonadIO m) => SourceName -> EventId -> TVar (HashMap SourceName (Set.Set EventId)) -> m ()
@@ -207,7 +204,12 @@ removeEventTriggerEventFromLockedEvents sourceName eventId lockedEvents =
     $ atomically
     $ do
       lockedEventsVals <- readTVar lockedEvents
-      writeTVar lockedEvents $! HashMap.adjust (Set.delete eventId) sourceName lockedEventsVals
+      -- delete eventId from set, maintaining no-empty-sets invariant
+      writeTVar lockedEvents $! HashMap.update deleteEventIdNE sourceName lockedEventsVals
+  where
+    deleteEventIdNE s = 
+      let sDeleted = Set.delete eventId s
+       in sDeleted <$ guard (not $ null sDeleted)
 
 type BackendEventWithSource = AB.AnyBackend EventWithSource
 
