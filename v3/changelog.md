@@ -455,9 +455,7 @@ The plugin receives a request body with the following structure:
       "x-hasura-user-id": "1"
     }
   },
-  "ndcRequest": {
-    /* The NDC request if configured */
-  },
+  "ndcRequest": {/* The NDC request if configured */},
   "dataConnectorName": "qualified.connector.name",
   "operationType": "query|queryExplain|mutation|mutationExplain",
   "ndcVersion": "v0.1.x|v0.2.x"
@@ -515,12 +513,8 @@ The plugin receives a request body with the following structure:
       "x-hasura-user-id": "1"
     }
   },
-  "ndcRequest": {
-    /* The original NDC request if configured */
-  },
-  "ndcResponse": {
-    /* The NDC response if configured */
-  },
+  "ndcRequest": {/* The original NDC request if configured */},
+  "ndcResponse": {/* The NDC response if configured */},
   "dataConnectorName": "qualified.connector.name",
   "operationType": "query|queryExplain|mutation|mutationExplain",
   "ndcVersion": "v0.1.x|v0.2.x"
