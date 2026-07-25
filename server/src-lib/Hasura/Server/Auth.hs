@@ -43,7 +43,7 @@ import Data.Text.Encoding qualified as T
 import Data.Text.Extended ((<<>), (<>>))
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Hasura.Authentication.Role (RoleName, adminRoleName)
-import Hasura.Authentication.Session (adminSecretHeader, deprecatedAccessKeyHeader, getSessionVariableValue, mkSessionVariablesHeaders)
+import Hasura.Authentication.Session (adminSecretHeader, getSessionVariableValue, mkSessionVariablesHeaders)
 import Hasura.Authentication.User (ExtraUserInfo, UserAdminSecret (..), UserInfo, UserRoleBuild (..), mkUserInfo)
 import Hasura.Base.Error
 import Hasura.GraphQL.Transport.HTTP.Protocol (ReqsText)
@@ -120,10 +120,10 @@ compareAuthMode authMode authMode' = do
     _ -> return $ authMode == authMode'
   where
     compareJWTConfig :: JWTCtx -> JWTCtx -> IO Bool
-    compareJWTConfig (JWTCtx url keyConfigRef audM iss claims allowedSkew headers) (JWTCtx url' keyConfigRef' audM' iss' claims' allowedSkew' headers') = do
+    compareJWTConfig (JWTCtx url keyConfigRef aud iss claims allowedSkew headers) (JWTCtx url' keyConfigRef' aud' iss' claims' allowedSkew' headers') = do
       keyConfig <- readIORef keyConfigRef
       keyConfig' <- readIORef keyConfigRef'
-      return $ (url, keyConfig, audM, iss, claims, allowedSkew, headers) == (url', keyConfig', audM', iss', claims', allowedSkew', headers')
+      return $ (url, keyConfig, aud, iss, claims, allowedSkew, headers) == (url', keyConfig', aud', iss', claims', allowedSkew', headers')
 
 -- | Validate the user's requested authentication configuration, launching any
 -- required maintenance threads for JWT etc.
@@ -188,7 +188,11 @@ mkJwtCtx JWTConfig {..} logger httpManager = do
       jwkRef <- liftIO $ newIORef (JWKSet [], Nothing)
       return (Just uri, jwkRef)
   let jwtHeader = fromMaybe JHAuthorization jcHeader
-  return $ JWTCtx jwkUri jwkKeyConfig jcAudience jcIssuer jcClaims jcAllowedSkew jwtHeader
+      toClaimCheck :: ExtraRequiredClaim -> Maybe a -> Maybe (JWTClaimCheckConfig a)
+      toClaimCheck erc = fmap \checkValue -> JWTClaimCheckConfig { checkValue, invalidIfMissing = erc `elem` jcExtraRequiredClaims }
+      jcxAudienceCheck = toClaimCheck ERCAudience jcAudience
+      jcxIssuerCheck = toClaimCheck ERCIssuer jcIssuer
+  return $ JWTCtx jwkUri jwkKeyConfig jcxAudienceCheck jcxIssuerCheck jcClaims jcAllowedSkew jwtHeader
   where
     -- JWK fetching is a significant source of tenant startup failures that are
     -- (currently) not automatically retried since they appear to be user
@@ -287,7 +291,7 @@ getUserInfoWithExpTime_ userInfoFromAuthHook_ processJwt_ logger manager rawHead
         -- Consider unauthorized role, if not found raise admin secret header required exception
         case maybeUnauthRole of
           Nothing ->
-            throw401 $ adminSecretHeader <<> "/" <> deprecatedAccessKeyHeader <<> " required, but not found"
+            throw401 $ adminSecretHeader <<> " required, but not found"
           Just unAuthRole ->
             mkUserInfo (URBPreDetermined unAuthRole) UAdminSecretNotSent sessionVariables
   -- this is the case that actually ends up consuming the request AST
@@ -310,11 +314,7 @@ getUserInfoWithExpTime_ userInfoFromAuthHook_ processJwt_ logger manager rawHead
     checkingSecretIfSent ::
       Set.HashSet AdminSecretHash -> m (UserInfo, Maybe UTCTime, [HTTP.Header]) -> m (UserInfo, Maybe UTCTime, [HTTP.Header])
     checkingSecretIfSent adminSecretHashSet actionIfNoAdminSecret = do
-      let maybeRequestAdminSecret =
-            foldl1 (<|>)
-              $ map
-                (`getSessionVariableValue` sessionVariables)
-                [adminSecretHeader, deprecatedAccessKeyHeader]
+      let maybeRequestAdminSecret = getSessionVariableValue adminSecretHeader sessionVariables
 
       -- when admin secret is absent, run the action to retrieve UserInfo
       case maybeRequestAdminSecret of
@@ -323,9 +323,7 @@ getUserInfoWithExpTime_ userInfoFromAuthHook_ processJwt_ logger manager rawHead
           unless (Set.member (hashAdminSecret requestAdminSecret) adminSecretHashSet)
             . throw401
             $ "invalid "
-            <> adminSecretHeader
-            <<> "/"
-            <>> deprecatedAccessKeyHeader
+            <>> adminSecretHeader
           withNoExpTime $ mkUserInfoFallbackAdminRole UAdminSecretSent
 
     withNoExpTime a = (,Nothing,[]) <$> a

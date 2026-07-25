@@ -170,16 +170,24 @@ translateBoolExp userInfo = \case
           -- Convert the where clause on scalar computed field
           bExps <- traverse (lift . mkFieldCompExp rootReference currTableReference redactionExp (LComputedField function sessionArgPresence) userInfo) opExps
           pure $ sqlAnd bExps
-        CFBETable _ be -> do
-          -- Convert the where clause on table computed field
+        -- NOTE: this mostly mirrors the AVRelationship case above
+        CFBETable _ RelationshipFilters { rfTargetTablePermissions, rfFilter } -> do
+          -- Convert the where clause on table computed field, mirroring AVRelationship:
+          -- AND the returning table's row permission filter into the EXISTS subquery.
           BoolExpCtx {currTableReference} <- ask
           functionAlias <- S.toTableAlias <$> freshIdentifier function
           let functionIdentifier = S.tableAliasToIdentifier functionAlias
+              functionQual = S.QualifiedIdentifier functionIdentifier Nothing
               functionExp =
                 mkComputedFieldFunctionExp currTableReference function sessionArgPresence
                   $ Just
                   $ functionAlias
-          S.mkExists (S.FIFunc functionExp) <$> withCurrentTable (S.QualifiedIdentifier functionIdentifier Nothing) (translateBoolExp userInfo be)
+          permBoolExp <-
+            local
+              (\e -> e {currTableReference = functionQual, rootReference = functionQual})
+              (translateBoolExp userInfo rfTargetTablePermissions)
+          annBoolExp <- withCurrentTable functionQual (translateBoolExp userInfo rfFilter)
+          pure $ S.mkExists (S.FIFunc functionExp) (S.BEBin S.AndOp permBoolExp annBoolExp)
     AVAggregationPredicates aggPreds -> translateAVAggregationPredicates userInfo aggPreds
     AVRemoteRelationship (RemoteRelPermBoolExp _rawRelBoolExp (lhsCol, _rawRelBoolExplhsColType) rhsFetchInfo) -> do
       {-
@@ -477,6 +485,8 @@ mkFieldCompExp rootReference currTableReference lhsRedactionExp lhsField userInf
         AHasKey val -> S.BECompare S.SHasKey lhs val
         AHasKeysAny val -> S.BECompare S.SHasKeysAny lhs val
         AHasKeysAll val -> S.BECompare S.SHasKeysAll lhs val
+        AJsonbPathExists val -> S.BECompare S.SJsonbPathExists lhs (S.SETyAnn val (S.TypeAnn "jsonpath"))
+        AJsonbPathMatch val -> S.BECompare S.SJsonbPathMatch lhs (S.SETyAnn val (S.TypeAnn "jsonpath"))
         AAncestor val -> S.BECompare S.SContains lhs val
         AAncestorAny val -> S.BECompare S.SContains lhs val
         ADescendant val -> S.BECompare S.SContainedIn lhs val

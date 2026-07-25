@@ -59,6 +59,7 @@ import Hasura.Server.Logging (HttpLogQueryOnlyOnError (HttpLogQueryOnlyOnErrorDi
 import Hasura.Server.Types
   ( ApolloFederationStatus (ApolloFederationDisabled),
     EventingMode (EventingEnabled),
+    EventProcessingMode (EventProcessingEnabled),
     ExperimentalFeature (..),
     MaintenanceMode (MaintenanceModeDisabled),
     ReadOnlyMode (ReadOnlyModeDisabled),
@@ -320,7 +321,9 @@ serveOptions =
       soAdminInternalErrors = Init.AdminInternalErrorsEnabled,
       soGracefulShutdownTimeout = $$(refineTH 0), -- Don't wait to shutdown.
       soWebSocketConnectionInitTimeout = Init._default Init.webSocketConnectionInitTimeoutOption,
+      soWebSocketQueueSize = Init._default Init.webSocketQueueSizeOption,
       soEventingMode = EventingEnabled,
+      soEventProcessingMode = EventProcessingEnabled,
       soReadOnlyMode = ReadOnlyModeDisabled,
       soEnableMetadataQueryLogging = MetadataQueryLoggingDisabled,
       soHttpLogQueryOnlyOnError = HttpLogQueryOnlyOnErrorDisabled,

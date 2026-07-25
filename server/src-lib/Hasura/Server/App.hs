@@ -151,7 +151,6 @@ newtype Handler m a = Handler (ReaderT HandlerCtx (ExceptT QErr m) a)
       MonadTrace,
       HasAppEnv,
       HasCacheStaticConfig,
-      HasFeatureFlagChecker,
       HasResourceLimits,
       MonadResolveSource,
       E.MonadGQLExecutionCheck,
@@ -244,7 +243,18 @@ isDeveloperAPIEnabled ac = S.member DEVELOPER $ acEnabledAPIs ac
 -- {-# SCC parseBody #-}
 parseBody :: (FromJSON a, MonadError QErr m) => BL.ByteString -> m (Value, a)
 parseBody reqBody =
-  case eitherDecode' reqBody of
+  -- Sanitize illegal unescaped ASCII control characters (0x00–0x1F) that some
+  -- clients embed literally inside JSON strings. Prior to aeson 2.2.4.0 these
+  -- were sometimes passed through into parsed 'String's.
+  --
+  -- In valid JSON these can only appear as insignificant whitespace between
+  -- tokens, so stripping them never semantically alters or corrupts a
+  -- well-formed payload. But some customers seem to have been relying on the
+  -- old behavior to inject newlines as white-space delimiter for their
+  -- graphql (e.g. in selection sets, in lieu of a comma or space), so rather
+  -- than just stripping, with great sadness we map control characters to space
+  -- so that these malformed queries continue to lex to equivalent graphql.
+  case eitherDecode' (BL.map (\w -> if w < 0x20 then 0x20 else w) reqBody) of
     Left e -> throw400 InvalidJSON (T.pack e)
     Right jVal -> (jVal,) <$> decodeValue jVal
 
@@ -446,8 +456,9 @@ mkSpockAction appStateRef qErrEncoder qErrModifier apiHandler = do
       AppEnv {..} <- lift askAppEnv
       let httpLogMetadata = buildHttpLogMetadata @m emptyHttpLogGraphQLInfo extraUserInfo
           jsonResponse = J.encodingToLazyByteString $ qErrEncoder includeInternal qErr
+          reqIdHeader = (requestIdHeader, txtToBs $ unRequestId reqId)
           contentLength = ("Content-Length", B8.toStrict $ BB.toLazyByteString $ BB.int64Dec $ BL.length jsonResponse)
-          allHeaders = [contentLength, jsonHeader]
+          allHeaders = [reqIdHeader, contentLength, jsonHeader]
       -- https://opentelemetry.io/docs/reference/specification/trace/semantic_conventions/http/#common-attributes
       lift $ Tracing.attachMetadata [("http.response_content_length", bsToTxt $ snd contentLength)]
       lift $ Tracing.setSpanError (qeError qErr)
@@ -776,10 +787,6 @@ configApiGetHandler appStateRef = do
     $ do
       AppEnv {..} <- lift askAppEnv
       AppContext {..} <- liftIO $ getAppContext appStateRef
-      featureFlagSettings <-
-        traverse
-          (\(ff, desc) -> (ff,desc,) <$> liftIO (runCheckFeatureFlag appEnvCheckFeatureFlag ff))
-          (listKnownFeatureFlags appEnvCheckFeatureFlag)
       mkSpockAction appStateRef encodeQErr id
         $ mkGetHandler
         $ do
@@ -796,7 +803,6 @@ configApiGetHandler appStateRef = do
                   acExperimentalFeatures
                   acEnabledAPIs
                   acDefaultNamingConvention
-                  featureFlagSettings
                   acApolloFederationStatus
           return (emptyHttpLogGraphQLInfo, JSONResp $ HttpResponse (encJFromJValue res) [])
 
@@ -850,7 +856,7 @@ mkWaiApp setupHook appStateRef consoleType ekgStore wsServerEnv = do
       $ httpApp setupHook appStateRef appEnv consoleType ekgStore
       $ WS.mkCloseWebsocketsOnMetadataChangeAction (WS._wseServer wsServerEnv)
 
-  let wsServerApp = WS.createWSServerApp (_lsEnabledLogTypes appEnvLoggingSettings) wsServerEnv appEnvWebSocketConnectionInitTimeout appEnvLicenseKeyCache
+  let wsServerApp = WS.createWSServerApp (_lsEnabledLogTypes appEnvLoggingSettings) wsServerEnv appEnvWebSocketConnectionInitTimeout appEnvWebSocketQueueSize appEnvLicenseKeyCache
       stopWSServer = WS.stopWSServerApp wsServerEnv
 
   waiApp <- liftWithStateless $ \lowerIO ->

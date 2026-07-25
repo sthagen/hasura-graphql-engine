@@ -319,12 +319,14 @@ data ServeOptionsRaw impl = ServeOptionsRaw
     rsoInferFunctionPermissions :: Maybe Schema.Options.InferFunctionPermissions,
     rsoEnableMaintenanceMode :: Server.Types.MaintenanceMode (),
     rsoEventingMode :: Server.Types.EventingMode,
+    rsoEventProcessingMode :: Server.Types.EventProcessingMode,
     rsoSchemaPollInterval :: Maybe OptionalInterval,
     -- | See Note '$experimentalFeatures' at bottom of module
     rsoExperimentalFeatures :: Maybe (HashSet Server.Types.ExperimentalFeature),
     rsoEventsFetchBatchSize :: Maybe (Refined NonNegative Int),
     rsoGracefulShutdownTimeout :: Maybe (Refined NonNegative Seconds),
     rsoWebSocketConnectionInitTimeout :: Maybe WSConnectionInitTimeout,
+    rsoWebSocketQueueSize :: Maybe (Refined Positive Int),
     rsoEnableMetadataQueryLoggingEnv :: Server.Logging.MetadataQueryLoggingMode,
     rsoHttpLogQueryOnlyOnError :: Server.Logging.HttpLogQueryOnlyOnError,
     -- | stores global default naming convention
@@ -673,7 +675,9 @@ data ServeOptions impl = ServeOptions
     soAdminInternalErrors :: AdminInternalErrorsStatus,
     soGracefulShutdownTimeout :: Refined NonNegative Seconds,
     soWebSocketConnectionInitTimeout :: WSConnectionInitTimeout,
+    soWebSocketQueueSize :: Refined Positive Int,
     soEventingMode :: Server.Types.EventingMode,
+    soEventProcessingMode :: Server.Types.EventProcessingMode,
     -- | See note '$readOnlyMode'
     soReadOnlyMode :: Server.Types.ReadOnlyMode,
     soEnableMetadataQueryLogging :: Server.Logging.MetadataQueryLoggingMode,

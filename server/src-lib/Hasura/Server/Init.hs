@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 -- | Arg and Env Parsing for initialisation of the engine along with
 -- corresponding logging and other helper functionality.
@@ -20,7 +21,6 @@ module Hasura.Server.Init
     module Hasura.Server.Init.Env,
     module Hasura.Server.Init.Arg,
     module Hasura.Server.Init.Logging,
-    module Hasura.Server.Init.FeatureFlag,
   )
 where
 
@@ -43,12 +43,11 @@ import Hasura.Server.Cors qualified as Cors
 import Hasura.Server.Init.Arg
 import Hasura.Server.Init.Config
 import Hasura.Server.Init.Env
-import Hasura.Server.Init.FeatureFlag
 import Hasura.Server.Init.Logging
 import Hasura.Server.Logging qualified as Server.Logging
 import Hasura.Server.Types qualified as Types
 import Network.WebSockets qualified as WebSockets
-import Refined (unrefine)
+import Refined (Positive, refineTH, unrefine)
 
 --------------------------------------------------------------------------------
 -- TODO(SOLOMON): Where does this note belong?
@@ -206,9 +205,21 @@ mkServeOptions sor@ServeOptionsRaw {..} = do
   soEventsFetchBatchSize <- withOptionDefault rsoEventsFetchBatchSize eventsFetchBatchSizeOption
   soGracefulShutdownTimeout <- withOptionDefault rsoGracefulShutdownTimeout gracefulShutdownOption
   soWebSocketConnectionInitTimeout <- withOptionDefault rsoWebSocketConnectionInitTimeout webSocketConnectionInitTimeoutOption
+  soWebSocketQueueSize <-
+    -- When the user has not set a value explicitly, default to 1000 if streaming
+    -- subscriptions are enabled (ordered streams make eviction a correctness risk).
+    case rsoWebSocketQueueSize of
+      Just explicit -> pure explicit
+      Nothing
+        | HashSet.member Types.EFStreamingSubscriptions soExperimentalFeatures ->
+            pure $$(refineTH @Positive @Int 1000)
+        | otherwise -> pure $ _default webSocketQueueSizeOption
   soEventingMode <- case rsoEventingMode of
     Types.EventingEnabled -> withOptionDefault Nothing disableEventingOption
     eventingDisabled -> pure eventingDisabled
+  soEventProcessingMode <- case rsoEventProcessingMode of
+    Types.EventProcessingEnabled -> withOptionDefault Nothing disableEventProcessingOption
+    eventProcessingDisabled -> pure eventProcessingDisabled
   let soReadOnlyMode = Types.ReadOnlyModeDisabled
   soEnableMetadataQueryLogging <- case rsoEnableMetadataQueryLoggingEnv of
     Server.Logging.MetadataQueryLoggingDisabled -> withOptionDefault Nothing enableMetadataQueryLoggingOption

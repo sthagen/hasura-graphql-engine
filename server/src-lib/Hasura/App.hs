@@ -390,7 +390,6 @@ data AppInit = AppInit
 -- NOTE: this is invoked in pro, but only for OSS mode (no license key)
 initialiseAppEnv ::
   (C.ForkableMonadIO m) =>
-  Env.Environment ->
   BasicConnectionInfo ->
   ServeOptions Hasura ->
   Maybe ES.SubscriptionPostPollHook ->
@@ -398,7 +397,7 @@ initialiseAppEnv ::
   PrometheusMetrics ->
   SamplingPolicy ->
   ManagedT m (AppInit, AppEnv)
-initialiseAppEnv env BasicConnectionInfo {..} serveOptions@ServeOptions {..} liveQueryHook serverMetrics prometheusMetrics traceSamplingPolicy = do
+initialiseAppEnv BasicConnectionInfo {..} serveOptions@ServeOptions {..} liveQueryHook serverMetrics prometheusMetrics traceSamplingPolicy = do
   loggers@(Loggers _loggerCtx logger pgLogger) <- mkLoggers soEnabledLogTypes soLogLevel
 
   -- SIDE EFFECT: print a warning if no admin secret is set.
@@ -482,6 +481,7 @@ initialiseAppEnv env BasicConnectionInfo {..} serveOptions@ServeOptions {..} liv
           appEnvEnableMaintenanceMode = soEnableMaintenanceMode,
           appEnvLoggingSettings = LoggingSettings soEnabledLogTypes soEnableMetadataQueryLogging soHttpLogQueryOnlyOnError soLogMaskedVariables,
           appEnvEventingMode = soEventingMode,
+          appEnvEventProcessingMode = soEventProcessingMode,
           appEnvEnableReadOnlyMode = soReadOnlyMode,
           appEnvServerMetrics = serverMetrics,
           appEnvShutdownLatch = latch,
@@ -497,8 +497,8 @@ initialiseAppEnv env BasicConnectionInfo {..} serveOptions@ServeOptions {..} liv
           appEnvConnectionOptions = soConnectionOptions,
           appEnvWebSocketKeepAlive = soWebSocketKeepAlive,
           appEnvWebSocketConnectionInitTimeout = soWebSocketConnectionInitTimeout,
+          appEnvWebSocketQueueSize = soWebSocketQueueSize,
           appEnvGracefulShutdownTimeout = soGracefulShutdownTimeout,
-          appEnvCheckFeatureFlag = ceCheckFeatureFlag env,
           appEnvSchemaPollInterval = soSchemaPollInterval,
           appEnvLicenseKeyCache = Nothing,
           appEnvMaxTotalHeaderLength = soMaxTotalHeaderLength,
@@ -534,7 +534,6 @@ initialiseAppContext env serveOptions AppInit {..} = do
         ( buildRebuildableAppContext
             (logger, appEnvManager)
             serveOptions
-            appEnvCheckFeatureFlag
             env
         )
   !rebuildableAppCtx <- onLeft rebuildableAppCtxE $ \e -> throwErrExit InvalidEnvironmentVariableOptionsError $ T.unpack $ qeError e
@@ -691,11 +690,6 @@ runAppM c (AppM a) = ignoreTraceT $ runReaderT a c
 
 instance HasAppEnv AppM where
   askAppEnv = ask
-
-instance HasFeatureFlagChecker AppM where
-  checkFlag f = AppM do
-    CheckFeatureFlag {runCheckFeatureFlag} <- asks appEnvCheckFeatureFlag
-    liftIO $ runCheckFeatureFlag f
 
 instance HasCacheStaticConfig AppM where
   askCacheStaticConfig = buildCacheStaticConfig <$> askAppEnv
@@ -1113,8 +1107,8 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
   -- Start a background thread for processing schema sync event present in the '_sscSyncEventRef'
   _ <- startSchemaSyncProcessorThread appStateRef newLogTVar
 
-  case appEnvEventingMode of
-    EventingEnabled -> do
+  case (appEnvEventingMode, appEnvEventProcessingMode) of
+    (EventingEnabled, EventProcessingEnabled) -> do
       lift $ unLoggerTracing logger $ mkGenericLog @Text LevelInfo "server" "Starting in eventing enabled mode"
 
       startEventTriggerPollerThread logger appEnvLockedEventsCtx
@@ -1132,7 +1126,12 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
           $ runCronEventsGenerator logger fetchedCronTriggerStatsLogger (getSchemaCache appStateRef)
 
       startScheduledEventsPollerThread logger appEnvLockedEventsCtx
-    EventingDisabled ->
+    -- Eventing is enabled (so source catalogs are still set up) but event
+    -- processing is disabled: don't start any of the pollers, so no event
+    -- triggers, cron triggers, scheduled events or async actions are delivered.
+    (EventingEnabled, EventProcessingDisabled) ->
+      lift $ unLoggerTracing logger $ mkGenericLog @Text LevelInfo "server" "Starting with event processing disabled: source catalogs will be set up but no events will be delivered"
+    (EventingDisabled, _) ->
       lift $ unLoggerTracing logger $ mkGenericLog @Text LevelInfo "server" "Starting in eventing disabled mode"
 
   -- start a background thread to check for updates

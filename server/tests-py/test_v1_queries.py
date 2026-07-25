@@ -27,6 +27,21 @@ class TestV1General:
     def test_query_v2_invalid_version(self, hge_ctx):
         check_query_f(hge_ctx, self.dir() + '/query_v2_invalid_version.yaml')
 
+    def test_error_response_includes_request_id_header(self, hge_ctx):
+        request_id = 'error-response-request-id'
+        headers = {'x-request-id': request_id}
+        if hge_ctx.hge_key:
+            headers['X-Hasura-Admin-Secret'] = hge_ctx.hge_key
+
+        code, _, resp_headers = hge_ctx.anyq(
+            '/v1/query',
+            {'type': 'random', 'args': {'foo': 'bar'}},
+            headers,
+        )
+
+        assert code == 400
+        assert resp_headers['x-request-id'] == request_id
+
     @classmethod
     def dir(cls):
         return "queries/v1/basic"
@@ -302,6 +317,29 @@ class TestV1SelectPermissions:
     @classmethod
     def dir(cls):
         return 'queries/v1/select/permissions'
+
+@usefixtures('per_class_tests_db_state')
+class TestV1SelectDMLRootColPerm:
+    """
+    Regression test: IsRoot ("$") column references in a relationship
+    permission filter must resolve against the permission-anchor table, not the
+    outer query root, on the /v1/query (DML) path.
+
+    In checkOnColExp / AVRelationship the resolved row-permission filter
+    (resolvedFltr) is placed in rfFilter rather than rfTargetTablePermissions.
+    The translator evaluates rfFilter with the inherited outer rootReference, so
+    any ["$","col"] inside the permission resolves to the outer query table's
+    column instead of the permission-anchor (relationship target) table's column.
+    This can allow a user to bypass a clearance-style permission when the outer
+    table happens to have a same-named column with a more permissive value.
+    """
+
+    def test_user_cannot_access_tasks_via_root_col_perm(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir() + '/user_cannot_access_tasks_via_root_col_perm.yaml')
+
+    @classmethod
+    def dir(cls):
+        return 'queries/v1/select/dml_root_col_perm'
 
 @use_mutation_fixtures
 class TestV1InsertBasic:
